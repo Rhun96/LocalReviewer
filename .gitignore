@@ -1,0 +1,38 @@
+# Виртуальное окружение
+venv/
+.venv/
+env/
+
+# Сборка PyInstaller — САМОЕ ВАЖНОЕ
+dist/
+build/
+*.spec
+
+# Python кэш
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Файлы проектов (они локальные у каждого пользователя)
+*.sqlite
+*.sqlite-journal
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Логи и экспорты (они генерируются в рантайме)
+logs/
+exports/
+backups/
+
+# OS файлы
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Тестовые данные
+TestData/
