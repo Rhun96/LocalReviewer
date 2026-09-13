@@ -143,6 +143,13 @@ class ProjectScreen(BaseScreen):
                 cursor = conn.cursor()
                 cursor.execute("SELECT file_id, file_name, row_count FROM files ORDER BY imported_at DESC")
                 files = cursor.fetchall()
+                cursor.execute("SELECT COUNT(*) AS total FROM cases")
+                total = cursor.fetchone()["total"]
+                cursor.execute("SELECT COUNT(*) AS reviewed FROM annotations WHERE status != 'unreviewed'")
+                reviewed = cursor.fetchone()["reviewed"]
+            pct = int(reviewed / total * 100) if total else 0
+            self.info_label.setText(
+                f"📂 {self.project_path}\nПроверено: {reviewed}/{total} ({pct}%)")
             self.files_list.clear()
             if files:
                 for file in files:
@@ -167,21 +174,21 @@ class ProjectScreen(BaseScreen):
         self.parent_window.stack.addWidget(widget)
         self.parent_window.stack.setCurrentWidget(widget)
 
-    def _close_transient(self, widget):
-        self.parent_window.stack.setCurrentWidget(self)
-        self.parent_window.stack.removeWidget(widget)
-        widget.deleteLater()
-        if widget in self._transient:
-            self._transient.remove(widget)
-        self.load_project_info()
-
     def on_add_file(self):
-        """Добавление нового файла."""
+        """Добавление нового файла (мастер — поверх, пункта меню у него нет)."""
         from import_wizard import ImportWizard
         wizard = ImportWizard(self.project_path, self.parent_window)
-        wizard.import_finished.connect(lambda: self._close_transient(wizard))
-        wizard.import_cancelled.connect(lambda: self._close_transient(wizard))
+        wizard.import_finished.connect(lambda: self._close_wizard(wizard))
+        wizard.import_cancelled.connect(lambda: self._close_wizard(wizard))
         self._show_transient(wizard)
+
+    def _close_wizard(self, wizard):
+        stack = self.parent_window.stack
+        stack.removeWidget(wizard)
+        wizard.deleteLater()
+        if wizard in self._transient:
+            self._transient.remove(wizard)
+        self.parent_window.main_window.show_screen("project")
 
     def on_delete_file(self):
         """Удаление выбранного файла."""
@@ -212,46 +219,30 @@ class ProjectScreen(BaseScreen):
             notify(self, "error", "Ошибка", f"Не удалось удалить файл: {str(e)}")
 
     def on_start_review(self):
-        """Ревью с выбором датасета."""
+        """Ревью с выбором датасета — через главный экран (подсветка лупы)."""
         from dataset_select_dialog import DatasetSelectDialog
         dialog = DatasetSelectDialog(self.project_path, self)
         if dialog.exec() == DatasetSelectDialog.Accepted:
             filters = {}
             if dialog.selected_file_id is not None:
                 filters['file_id'] = dialog.selected_file_id
-
-            from review_screen import ReviewScreen
-            review = ReviewScreen(self.project_path, self.parent_window, filters=filters)
-            review.review_closed.connect(lambda: self._close_transient(review))
-            self._show_transient(review)
+            self.parent_window.main_window.show_screen("review", filters=filters)
 
     def on_reports(self):
         """Переход к отчётам."""
-        from reports_screen import ReportsScreen
-        reports = ReportsScreen(self.project_path, self.parent_window)
-        reports.reports_closed.connect(lambda: self._close_transient(reports))
-        self._show_transient(reports)
+        self.parent_window.main_window.show_screen("reports")
 
     def on_history(self):
         """Переход к истории."""
-        from history_screen import HistoryScreen
-        history = HistoryScreen(self.project_path, self.parent_window)
-        history.history_closed.connect(lambda: self._close_transient(history))
-        self._show_transient(history)
+        self.parent_window.main_window.show_screen("history")
 
     def on_backup(self):
         """Переход к резервному копированию."""
-        from backup_screen import BackupScreen
-        backup = BackupScreen(self.project_path, self.parent_window)
-        backup.backup_closed.connect(lambda: self._close_transient(backup))
-        self._show_transient(backup)
+        self.parent_window.main_window.show_screen("backup")
 
     def on_settings(self):
         """Переход к настройкам."""
-        from settings_screen import SettingsScreen
-        settings = SettingsScreen(self.project_path, self.parent_window)
-        settings.settings_closed.connect(lambda: self._close_transient(settings))
-        self._show_transient(settings)
+        self.parent_window.main_window.show_screen("settings")
 
     def on_back(self):
         """Возврат на стартовый экран."""

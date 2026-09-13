@@ -2,7 +2,8 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
     QTextEdit, QScrollArea, QGroupBox, QFrame,
     QGridLayout, QSizePolicy, QMenu, QInputDialog, QStackedWidget,
-    QTableWidget, QTableWidgetItem, QComboBox, QDialog, QCheckBox
+    QTableWidget, QTableWidgetItem, QComboBox, QDialog, QCheckBox,
+    QAbstractItemView,
 )
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QShortcut, QKeySequence
@@ -16,7 +17,7 @@ from autocheck_service import check_case, get_check_settings
 from templates_service import get_comment_templates, add_comment_template, delete_comment_template, get_user_templates
 from styles import STATUS_STYLES, apply_shadow
 from ui_base import BaseScreen
-from ui_compat import FLUENT, FComboBox, FPushButton, FTable, clear_in_fluent, confirm, notify
+from ui_compat import FLUENT, FCheckBox, FComboBox, FPushButton, FTable, clear_in_fluent, confirm, notify
 import json
 import logging
 
@@ -513,6 +514,10 @@ class ReviewScreen(BaseScreen):
         """)
         self.cases_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.cases_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        # Горизонтальный ползунок всегда виден: в узком окне колонки
+        # Статус/⚠ не пропадают, а уходят вправо за скролл
+        self.cases_table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
+        self.cases_table.setHorizontalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
         self.cases_table.doubleClicked.connect(self.on_table_double_click)
         layout.addWidget(self.cases_table)
         clear_in_fluent(self.cases_table)
@@ -717,13 +722,22 @@ class ReviewScreen(BaseScreen):
                         metadata = json.loads(case['metadata_json'])
                     except (ValueError, TypeError):
                         pass
+                # Чекбокс — настоящим виджетом по центру ячейки: рисованный
+                # индикатор item'а fluent-стиль ужимает и сдвигает в угол
                 check_item = QTableWidgetItem()
-                check_item.setFlags(check_item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
-                check_item.setCheckState(
-                    Qt.CheckState.Checked if case['case_id'] in self.bulk_selected
-                    else Qt.CheckState.Unchecked)
                 check_item.setData(Qt.ItemDataRole.UserRole, case['case_id'])
+                check_item.setFlags(check_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
                 self.cases_table.setItem(row, 0, check_item)
+                check_wrap = QWidget()
+                check_layout = QHBoxLayout(check_wrap)
+                check_layout.setContentsMargins(0, 0, 0, 0)
+                check_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                check_box = FCheckBox()
+                check_box.setChecked(case['case_id'] in self.bulk_selected)
+                check_box.toggled.connect(
+                    lambda checked, cid=case['case_id']: self._on_bulk_toggled(cid, checked))
+                check_layout.addWidget(check_box)
+                self.cases_table.setCellWidget(row, 0, check_wrap)
                 for col_idx, col_name in enumerate(self.selected_columns, start=1):
                     if col_name == 'ID':
                         value = str(case['case_id'])
@@ -766,28 +780,28 @@ class ReviewScreen(BaseScreen):
                 checks_item.setToolTip(tip)
                 checks_item.setFlags(checks_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
                 self.cases_table.setItem(row, len(self.selected_columns) + 1, checks_item)
-            try:
-                self.cases_table.itemChanged.disconnect(self.on_table_item_changed)
-            except (RuntimeError, TypeError):
-                pass
-            self.cases_table.itemChanged.connect(self.on_table_item_changed)
             self.cases_table.blockSignals(False)
             self.cases_table.resizeColumnsToContents()
+            # Колонка галочки — фиксированная узкая, как раньше: бокс ровно
+            # напротив номера строки, без люфта
+            self.cases_table.setColumnWidth(0, 30)
+            # Широкие текстовые колонки укорачиваем, но не душим (440),
+            # иначе Статус и ⚠ выдавливаются за край даже со скроллом
+            for _c in range(1, self.cases_table.columnCount()):
+                if self.cases_table.columnWidth(_c) > 440:
+                    self.cases_table.setColumnWidth(_c, 440)
             self.page_label.setText(f"Страница {self.current_page + 1} / {self.total_pages} (всего: {total})")
             self._update_bulk_label()
         except Exception as e:
             self.show_error("Не удалось загрузить таблицу", e)
 
-    def on_table_item_changed(self, item):
-        """Чекбокс массовых операций (только колонка 0)."""
-        if item.column() != 0:
-            return
-        case_id = item.data(Qt.ItemDataRole.UserRole)
+    def _on_bulk_toggled(self, case_id: int, checked: bool):
+        """Чекбокс-виджет массовых операций."""
         try:
             case_id = int(case_id)
         except (TypeError, ValueError):
             return
-        if item.checkState() == Qt.CheckState.Checked:
+        if checked:
             self.bulk_selected.add(case_id)
         else:
             self.bulk_selected.discard(case_id)
@@ -1561,4 +1575,8 @@ class ReviewScreen(BaseScreen):
     def on_back(self):
         if self.current_case_id:
             self.save_comment(silent=True)
-        self.review_closed.emit()
+        mw = getattr(getattr(self, "parent_window", None), "main_window", None)
+        if mw is not None and hasattr(mw, "show_screen"):
+            mw.show_screen("project")
+        else:
+            self.review_closed.emit()

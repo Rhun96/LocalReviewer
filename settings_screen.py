@@ -25,9 +25,9 @@ class SettingsScreen(BaseScreen):
     
     def init_ui(self):
         layout = QVBoxLayout()
-        layout.setSpacing(20)
-        layout.setContentsMargins(40, 20, 40, 20)
-        
+        layout.setSpacing(12)
+        layout.setContentsMargins(24, 12, 24, 12)
+
         # Заголовок
         title = QLabel("НАСТРОЙКИ")
         title.setObjectName("title")
@@ -284,4 +284,8 @@ class SettingsScreen(BaseScreen):
     
     def on_back(self):
         """Возврат к проекту."""
-        self.settings_closed.emit()
+        mw = getattr(getattr(self, "parent_window", None), "main_window", None)
+        if mw is not None and hasattr(mw, "show_screen"):
+            mw.show_screen("project")
+        else:
+            self.settings_closed.emit()

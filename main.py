@@ -7,7 +7,6 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont
 from pathlib import Path
 from database import init_database
-from sidebar import Sidebar
 from styles import APP_STYLE
 from ui_compat import (
     FLUENT, FPrimaryButton, FPushButton, FSubtitleLabel, FTitleLabel,
@@ -88,28 +87,29 @@ class StartScreen(QWidget):
 
 
 class ProjectWindow(QWidget):
-    """Окно проекта: сайдбар + стек экранов."""
+    """Проект: владеет экранами и общей логикой.
+
+    Во Fluent-режиме навигация — нативная (FluentWindow), этот виджет остаётся
+    скрытым владельцем экранов. В классическом режиме — сайдбар + свой стек.
+    """
 
     def __init__(self, project_path: str, main_window):
         super().__init__()
         self.project_path = project_path
         self.main_window = main_window
         self.screens = {}
+        self._stack = None
+        self.sidebar = None
         self.init_ui()
 
+    @property
+    def stack(self):
+        # Экраны обращаются к parent_window.stack (транзитные виджеты и т.п.)
+        if FLUENT:
+            return self.main_window.stackedWidget
+        return self._stack
+
     def init_ui(self):
-        layout = QHBoxLayout()
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
-
-        # Сайдбар
-        self.sidebar = Sidebar(self.project_path)
-        self.sidebar.nav_changed.connect(self.on_nav)
-        layout.addWidget(self.sidebar)
-
-        # Стек экранов
-        self.stack = QStackedWidget()
-
         # Создаём все экраны
         from project_screen import ProjectScreen
         from review_screen import ReviewScreen
@@ -125,13 +125,28 @@ class ProjectWindow(QWidget):
         self.screens['backup'] = BackupScreen(self.project_path, self)
         self.screens['settings'] = SettingsScreen(self.project_path, self)
 
-        for screen in self.screens.values():
-            self.stack.addWidget(screen)
+        if FLUENT:
+            return
 
-        self.stack.setCurrentWidget(self.screens['project'])
+        from sidebar import Sidebar
+        layout = QHBoxLayout()
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        # Сайдбар
+        self.sidebar = Sidebar(self.project_path)
+        self.sidebar.nav_changed.connect(self.on_nav)
+        layout.addWidget(self.sidebar)
+
+        # Стек экранов
+        self._stack = QStackedWidget()
+        for screen in self.screens.values():
+            self._stack.addWidget(screen)
+
+        self._stack.setCurrentWidget(self.screens['project'])
         self.sidebar.set_active('project')
 
-        layout.addWidget(self.stack)
+        layout.addWidget(self._stack)
         self.setLayout(layout)
 
     def on_nav(self, key):
@@ -148,11 +163,13 @@ class ProjectWindow(QWidget):
                     refresh()
                 except Exception:
                     pass
-            self.sidebar.update_progress()
+            if self.sidebar is not None:
+                self.sidebar.update_progress()
 
     def refresh_all(self):
         """Обновляет все экраны."""
-        self.sidebar.update_progress()
+        if self.sidebar is not None:
+            self.sidebar.update_progress()
         for screen in self.screens.values():
             refresh = getattr(screen, 'refresh', None)
             if callable(refresh):
@@ -161,9 +178,28 @@ class ProjectWindow(QWidget):
                 except Exception:
                     pass
 
+    def go_home(self):
+        """Возврат на стартовый экран (для цепочки parent_window из экранов)."""
+        self.main_window.go_home()
 
-class MainWindow(QMainWindow):
-    """Главное окно приложения."""
+
+if FLUENT:
+    from qfluentwidgets import FluentWindow as _BaseWindow
+else:
+    _BaseWindow = QMainWindow
+
+
+class MainWindow(_BaseWindow):
+    """Главное окно приложения (классика + Fluent-навигация)."""
+
+    NAV_ITEMS = [
+        ("project", "FOLDER", "Проект"),
+        ("review", "SEARCH", "Ревью"),
+        ("reports", "DOCUMENT", "Отчёты"),
+        ("history", "HISTORY", "История"),
+        ("backup", "SAVE", "Бэкапы"),
+        ("settings", "SETTING", "Настройки"),
+    ]
 
     def __init__(self):
         super().__init__()
@@ -171,14 +207,26 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(1000, 700)
         self.resize(1280, 800)
 
-        self.stack = QStackedWidget()
-        self.setCentralWidget(self.stack)
-
-        self.start_screen = StartScreen(self)
-        self.stack.addWidget(self.start_screen)
-        self.stack.setCurrentWidget(self.start_screen)
+        if FLUENT:
+            from qfluentwidgets import FluentIcon as FIF
+            self._FIF = FIF
+            # Нативный стек FluentWindow — алиас для совместимости экранов
+            self.stack = self.stackedWidget
+            self.start_screen = StartScreen(self)
+            self.start_screen.setObjectName("start")
+            self.addSubInterface(self.start_screen, FIF.HOME, "Главная")
+            self.stackedWidget.currentChanged.connect(self._on_page_changed)
+        else:
+            self.stack = QStackedWidget()
+            self.setCentralWidget(self.stack)
+            self.start_screen = StartScreen(self)
+            self.stack.addWidget(self.start_screen)
+            self.stack.setCurrentWidget(self.start_screen)
 
         self.project_window = None
+
+    def _nav_icon(self, name: str):
+        return getattr(self._FIF, name)
 
     def open_project(self, folder):
         """Открывает проект (старый выгружается, чтобы не было утечек)."""
@@ -194,21 +242,89 @@ class MainWindow(QMainWindow):
                    "Перед миграцией создан бэкап в папке backups/.\n"
                    "Подробности — в logs/localreviewer.log.")
             return
-        if self.project_window:
+        self._close_project()
+        self.project_window = ProjectWindow(folder, self)
+        if FLUENT:
+            for key, icon_name, text in self.NAV_ITEMS:
+                screen = self.project_window.screens[key]
+                screen.setObjectName(f"screen_{key}")
+                self.addSubInterface(screen, self._nav_icon(icon_name), text)
+            self.switchTo(self.project_window.screens["project"])
+        else:
+            self.stack.addWidget(self.project_window)
+            self.stack.setCurrentWidget(self.project_window)
+
+    def _close_project(self):
+        if not self.project_window:
+            return
+        if FLUENT:
+            for key, _icon_name, _text in self.NAV_ITEMS:
+                screen = self.project_window.screens.get(key)
+                if screen is None:
+                    continue
+                try:
+                    self.navigationInterface.removeWidget(f"screen_{key}")
+                except Exception:
+                    pass
+                self.stackedWidget.removeWidget(screen)
+                screen.deleteLater()
+        else:
             self.stack.removeWidget(self.project_window)
             self.project_window.deleteLater()
-            self.project_window = None
-        self.project_window = ProjectWindow(folder, self)
-        self.stack.addWidget(self.project_window)
-        self.stack.setCurrentWidget(self.project_window)
+        self.project_window = None
 
     def go_home(self):
         """Возврат на стартовый экран."""
-        if self.project_window:
-            self.stack.removeWidget(self.project_window)
-            self.project_window.deleteLater()
-            self.project_window = None
-        self.stack.setCurrentWidget(self.start_screen)
+        self._close_project()
+        if FLUENT:
+            self.switchTo(self.start_screen)
+        else:
+            self.stack.setCurrentWidget(self.start_screen)
+
+    def show_screen(self, key, filters=None):
+        """Показать экран проекта; для ревью можно передать фильтры.
+
+        Единая точка навигации: подсветка в меню всегда соответствует контенту.
+        """
+        pw = self.project_window
+        if not pw or key not in pw.screens:
+            return
+        screen = pw.screens[key]
+        if filters is not None and hasattr(screen, "filters"):
+            screen.filters = filters
+        if hasattr(screen, "current_page"):
+            screen.current_page = 0
+        if hasattr(screen, "current_index"):
+            screen.current_index = 0
+        if hasattr(screen, "bulk_selected"):
+            try:
+                screen.bulk_selected.clear()
+            except Exception:
+                pass
+        if hasattr(screen, "load_case_ids"):
+            try:
+                screen.load_case_ids()
+            except Exception:
+                pass
+        if FLUENT:
+            if self.stackedWidget.currentWidget() is not screen:
+                self.switchTo(screen)
+            else:
+                self._refresh_widget(screen)
+        else:
+            pw.stack.setCurrentWidget(screen)
+            self._refresh_widget(screen)
+
+    def _refresh_widget(self, widget):
+        refresh = getattr(widget, "refresh", None)
+        if callable(refresh):
+            try:
+                refresh()
+            except Exception:
+                pass
+
+    def _on_page_changed(self, _index: int):
+        self._refresh_widget(self.stackedWidget.currentWidget())
 
 
 def main():

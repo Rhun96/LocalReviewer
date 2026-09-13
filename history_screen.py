@@ -155,4 +155,8 @@ class HistoryScreen(BaseScreen):
 
     def on_back(self):
         """Возврат к проекту."""
-        self.history_closed.emit()
+        mw = getattr(getattr(self, "parent_window", None), "main_window", None)
+        if mw is not None and hasattr(mw, "show_screen"):
+            mw.show_screen("project")
+        else:
+            self.history_closed.emit()
