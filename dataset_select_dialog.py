@@ -1,9 +1,10 @@
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
-    QListWidget, QListWidgetItem, QMessageBox
+    QDialog, QVBoxLayout, QHBoxLayout, QLabel,
+    QListWidget, QListWidgetItem
 )
 from PySide6.QtCore import Qt
-from database import get_db_connection
+from database import db
+from ui_compat import FLUENT, FPrimaryButton, FPushButton, FTitleLabel, clear_in_fluent, notify
 
 
 class DatasetSelectDialog(QDialog):
@@ -23,13 +24,13 @@ class DatasetSelectDialog(QDialog):
         layout.setSpacing(15)
         layout.setContentsMargins(20, 20, 20, 20)
 
-        title = QLabel("📄 Выберите датасет для ревью")
-        title.setStyleSheet("font-size: 18px; font-weight: bold; color: #00FF41;")
+        title = FTitleLabel("📄 Выберите датасет для ревью")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(title)
 
         hint = QLabel("Выберите конкретный файл или все файлы:")
-        hint.setStyleSheet("color: #00AA2A; font-size: 13px;")
+        if not FLUENT:
+            hint.setStyleSheet("color: #00AA2A; font-size: 13px;")
         layout.addWidget(hint)
 
         # Список файлов
@@ -54,63 +55,68 @@ class DatasetSelectDialog(QDialog):
             }
         """)
         layout.addWidget(self.files_list)
+        clear_in_fluent(self.files_list)
+        self.files_list.itemDoubleClicked.connect(lambda _item: self.on_accept())
 
         self.load_files()
 
         # Кнопки
         buttons = QHBoxLayout()
-        btn_all = QPushButton("📋 Все файлы")
+        btn_all = FPushButton("📋 Все файлы")
         btn_all.setMinimumHeight(45)
-        btn_all.setStyleSheet("""
-            QPushButton {
-                background-color: #0D150D;
-                color: #00AAFF;
-                border: 2px solid #00AAFF;
-                border-radius: 8px;
-                padding: 10px 20px;
-                font-size: 14px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #002233;
-            }
-        """)
+        if not FLUENT:
+            btn_all.setStyleSheet("""
+                QPushButton {
+                    background-color: #0D150D;
+                    color: #00AAFF;
+                    border: 2px solid #00AAFF;
+                    border-radius: 8px;
+                    padding: 10px 20px;
+                    font-size: 14px;
+                    font-weight: bold;
+                }
+                QPushButton:hover {
+                    background-color: #002233;
+                }
+            """)
         btn_all.clicked.connect(self.on_all_files)
 
-        btn_ok = QPushButton("✅ Начать ревью")
+        btn_ok = FPrimaryButton("✅ Начать ревью")
         btn_ok.setMinimumHeight(45)
-        btn_ok.setStyleSheet("""
-            QPushButton {
-                background-color: #0D150D;
-                color: #00FF41;
-                border: 2px solid #00FF41;
-                border-radius: 8px;
-                padding: 10px 20px;
-                font-size: 14px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #003315;
-            }
-        """)
+        if not FLUENT:
+            btn_ok.setStyleSheet("""
+                QPushButton {
+                    background-color: #0D150D;
+                    color: #00FF41;
+                    border: 2px solid #00FF41;
+                    border-radius: 8px;
+                    padding: 10px 20px;
+                    font-size: 14px;
+                    font-weight: bold;
+                }
+                QPushButton:hover {
+                    background-color: #003315;
+                }
+            """)
         btn_ok.clicked.connect(self.on_accept)
 
-        btn_cancel = QPushButton("❌ Отмена")
+        btn_cancel = FPushButton("❌ Отмена")
         btn_cancel.setMinimumHeight(45)
-        btn_cancel.setStyleSheet("""
-            QPushButton {
-                background-color: #0D150D;
-                color: #FF3B3B;
-                border: 2px solid #FF3B3B;
-                border-radius: 8px;
-                padding: 10px 20px;
-                font-size: 14px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #330000;
-            }
-        """)
+        if not FLUENT:
+            btn_cancel.setStyleSheet("""
+                QPushButton {
+                    background-color: #0D150D;
+                    color: #FF3B3B;
+                    border: 2px solid #FF3B3B;
+                    border-radius: 8px;
+                    padding: 10px 20px;
+                    font-size: 14px;
+                    font-weight: bold;
+                }
+                QPushButton:hover {
+                    background-color: #330000;
+                }
+            """)
         btn_cancel.clicked.connect(self.reject)
 
         buttons.addWidget(btn_all)
@@ -122,20 +128,19 @@ class DatasetSelectDialog(QDialog):
 
     def load_files(self):
         try:
-            conn = get_db_connection(self.project_path)
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT f.file_id, f.file_name, f.row_count,
-                       COUNT(DISTINCT CASE WHEN COALESCE(a.status,'unreviewed') != 'unreviewed'
-                             THEN c.case_id END) as reviewed
-                FROM files f
-                LEFT JOIN cases c ON f.file_id = c.file_id
-                LEFT JOIN annotations a ON c.case_id = a.case_id
-                GROUP BY f.file_id
-                ORDER BY f.imported_at DESC
-            """)
-            files = cursor.fetchall()
-            conn.close()
+            with db(self.project_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT f.file_id, f.file_name, f.row_count,
+                           COUNT(DISTINCT CASE WHEN COALESCE(a.status,'unreviewed') != 'unreviewed'
+                                 THEN c.case_id END) as reviewed
+                    FROM files f
+                    LEFT JOIN cases c ON f.file_id = c.file_id
+                    LEFT JOIN annotations a ON c.case_id = a.case_id
+                    GROUP BY f.file_id
+                    ORDER BY f.imported_at DESC
+                """)
+                files = cursor.fetchall()
 
             self.files_list.clear()
             for f in files:
@@ -146,13 +151,23 @@ class DatasetSelectDialog(QDialog):
 
             if self.files_list.count() > 0:
                 self.files_list.setCurrentRow(0)
-        except Exception:
-            pass
+            else:
+                item = QListWidgetItem("📭 Файлы ещё не добавлены")
+                item.setData(Qt.ItemDataRole.UserRole, None)
+                item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsSelectable)
+                self.files_list.addItem(item)
+        except Exception as e:
+            notify(self, "warning", "Ошибка", f"Не удалось загрузить файлы:\n{e}")
 
     def on_accept(self):
         current = self.files_list.currentItem()
         if current:
-            self.selected_file_id = current.data(Qt.ItemDataRole.UserRole)
+            file_id = current.data(Qt.ItemDataRole.UserRole)
+            if file_id is None and self.files_list.count() == 1:
+                # Плейсхолдер «нет файлов» — явный отказ вместо молчаливого «все файлы»
+                notify(self, "warning", "Внимание", "В проекте пока нет файлов для ревью")
+                return
+            self.selected_file_id = file_id
         self.accept()
 
     def on_all_files(self):

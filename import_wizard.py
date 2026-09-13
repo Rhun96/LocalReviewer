@@ -1,29 +1,20 @@
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
-    QComboBox, QTableWidget, QTableWidgetItem, QFileDialog,
-    QMessageBox, QSpinBox, QGroupBox, QScrollArea,
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel,
+    QTableWidgetItem, QFileDialog,
+    QGroupBox, QScrollArea,
     QFormLayout, QSizePolicy
 )
 from PySide6.QtCore import Qt, Signal
 from file_reader import FileReader
 from pathlib import Path
+from ui_compat import FComboBox, FPrimaryButton, FPushButton, FSpinBox, FTable, clear_in_fluent, notify
 
-MAPPING_ROLES = [
-    ("ignore", "Не импортировать"),
-    ("primary_text", "Запрос"),
-    ("response_text", "Ответ модели"),
-    ("ticket_number", "Номер обращения"),
-    ("product", "Продукт"),
-    ("operator_response", "Ответ оператора"),
-    ("group_name", "Группа / категория"),
-    ("source_id", "Идентификатор"),
-    ("comment_source", "Комментарий из источника"),
-    ("metadata", "Дополнительное поле"),
-]
+from constants import MAPPING_ROLES
 
 
 class ImportWizard(QWidget):
     import_finished = Signal()
+    import_cancelled = Signal()
 
     def __init__(self, project_path: str, parent=None):
         super().__init__(parent)
@@ -35,6 +26,7 @@ class ImportWizard(QWidget):
         self.sheet_name = None
         self.preview_data = None
         self.mapping_combos = {}
+        self.extra_roles = []
         self.init_ui()
 
     def init_ui(self):
@@ -64,7 +56,7 @@ class ImportWizard(QWidget):
         file_layout = QHBoxLayout()
         self.file_label = QLabel("Файл не выбран")
         self.file_label.setStyleSheet("font-size: 13px;")
-        btn_select = QPushButton("📂 Выбрать файл")
+        btn_select = FPushButton("📂 Выбрать файл")
         btn_select.setMinimumHeight(35)
         btn_select.clicked.connect(self.on_select_file)
         file_layout.addWidget(self.file_label)
@@ -73,7 +65,7 @@ class ImportWizard(QWidget):
 
         self.sheet_group = QGroupBox("📑 Лист Excel")
         sheet_layout = QHBoxLayout()
-        self.sheet_combo = QComboBox()
+        self.sheet_combo = FComboBox()
         self.sheet_combo.setMinimumHeight(30)
         self.sheet_combo.currentIndexChanged.connect(self.on_sheet_changed)
         sheet_layout.addWidget(QLabel("Лист:"))
@@ -83,7 +75,7 @@ class ImportWizard(QWidget):
         layout.addWidget(self.sheet_group)
 
         header_layout = QHBoxLayout()
-        self.header_spin = QSpinBox()
+        self.header_spin = FSpinBox()
         self.header_spin.setMinimum(0)
         self.header_spin.setMaximum(100)
         self.header_spin.setValue(0)
@@ -94,11 +86,30 @@ class ImportWizard(QWidget):
         header_layout.addStretch()
         layout.addLayout(header_layout)
 
+        csv_layout = QHBoxLayout()
+        self.encoding_combo = FComboBox()
+        self.encoding_combo.addItem("UTF-8 (BOM тоже)", "utf-8-sig")
+        self.encoding_combo.addItem("UTF-8", "utf-8")
+        self.encoding_combo.addItem("CP1251 (рус. Excel)", "cp1251")
+        self.encoding_combo.currentIndexChanged.connect(self.load_preview)
+        self.delimiter_combo = FComboBox()
+        self.delimiter_combo.addItem("Запятая (,)", ",")
+        self.delimiter_combo.addItem("Точка с запятой (;)", ";")
+        self.delimiter_combo.addItem("Табуляция", "\t")
+        self.delimiter_combo.addItem("Пайп (|)", "|")
+        self.delimiter_combo.currentIndexChanged.connect(self.load_preview)
+        csv_layout.addWidget(QLabel("Кодировка CSV:"))
+        csv_layout.addWidget(self.encoding_combo)
+        csv_layout.addWidget(QLabel("Разделитель:"))
+        csv_layout.addWidget(self.delimiter_combo)
+        csv_layout.addStretch()
+        layout.addLayout(csv_layout)
+
         preview_label = QLabel("📋 Превью данных:")
         preview_label.setStyleSheet("font-size: 14px; font-weight: bold;")
         layout.addWidget(preview_label)
 
-        self.preview_table = QTableWidget()
+        self.preview_table = FTable()
         self.preview_table.setMinimumHeight(150)
         self.preview_table.setStyleSheet("""
             QTableWidget {
@@ -119,12 +130,13 @@ class ImportWizard(QWidget):
             }
         """)
         layout.addWidget(self.preview_table)
+        clear_in_fluent(self.preview_table)
 
         buttons_layout = QHBoxLayout()
-        btn_next = QPushButton("➡️ Далее: маппинг колонок")
+        btn_next = FPushButton("➡️ Далее: маппинг колонок")
         btn_next.setMinimumHeight(40)
         btn_next.clicked.connect(self.on_next_step)
-        btn_cancel = QPushButton("❌ Отмена")
+        btn_cancel = FPushButton("❌ Отмена")
         btn_cancel.setObjectName("danger")
         btn_cancel.setMinimumHeight(40)
         btn_cancel.clicked.connect(self.on_cancel)
@@ -148,11 +160,22 @@ class ImportWizard(QWidget):
             "Укажите роль для каждой колонки. "
             "Можно назначить одну роль нескольким колонкам — "
             "их содержимое будет объединено. "
-            "Исключение: «Идентификатор» — только одна колонка."
+            "Исключение: «Идентификатор» — только одна колонка. "
+            "«Источник» — ссылка на статью БЗ (показывается в кейсе 🔗). "
+            "Свои категории попадают в метаданные и становятся столбцами таблицы."
         )
         hint.setStyleSheet("color: #00AA2A; font-size: 11px;")
         hint.setWordWrap(True)
         layout.addWidget(hint)
+
+        custom_layout = QHBoxLayout()
+        btn_custom = FPushButton("＋ Своя категория…")
+        btn_custom.setMinimumHeight(32)
+        btn_custom.setToolTip("Создать свою категорию маппинга — значение попадёт в метаданные кейса")
+        btn_custom.clicked.connect(self.on_add_custom_role)
+        custom_layout.addWidget(btn_custom)
+        custom_layout.addStretch()
+        layout.addLayout(custom_layout)
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
@@ -170,20 +193,21 @@ class ImportWizard(QWidget):
         self.mapping_layout.setContentsMargins(10, 10, 10, 10)
         self.mapping_container.setLayout(self.mapping_layout)
         scroll.setWidget(self.mapping_container)
+        clear_in_fluent(scroll)
         layout.addWidget(scroll)
 
         buttons_layout = QHBoxLayout()
-        btn_back = QPushButton("⬅️ Назад")
+        btn_back = FPushButton("⬅️ Назад")
         btn_back.setMinimumHeight(40)
         btn_back.clicked.connect(self.on_back_step)
-        btn_import = QPushButton("🚀 Начать импорт")
+        btn_import = FPrimaryButton("🚀 Начать импорт")
         btn_import.setMinimumHeight(40)
         btn_import.setStyleSheet("""
             QPushButton { border-color: #00FF41; color: #00FF41; font-weight: bold; }
             QPushButton:hover { background-color: #003315; }
         """)
         btn_import.clicked.connect(self.on_import)
-        btn_cancel = QPushButton("❌ Отмена")
+        btn_cancel = FPushButton("❌ Отмена")
         btn_cancel.setObjectName("danger")
         btn_cancel.setMinimumHeight(40)
         btn_cancel.clicked.connect(self.on_cancel)
@@ -205,7 +229,11 @@ class ImportWizard(QWidget):
             return
         self.file_path = file_path
         self.file_label.setText(Path(file_path).name)
-        self.file_type = self.file_reader.detect_file_type(file_path)
+        try:
+            self.file_type = self.file_reader.detect_file_type(file_path)
+        except ValueError as e:
+            notify(self, "warning", "Неподдерживаемый формат", str(e))
+            return
 
         if self.file_type == 'excel':
             try:
@@ -216,7 +244,7 @@ class ImportWizard(QWidget):
                 self.sheet_name = sheets[0] if sheets else None
                 self.load_preview()
             except Exception as e:
-                QMessageBox.critical(self, "Ошибка", str(e))
+                notify(self, "error", "Ошибка", str(e))
         elif self.file_type == 'csv':
             self.sheet_group.setVisible(False)
             self.load_preview()
@@ -224,8 +252,8 @@ class ImportWizard(QWidget):
             self.sheet_group.setVisible(False)
             self.load_preview()
         else:
-            QMessageBox.warning(self, "Неподдерживаемый формат",
-                "Пока поддерживаются: .xlsx, .csv, .json, .jsonl")
+            notify(self, "warning", "Неподдерживаемый формат",
+                   "Пока поддерживаются: .xlsx, .csv, .json, .jsonl")
 
     def on_sheet_changed(self):
         self.sheet_name = self.sheet_combo.currentText()
@@ -233,6 +261,9 @@ class ImportWizard(QWidget):
 
     def on_header_changed(self):
         self.load_preview()
+
+    def _csv_options(self):
+        return self.encoding_combo.currentData(), self.delimiter_combo.currentData()
 
     def load_preview(self):
         if not self.file_path:
@@ -242,17 +273,23 @@ class ImportWizard(QWidget):
                 self.preview_data = self.file_reader.read_excel_preview(
                     self.file_path, self.sheet_name, max_rows=100)
             elif self.file_type == 'csv':
+                enc, delim = self._csv_options()
                 self.preview_data = self.file_reader.read_csv_preview(
-                    self.file_path, encoding='utf-8', delimiter=',', max_rows=100)
+                    self.file_path, encoding=enc, delimiter=delim, max_rows=100)
             elif self.file_type == 'json':
                 self.preview_data = self.file_reader.read_json_preview(
                     self.file_path, max_rows=100)
             elif self.file_type == 'jsonl':
                 self.preview_data = self.file_reader.read_jsonl_preview(
                     self.file_path, max_rows=100)
+                errors = self.preview_data.get('errors')
+                if errors:
+                    notify(
+                        self, "warning", "JSONL",
+                        f"Битых строк в превью: {len(errors)} (показаны целые).")
             self.update_preview_table()
         except Exception as e:
-            QMessageBox.critical(self, "Ошибка", str(e))
+            notify(self, "error", "Ошибка", str(e))
 
     def update_preview_table(self):
         if not self.preview_data:
@@ -271,10 +308,10 @@ class ImportWizard(QWidget):
 
     def on_next_step(self):
         if not self.file_path:
-            QMessageBox.warning(self, "Внимание", "Сначала выберите файл")
+            notify(self, "warning", "Внимание", "Сначала выберите файл")
             return
         if not self.preview_data or not self.preview_data['headers']:
-            QMessageBox.warning(self, "Внимание", "Нет данных для маппинга")
+            notify(self, "warning", "Внимание", "Нет данных для маппинга")
             return
         self.build_mapping_ui()
         self.step1_widget.setVisible(False)
@@ -289,15 +326,39 @@ class ImportWizard(QWidget):
         self.mapping_combos.clear()
 
         headers = self.preview_data['headers']
+        roles = list(MAPPING_ROLES) + getattr(self, "extra_roles", [])
         for header in headers:
-            combo = QComboBox()
+            combo = FComboBox()
             combo.setMinimumHeight(30)
-            for role_code, role_name in MAPPING_ROLES:
+            for role_code, role_name in roles:
                 combo.addItem(role_name, role_code)
             if header == headers[0]:
                 combo.setCurrentIndex(1)  # primary_text
             self.mapping_layout.addRow(QLabel(str(header)), combo)
             self.mapping_combos[header] = combo
+
+    def on_add_custom_role(self):
+        from PySide6.QtWidgets import QInputDialog
+        name, ok = QInputDialog.getText(
+            self, "Своя категория", "Название категории (попадёт в метаданные):")
+        if not ok:
+            return
+        name = (name or "").strip()
+        if not name:
+            return
+        if len(name) > 64 or any(ch in name for ch in "\n\r\t"):
+            notify(self, "warning", "Ошибка", "Название до 64 символов, без переносов")
+            return
+        if not hasattr(self, "extra_roles"):
+            self.extra_roles = []
+        code = f"custom:{name}"
+        if any(c == code for c, _ in self.extra_roles):
+            notify(self, "warning", "Ошибка", "Такая категория уже есть")
+            return
+        self.extra_roles.append((code, f"📎 {name}"))
+        self.build_mapping_ui()
+        notify(
+            self, "success", "Категория", f"Категория «{name}» добавлена — выбери её в нужных колонках")
 
     def on_back_step(self):
         self.step2_widget.setVisible(False)
@@ -330,28 +391,30 @@ class ImportWizard(QWidget):
         mapping = self.get_mapping()
         valid, error = self.validate_mapping(mapping)
         if not valid:
-            QMessageBox.warning(self, "Ошибка маппинга", error)
+            notify(self, "warning", "Ошибка маппинга", error)
             return
 
         try:
+            errors = []
             if self.file_type == 'excel':
                 data = self.file_reader.read_excel_data(
                     self.file_path, self.sheet_name,
                     header_row=self.header_spin.value())
             elif self.file_type == 'csv':
+                enc, delim = self._csv_options()
                 data = self.file_reader.read_csv_data(
-                    self.file_path, encoding='utf-8', delimiter=',',
+                    self.file_path, encoding=enc, delimiter=delim,
                     header_row=self.header_spin.value())
             elif self.file_type == 'json':
-                data = self.file_reader.read_json_data(self.file_path)
+                data, errors = self.file_reader.read_json_data(self.file_path)
             elif self.file_type == 'jsonl':
-                data = self.file_reader.read_jsonl_data(self.file_path)
+                data, errors = self.file_reader.read_jsonl_data(self.file_path)
             else:
-                QMessageBox.warning(self, "Ошибка", "Неподдерживаемый формат")
+                notify(self, "warning", "Ошибка", "Неподдерживаемый формат")
                 return
 
             if not data:
-                QMessageBox.warning(self, "Внимание", "Файл не содержит данных")
+                notify(self, "warning", "Внимание", "Файл не содержит данных")
                 return
 
             from importer import import_file
@@ -364,11 +427,13 @@ class ImportWizard(QWidget):
                 mapping=mapping,
                 data=data
             )
-            QMessageBox.information(self, "Импорт завершён",
-                f"✅ Успешно импортировано {cases_count} кейсов.")
+            msg = f"✅ Успешно импортировано {cases_count} кейсов."
+            if errors:
+                msg += f"\n⚠️ Пропущено битых строк: {len(errors)}."
+            notify(self, "success", "Импорт завершён", msg)
             self.import_finished.emit()
         except Exception as e:
-            QMessageBox.critical(self, "Ошибка импорта", str(e))
+            notify(self, "error", "Ошибка импорта", str(e))
 
     def on_cancel(self):
-        self.import_finished.emit()
+        self.import_cancelled.emit()

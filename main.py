@@ -1,7 +1,7 @@
 import sys
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QPushButton, QLabel, QStackedWidget, QFileDialog, QMessageBox
+    QStackedWidget, QFileDialog
 )
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont
@@ -9,6 +9,10 @@ from pathlib import Path
 from database import init_database
 from sidebar import Sidebar
 from styles import APP_STYLE
+from ui_compat import (
+    FLUENT, FPrimaryButton, FPushButton, FSubtitleLabel, FTitleLabel,
+    apply_theme, confirm, get_theme_mode, notify,
+)
 
 
 class StartScreen(QWidget):
@@ -24,30 +28,29 @@ class StartScreen(QWidget):
         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.setSpacing(20)
 
-        title = QLabel("LOCAL REVIEWER")
-        title.setObjectName("title")
+        title = FTitleLabel("LOCAL REVIEWER")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(title)
 
-        subtitle = QLabel("Локальная разметка датасетов")
-        subtitle.setObjectName("subtitle")
+        subtitle = FSubtitleLabel("Локальная разметка датасетов")
         subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(subtitle)
 
         layout.addSpacing(30)
 
-        btn_create = QPushButton("📁 Создать проект")
+        btn_create = FPrimaryButton("📁 Создать проект")
         btn_create.setMinimumWidth(280)
         btn_create.setMinimumHeight(50)
         btn_create.clicked.connect(self.on_create_project)
 
-        btn_open = QPushButton("📂 Открыть проект")
+        btn_open = FPushButton("📂 Открыть проект")
         btn_open.setMinimumWidth(280)
         btn_open.setMinimumHeight(50)
         btn_open.clicked.connect(self.on_open_project)
 
-        btn_exit = QPushButton("🚪 Выход")
-        btn_exit.setObjectName("danger")
+        btn_exit = FPushButton("🚪 Выход")
+        if not FLUENT:
+            btn_exit.setObjectName("danger")
         btn_exit.setMinimumWidth(280)
         btn_exit.setMinimumHeight(50)
         btn_exit.clicked.connect(self.on_exit)
@@ -65,8 +68,10 @@ class StartScreen(QWidget):
             try:
                 init_database(folder)
                 self.main_window.open_project(folder)
+                notify(self.main_window, "success", "Проект создан",
+                       f"База инициализирована:\n{folder}")
             except Exception as e:
-                QMessageBox.critical(self, "Ошибка", f"Не удалось создать проект:\n{str(e)}")
+                notify(self, "error", "Ошибка", f"Не удалось создать проект:\n{str(e)}")
 
     def on_open_project(self):
         folder = QFileDialog.getExistingDirectory(
@@ -74,8 +79,7 @@ class StartScreen(QWidget):
         if folder:
             db_path = Path(folder) / "project.sqlite"
             if not db_path.exists():
-                QMessageBox.warning(self, "Проект не найден",
-                    f"В папке {folder} не найдена база данных.")
+                notify(self, "warning", "Проект не найден", f"В папке {folder} не найдена база данных.")
                 return
             self.main_window.open_project(folder)
 
@@ -138,15 +142,24 @@ class ProjectWindow(QWidget):
             self.stack.setCurrentWidget(self.screens[key])
             # Обновляем данные экрана при переключении
             screen = self.screens[key]
-            if hasattr(screen, 'refresh'):
-                screen.refresh()
+            refresh = getattr(screen, 'refresh', None)
+            if callable(refresh):
+                try:
+                    refresh()
+                except Exception:
+                    pass
+            self.sidebar.update_progress()
 
     def refresh_all(self):
         """Обновляет все экраны."""
         self.sidebar.update_progress()
         for screen in self.screens.values():
-            if hasattr(screen, 'refresh'):
-                screen.refresh()
+            refresh = getattr(screen, 'refresh', None)
+            if callable(refresh):
+                try:
+                    refresh()
+                except Exception:
+                    pass
 
 
 class MainWindow(QMainWindow):
@@ -168,7 +181,23 @@ class MainWindow(QMainWindow):
         self.project_window = None
 
     def open_project(self, folder):
-        """Открывает проект."""
+        """Открывает проект (старый выгружается, чтобы не было утечек)."""
+        try:
+            # Миграции должны выполняться и при ОТКРЫТИИ, а не только при создании:
+            # иначе старые проекты не получат новые таблицы (bulk_operations, saved_filters...).
+            init_database(folder)
+        except Exception as e:
+            notify(self, "error", "Ошибка",
+                   "Не удалось мигрировать базу проекта.\n\n"
+                   f"Причина: {e}\n\n"
+                   "Ваши данные НЕ изменены (миграция откачена).\n"
+                   "Перед миграцией создан бэкап в папке backups/.\n"
+                   "Подробности — в logs/localreviewer.log.")
+            return
+        if self.project_window:
+            self.stack.removeWidget(self.project_window)
+            self.project_window.deleteLater()
+            self.project_window = None
         self.project_window = ProjectWindow(folder, self)
         self.stack.addWidget(self.project_window)
         self.stack.setCurrentWidget(self.project_window)
@@ -183,12 +212,21 @@ class MainWindow(QMainWindow):
 
 
 def main():
+    from app_logging import setup_logging
+    setup_logging()
     app = QApplication(sys.argv)
-    app.setStyle("Fusion")
-    app.setStyleSheet(APP_STYLE)
-    font = QFont("Cascadia Code", 10)
-    font.setStyleHint(QFont.StyleHint.Monospace)
-    app.setFont(font)
+    if FLUENT:
+        # Fluent рисует сам: глобальный APP_STYLE его бы ломал
+        apply_theme(get_theme_mode())
+    else:
+        app.setStyle("Fusion")
+        app.setStyleSheet(APP_STYLE)
+    for family in ("Cascadia Code", "Consolas", "Courier New"):
+        font = QFont(family, 10)
+        if font.exactMatch() or family != "Cascadia Code":
+            font.setStyleHint(QFont.StyleHint.Monospace)
+            app.setFont(font)
+            break
     window = MainWindow()
     window.show()
     sys.exit(app.exec())

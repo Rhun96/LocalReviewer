@@ -12,6 +12,7 @@ a = Analysis(
         'openpyxl',
         'matplotlib',
         'matplotlib.backends.backend_agg',
+        'qfluentwidgets',
     ],
     hookspath=[],
     hooksconfig={},

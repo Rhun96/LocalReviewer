@@ -1,12 +1,15 @@
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
-    QListWidget, QListWidgetItem, QMessageBox, QFileDialog
+    QListWidget, QListWidgetItem, QFileDialog
 )
 from PySide6.QtCore import Qt, Signal
 from backup_service import create_backup, get_backups_list, restore_backup, delete_backup
+from ui_base import BaseScreen
+from ui_compat import FPrimaryButton, FPushButton, clear_in_fluent, confirm, notify
+from workers import run_in_background
 
 
-class BackupScreen(QWidget):
+class BackupScreen(BaseScreen):
     """Экран резервного копирования."""
     
     backup_closed = Signal()
@@ -33,11 +36,11 @@ class BackupScreen(QWidget):
         # Кнопки действий
         buttons_layout = QHBoxLayout()
         
-        btn_create = QPushButton("Создать резервную копию")
+        btn_create = FPrimaryButton("Создать резервную копию")
         btn_create.setMinimumHeight(50)
         btn_create.clicked.connect(self.on_create_backup)
         
-        btn_refresh = QPushButton("Обновить список")
+        btn_refresh = FPushButton("Обновить список")
         btn_refresh.setMinimumHeight(50)
         btn_refresh.clicked.connect(self.load_backups)
         
@@ -67,11 +70,12 @@ class BackupScreen(QWidget):
             }
         """)
         layout.addWidget(self.backups_list)
+        clear_in_fluent(self.backups_list)
         
         # Кнопки для выбранной копии
         actions_layout = QHBoxLayout()
         
-        btn_restore = QPushButton("Восстановить выбранную копию")
+        btn_restore = FPushButton("Восстановить выбранную копию")
         btn_restore.setMinimumHeight(50)
         btn_restore.setStyleSheet("""
             QPushButton { border-color: #FFAA00; color: #FFAA00; }
@@ -79,7 +83,7 @@ class BackupScreen(QWidget):
         """)
         btn_restore.clicked.connect(self.on_restore_backup)
         
-        btn_delete = QPushButton("Удалить выбранную копию")
+        btn_delete = FPushButton("Удалить выбранную копию")
         btn_delete.setMinimumHeight(50)
         btn_delete.setObjectName("danger")
         btn_delete.clicked.connect(self.on_delete_backup)
@@ -89,7 +93,7 @@ class BackupScreen(QWidget):
         layout.addLayout(actions_layout)
         
         # Кнопка назад
-        btn_back = QPushButton("Назад к проекту")
+        btn_back = FPushButton("Назад к проекту")
         btn_back.setObjectName("danger")
         btn_back.setMinimumHeight(50)
         btn_back.clicked.connect(self.on_back)
@@ -99,12 +103,18 @@ class BackupScreen(QWidget):
     
     def load_backups(self):
         """Загружает список резервных копий."""
-        backups = get_backups_list(self.project_path)
-        
+        try:
+            backups = get_backups_list(self.project_path)
+        except Exception as e:
+            self.show_error("Не удалось получить список копий", e)
+            return
+
         self.backups_list.clear()
-        
+
         if not backups:
             item = QListWidgetItem("Резервных копий нет")
+            item.setData(Qt.ItemDataRole.UserRole, None)
+            item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsSelectable)
             self.backups_list.addItem(item)
             return
         
@@ -116,77 +126,88 @@ class BackupScreen(QWidget):
             self.backups_list.addItem(item)
     
     def on_create_backup(self):
-        """Создаёт резервную копию."""
-        try:
-            backup_path = create_backup(self.project_path)
-            QMessageBox.information(
-                self,
-                "Резервная копия создана",
-                f"Копия сохранена:\n{backup_path}"
-            )
+        """Создаёт резервную копию (в фоне, чтобы не морозить UI)."""
+        self.set_buttons_enabled(False)
+
+        def _done(path):
+            self.set_buttons_enabled(True)
+            notify(self, "success", "Резервная копия создана", f"Копия сохранена:\n{path}")
             self.load_backups()
-        except Exception as e:
-            QMessageBox.critical(self, "Ошибка", f"Не удалось создать резервную копию: {str(e)}")
+            if self.parent_window and hasattr(self.parent_window, "refresh_all"):
+                try:
+                    self.parent_window.refresh_all()
+                except Exception:
+                    pass
+
+        def _fail(msg):
+            self.set_buttons_enabled(True)
+            notify(self, "error", "Ошибка", f"Не удалось создать резервную копию:\n{msg}")
+
+        run_in_background(create_backup, self.project_path, on_finished=_done, on_error=_fail)
+
+    def set_buttons_enabled(self, enabled: bool):
+        for w in self.findChildren(QWidget):
+            if isinstance(w, QPushButton):
+                w.setEnabled(enabled)
+
+    def refresh(self):
+        self.load_backups()
     
     def on_restore_backup(self):
         """Восстанавливает выбранную резервную копию."""
         current_item = self.backups_list.currentItem()
-        
+
         if not current_item:
-            QMessageBox.warning(self, "Внимание", "Выберите резервную копию")
+            notify(self, "warning", "Внимание", "Выберите резервную копию")
             return
-        
+
         backup_path = current_item.data(Qt.ItemDataRole.UserRole)
-        
+
         if not backup_path:
             return
-        
-        reply = QMessageBox.question(
+
+        if not confirm(
             self,
             "Подтверждение",
             "Восстановить базу данных из этой резервной копии?\n\nТекущие данные будут заменены.",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No
-        )
-        
-        if reply == QMessageBox.StandardButton.Yes:
-            try:
-                restore_backup(self.project_path, backup_path)
-                QMessageBox.information(
-                    self,
-                    "Восстановление завершено",
-                    "База данных восстановлена из резервной копии.\nТекущая база была сохранена как резервная копия."
-                )
-                self.load_backups()
-            except Exception as e:
-                QMessageBox.critical(self, "Ошибка", f"Не удалось восстановить: {str(e)}")
+        ):
+            return
+        try:
+            restore_backup(self.project_path, backup_path)
+            notify(
+                self,
+                "success",
+                "Восстановление завершено",
+                "База данных восстановлена из резервной копии.\nТекущая база была сохранена как резервная копия."
+            )
+            self.load_backups()
+            if self.parent_window and hasattr(self.parent_window, "refresh_all"):
+                try:
+                    self.parent_window.refresh_all()
+                except Exception:
+                    pass
+        except Exception as e:
+            notify(self, "error", "Ошибка", f"Не удалось восстановить: {str(e)}")
     
     def on_delete_backup(self):
         """Удаляет выбранную резервную копию."""
         current_item = self.backups_list.currentItem()
-        
+
         if not current_item:
-            QMessageBox.warning(self, "Внимание", "Выберите резервную копию")
+            notify(self, "warning", "Внимание", "Выберите резервную копию")
             return
-        
+
         backup_path = current_item.data(Qt.ItemDataRole.UserRole)
-        
+
         if not backup_path:
             return
-        
-        reply = QMessageBox.question(
-            self,
-            "Подтверждение",
-            "Удалить эту резервную копию?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No
-        )
-        
-        if reply == QMessageBox.StandardButton.Yes:
-            if delete_backup(backup_path):
-                self.load_backups()
-            else:
-                QMessageBox.critical(self, "Ошибка", "Не удалось удалить резервную копию")
+
+        if not confirm(self, "Подтверждение", "Удалить эту резервную копию?"):
+            return
+        if delete_backup(self.project_path, backup_path):
+            self.load_backups()
+        else:
+            notify(self, "error", "Ошибка", "Не удалось удалить резервную копию")
     
     def on_back(self):
         """Возврат к проекту."""

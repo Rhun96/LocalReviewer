@@ -1,20 +1,23 @@
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
-    QMessageBox, QListWidget, QListWidgetItem,
+    QListWidget, QListWidgetItem,
     QGridLayout, QSizePolicy, QGroupBox
 )
 from PySide6.QtCore import Qt
-from database import get_db_connection
+from database import db
 from styles import apply_shadow
+from ui_base import BaseScreen
+from ui_compat import FPrimaryButton, FPushButton, confirm, notify
 
 
-class ProjectScreen(QWidget):
+class ProjectScreen(BaseScreen):
     """Экран проекта после создания/открытия."""
 
     def __init__(self, project_path: str, parent=None):
         super().__init__(parent)
         self.project_path = project_path
         self.parent_window = parent
+        self._transient = []  # виджеты, добавленные в стек (wizard/review/...), чтобы удалять их
         self.init_ui()
         self.load_project_info()
 
@@ -46,13 +49,13 @@ class ProjectScreen(QWidget):
 
         # Кнопки управления файлами
         file_buttons = QHBoxLayout()
-        btn_add_file = QPushButton("📥 Добавить файл")
+        btn_add_file = FPushButton("📥 Добавить файл")
         btn_add_file.setMinimumHeight(45)
         btn_add_file.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         btn_add_file.clicked.connect(self.on_add_file)
         apply_shadow(btn_add_file)
 
-        btn_delete_file = QPushButton("🗑️ Удалить файл")
+        btn_delete_file = FPushButton("🗑️ Удалить файл")
         btn_delete_file.setObjectName("danger")
         btn_delete_file.setMinimumHeight(45)
         btn_delete_file.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
@@ -73,25 +76,25 @@ class ProjectScreen(QWidget):
         buttons_grid.setSpacing(10)
 
         # Ряд 1
-        btn_start_review = QPushButton("▶️ Начать ревью")
+        btn_start_review = FPrimaryButton("▶️ Начать ревью")
         btn_start_review.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         btn_start_review.setMinimumHeight(45)
         btn_start_review.clicked.connect(self.on_start_review)
         apply_shadow(btn_start_review)
 
-        btn_reports = QPushButton("📈 Отчёты")
+        btn_reports = FPushButton("📈 Отчёты")
         btn_reports.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         btn_reports.setMinimumHeight(45)
         btn_reports.clicked.connect(self.on_reports)
         apply_shadow(btn_reports)
 
-        btn_history = QPushButton("🕐 История")
+        btn_history = FPushButton("🕐 История")
         btn_history.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         btn_history.setMinimumHeight(45)
         btn_history.clicked.connect(self.on_history)
         apply_shadow(btn_history)
 
-        btn_backup = QPushButton("💾 Резервные копии")
+        btn_backup = FPushButton("💾 Резервные копии")
         btn_backup.setStyleSheet("""
             QPushButton { border-color: #00AAFF; color: #00AAFF; }
             QPushButton:hover { background-color: #002233; }
@@ -107,7 +110,7 @@ class ProjectScreen(QWidget):
         buttons_grid.addWidget(btn_backup, 0, 3)
 
         # Ряд 2
-        btn_settings = QPushButton("⚙️ Настройки")
+        btn_settings = FPushButton("⚙️ Настройки")
         btn_settings.setStyleSheet("""
             QPushButton { border-color: #00AAFF; color: #00AAFF; }
             QPushButton:hover { background-color: #002233; }
@@ -117,7 +120,7 @@ class ProjectScreen(QWidget):
         btn_settings.clicked.connect(self.on_settings)
         apply_shadow(btn_settings, color='#00AAFF')
 
-        btn_back = QPushButton("🚪 Назад")
+        btn_back = FPushButton("🚪 Назад")
         btn_back.setObjectName("danger")
         btn_back.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         btn_back.setMinimumHeight(45)
@@ -136,11 +139,10 @@ class ProjectScreen(QWidget):
         """Загружает информацию о проекте."""
         self.info_label.setText(f"📂 {self.project_path}")
         try:
-            conn = get_db_connection(self.project_path)
-            cursor = conn.cursor()
-            cursor.execute("SELECT file_id, file_name, row_count FROM files ORDER BY imported_at DESC")
-            files = cursor.fetchall()
-            conn.close()
+            with db(self.project_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT file_id, file_name, row_count FROM files ORDER BY imported_at DESC")
+                files = cursor.fetchall()
             self.files_list.clear()
             if files:
                 for file in files:
@@ -149,6 +151,8 @@ class ProjectScreen(QWidget):
                     self.files_list.addItem(item)
             else:
                 item = QListWidgetItem("📭 Файлы ещё не добавлены")
+                item.setData(Qt.ItemDataRole.UserRole, None)
+                item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsSelectable)
                 self.files_list.addItem(item)
         except Exception as e:
             self.files_list.clear()
@@ -158,48 +162,54 @@ class ProjectScreen(QWidget):
     def refresh(self):
         self.load_project_info()
 
+    def _show_transient(self, widget):
+        self._transient.append(widget)
+        self.parent_window.stack.addWidget(widget)
+        self.parent_window.stack.setCurrentWidget(widget)
+
+    def _close_transient(self, widget):
+        self.parent_window.stack.setCurrentWidget(self)
+        self.parent_window.stack.removeWidget(widget)
+        widget.deleteLater()
+        if widget in self._transient:
+            self._transient.remove(widget)
+        self.load_project_info()
+
     def on_add_file(self):
         """Добавление нового файла."""
         from import_wizard import ImportWizard
         wizard = ImportWizard(self.project_path, self.parent_window)
-        wizard.import_finished.connect(self.on_import_finished)
-        self.parent_window.stack.addWidget(wizard)
-        self.parent_window.stack.setCurrentWidget(wizard)
-
-    def on_import_finished(self):
-        """Завершение импорта."""
-        self.load_project_info()
-        self.parent_window.stack.setCurrentWidget(self)
+        wizard.import_finished.connect(lambda: self._close_transient(wizard))
+        wizard.import_cancelled.connect(lambda: self._close_transient(wizard))
+        self._show_transient(wizard)
 
     def on_delete_file(self):
         """Удаление выбранного файла."""
         current_item = self.files_list.currentItem()
         if not current_item:
-            QMessageBox.warning(self, "Внимание", "Выберите файл для удаления")
+            notify(self, "warning", "Внимание", "Выберите файл для удаления")
             return
         file_id = current_item.data(Qt.ItemDataRole.UserRole)
         if not file_id:
-            QMessageBox.warning(self, "Внимание", "Выберите файл для удаления")
+            notify(self, "warning", "Внимание", "Выберите файл для удаления")
             return
         file_name = current_item.text()
-        reply = QMessageBox.question(
+        if not confirm(
             self,
             "Подтверждение",
             f"Удалить файл и все связанные кейсы?\n\n{file_name}\n\n⚠️ Это действие нельзя отменить.",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No
-        )
-        if reply == QMessageBox.StandardButton.Yes:
-            try:
-                conn = get_db_connection(self.project_path)
+        ):
+            return
+        try:
+            with db(self.project_path) as conn:
                 cursor = conn.cursor()
                 cursor.execute("DELETE FROM files WHERE file_id = ?", (file_id,))
-                conn.commit()
-                conn.close()
-                self.load_project_info()
-                QMessageBox.information(self, "Удаление", "✅ Файл удалён из проекта")
-            except Exception as e:
-                QMessageBox.critical(self, "Ошибка", f"Не удалось удалить файл: {str(e)}")
+                if cursor.rowcount == 0:
+                    raise RuntimeError("Файл уже удалён")
+            self.load_project_info()
+            notify(self, "success", "Удаление", "✅ Файл удалён из проекта")
+        except Exception as e:
+            notify(self, "error", "Ошибка", f"Не удалось удалить файл: {str(e)}")
 
     def on_start_review(self):
         """Ревью с выбором датасета."""
@@ -212,67 +222,41 @@ class ProjectScreen(QWidget):
 
             from review_screen import ReviewScreen
             review = ReviewScreen(self.project_path, self.parent_window, filters=filters)
-            review.review_closed.connect(self.on_review_closed)
-            self.parent_window.stack.addWidget(review)
-            self.parent_window.stack.setCurrentWidget(review)
-
-    def on_review_closed(self):
-        """Возврат из ревью."""
-        self.load_project_info()
-        self.parent_window.stack.setCurrentWidget(self)
+            review.review_closed.connect(lambda: self._close_transient(review))
+            self._show_transient(review)
 
     def on_reports(self):
         """Переход к отчётам."""
         from reports_screen import ReportsScreen
         reports = ReportsScreen(self.project_path, self.parent_window)
-        reports.reports_closed.connect(self.on_reports_closed)
-        self.parent_window.stack.addWidget(reports)
-        self.parent_window.stack.setCurrentWidget(reports)
-
-    def on_reports_closed(self):
-        """Возврат из отчётов."""
-        self.load_project_info()
-        self.parent_window.stack.setCurrentWidget(self)
+        reports.reports_closed.connect(lambda: self._close_transient(reports))
+        self._show_transient(reports)
 
     def on_history(self):
         """Переход к истории."""
         from history_screen import HistoryScreen
         history = HistoryScreen(self.project_path, self.parent_window)
-        history.history_closed.connect(self.on_history_closed)
-        self.parent_window.stack.addWidget(history)
-        self.parent_window.stack.setCurrentWidget(history)
-
-    def on_history_closed(self):
-        """Возврат из истории."""
-        self.load_project_info()
-        self.parent_window.stack.setCurrentWidget(self)
+        history.history_closed.connect(lambda: self._close_transient(history))
+        self._show_transient(history)
 
     def on_backup(self):
         """Переход к резервному копированию."""
         from backup_screen import BackupScreen
         backup = BackupScreen(self.project_path, self.parent_window)
-        backup.backup_closed.connect(self.on_backup_closed)
-        self.parent_window.stack.addWidget(backup)
-        self.parent_window.stack.setCurrentWidget(backup)
-
-    def on_backup_closed(self):
-        """Возврат из резервного копирования."""
-        self.load_project_info()
-        self.parent_window.stack.setCurrentWidget(self)
+        backup.backup_closed.connect(lambda: self._close_transient(backup))
+        self._show_transient(backup)
 
     def on_settings(self):
         """Переход к настройкам."""
         from settings_screen import SettingsScreen
         settings = SettingsScreen(self.project_path, self.parent_window)
-        settings.settings_closed.connect(self.on_settings_closed)
-        self.parent_window.stack.addWidget(settings)
-        self.parent_window.stack.setCurrentWidget(settings)
-
-    def on_settings_closed(self):
-        """Возврат из настроек."""
-        self.load_project_info()
-        self.parent_window.stack.setCurrentWidget(self)
+        settings.settings_closed.connect(lambda: self._close_transient(settings))
+        self._show_transient(settings)
 
     def on_back(self):
         """Возврат на стартовый экран."""
-        self.parent_window.stack.setCurrentWidget(self.parent_window.start_screen)
+        main = self.parent_window
+        while main is not None and not hasattr(main, "go_home"):
+            main = main.parent()
+        if main is not None:
+            main.go_home()

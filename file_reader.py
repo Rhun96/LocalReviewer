@@ -1,291 +1,263 @@
+"""Чтение xlsx/csv/json/jsonl: лимиты размера, utf-8-sig, корректные ошибки, отчёт о битых строках."""
 import csv
 import json
+import logging
 from pathlib import Path
-from typing import List, Dict, Any, Optional
+from typing import Any
+
 import openpyxl
+
+logger = logging.getLogger(__name__)
+
+MAX_PREVIEW_BYTES = 200 * 1024 * 1024
+
+
+def _check_size(file_path: str) -> None:
+    size = Path(file_path).stat().st_size
+    if size > MAX_PREVIEW_BYTES:
+        raise ValueError("Файл слишком большой для превью (>200 МБ)")
+
+
+def _validate_delimiter(delimiter: str) -> None:
+    if not isinstance(delimiter, str) or len(delimiter) != 1:
+        raise ValueError("Разделитель CSV — ровно один символ")
 
 
 class FileReader:
     """Читает различные форматы файлов и возвращает данные."""
-    
+
     @staticmethod
     def detect_file_type(file_path: str) -> str:
-        """Определяет тип файла по расширению."""
         ext = Path(file_path).suffix.lower()
-        if ext in ['.xlsx', '.xls']:
-            return 'excel'
-        elif ext == '.csv':
-            return 'csv'
-        elif ext == '.json':
-            return 'json'
-        elif ext == '.jsonl':
-            return 'jsonl'
-        else:
-            return 'unknown'
-    
+        if ext == ".xlsx":
+            return "excel"
+        if ext == ".xls":
+            raise ValueError(".xls не поддерживается openpyxl — сохраните как .xlsx")
+        if ext == ".csv":
+            return "csv"
+        if ext == ".json":
+            return "json"
+        if ext == ".jsonl":
+            return "jsonl"
+        return "unknown"
+
     @staticmethod
-    def read_excel_sheets(file_path: str) -> List[str]:
-        """Возвращает список листов в Excel-файле."""
+    def read_excel_sheets(file_path: str) -> list:
+        _check_size(file_path)
+        wb = openpyxl.load_workbook(file_path, read_only=True, data_only=True)
         try:
-            wb = openpyxl.load_workbook(file_path, read_only=True, data_only=True)
-            sheets = wb.sheetnames
-            wb.close()
-            return sheets
+            return list(wb.sheetnames)
         except Exception as e:
-            raise Exception(f"Не удалось открыть Excel-файл: {str(e)}")
-    
+            raise ValueError(f"Не удалось открыть Excel-файл: {e}") from e
+        finally:
+            wb.close()
+
     @staticmethod
-    def read_excel_preview(
-        file_path: str,
-        sheet_name: str,
-        max_rows: int = 100
-    ) -> Dict[str, Any]:
-        """Читает первые строки Excel-файла для превью."""
+    def read_excel_preview(file_path: str, sheet_name: str, max_rows: int = 100) -> dict:
+        _check_size(file_path)
+        wb = openpyxl.load_workbook(file_path, read_only=True, data_only=True)
         try:
-            wb = openpyxl.load_workbook(file_path, read_only=True, data_only=True)
+            if sheet_name not in wb.sheetnames:
+                raise ValueError(f"Лист {sheet_name!r} не найден")
             ws = wb[sheet_name]
-            
             rows = []
             for i, row in enumerate(ws.iter_rows(values_only=True)):
                 if i >= max_rows:
                     break
-                rows.append([str(cell) if cell is not None else '' for cell in row])
-            
-            wb.close()
-            
+                rows.append([str(cell) if cell is not None else "" for cell in row])
             if not rows:
-                return {'headers': [], 'rows': []}
-            
-            headers = rows[0] if rows else []
-            data_rows = rows[1:] if len(rows) > 1 else []
-            
-            return {'headers': headers, 'rows': data_rows}
+                return {"headers": [], "rows": []}
+            return {"headers": rows[0], "rows": rows[1:]}
+        except ValueError:
+            raise
         except Exception as e:
-            raise Exception(f"Не удалось прочитать Excel-файл: {str(e)}")
-    
+            raise ValueError(f"Не удалось прочитать Excel-файл: {e}") from e
+        finally:
+            wb.close()
+
     @staticmethod
     def read_csv_preview(
-        file_path: str,
-        encoding: str = 'utf-8',
-        delimiter: str = ',',
-        max_rows: int = 100
-    ) -> Dict[str, Any]:
-        """Читает первые строки CSV-файла для превью."""
+        file_path: str, encoding: str = "utf-8-sig", delimiter: str = ",", max_rows: int = 100
+    ) -> dict:
+        _validate_delimiter(delimiter)
+        _check_size(file_path)
         try:
             rows = []
-            with open(file_path, 'r', encoding=encoding) as f:
+            with open(file_path, encoding=encoding, newline="") as f:
                 reader = csv.reader(f, delimiter=delimiter)
                 for i, row in enumerate(reader):
                     if i >= max_rows:
                         break
                     rows.append(row)
-            
             if not rows:
-                return {'headers': [], 'rows': []}
-            
-            headers = rows[0]
-            data_rows = rows[1:]
-            
-            return {'headers': headers, 'rows': data_rows}
-        except UnicodeDecodeError:
-            raise Exception("Не удалось определить кодировку. Попробуйте выбрать другую.")
+                return {"headers": [], "rows": []}
+            return {"headers": rows[0], "rows": rows[1:]}
+        except UnicodeDecodeError as e:
+            raise ValueError("Не удалось определить кодировку. Попробуйте выбрать другую.") from e
         except Exception as e:
-            raise Exception(f"Не удалось прочитать CSV-файл: {str(e)}")
-    
+            raise ValueError(f"Не удалось прочитать CSV-файл: {e}") from e
+
     @staticmethod
-    def read_json_preview(file_path: str, max_rows: int = 100) -> Dict[str, Any]:
-        """Читает первые строки JSON-файла для превью."""
+    def _json_headers_and_rows(data: list, max_rows: int) -> dict:
+        items = [x for x in data if isinstance(x, dict)]
+        if not items:
+            return {"headers": [], "rows": []}
+        headers = list(items[0].keys())
+        rows = [[str(it.get(h, "")) for h in headers] for it in items[:max_rows]]
+        return {"headers": headers, "rows": rows}
+
+    @staticmethod
+    def read_json_preview(file_path: str, max_rows: int = 100) -> dict:
+        _check_size(file_path)
         try:
-            with open(file_path, 'r', encoding='utf-8') as f:
+            with open(file_path, encoding="utf-8-sig") as f:
                 data = json.load(f)
-            
-            # Проверяем, что это список объектов
             if not isinstance(data, list):
-                raise Exception("JSON должен содержать массив объектов")
-            
-            if not data:
-                return {'headers': [], 'rows': []}
-            
-            # Берём заголовки из первого объекта
-            headers = list(data[0].keys())
-            
-            rows = []
-            for item in data[:max_rows]:
-                row = [str(item.get(h, '')) for h in headers]
-                rows.append(row)
-            
-            return {'headers': headers, 'rows': rows}
+                raise ValueError("JSON должен содержать массив объектов")
+            return FileReader._json_headers_and_rows(data, max_rows)
         except json.JSONDecodeError as e:
-            raise Exception(f"Ошибка парсинга JSON: {str(e)}")
-        except Exception as e:
-            raise Exception(f"Не удалось прочитать JSON-файл: {str(e)}")
-    
+            raise ValueError(f"Ошибка парсинга JSON: {e}") from e
+
     @staticmethod
-    def read_jsonl_preview(file_path: str, max_rows: int = 100) -> Dict[str, Any]:
-        """Читает первые строки JSONL-файла для превью."""
+    def read_jsonl_preview(file_path: str, max_rows: int = 100) -> dict:
+        _check_size(file_path)
+        headers: list = []
+        rows: list = []
+        errors: list = []
         try:
-            rows = []
-            headers = []
-            
-            with open(file_path, 'r', encoding='utf-8') as f:
+            with open(file_path, encoding="utf-8-sig") as f:
                 for i, line in enumerate(f):
-                    if i >= max_rows:
+                    if len(rows) >= max_rows:
                         break
-                    
-                    line = line.strip()
-                    if not line:
+                    s = line.strip()
+                    if not s:
                         continue
-                    
-                    item = json.loads(line)
-                    
-                    # Берём заголовки из первой строки
+                    try:
+                        item = json.loads(s)
+                    except json.JSONDecodeError as e:
+                        errors.append({"line": i + 1, "error": str(e)})
+                        continue
+                    if not isinstance(item, dict):
+                        errors.append({"line": i + 1, "error": "not an object"})
+                        continue
                     if not headers:
                         headers = list(item.keys())
-                    
-                    row = [str(item.get(h, '')) for h in headers]
-                    rows.append(row)
-            
-            return {'headers': headers, 'rows': rows}
-        except json.JSONDecodeError as e:
-            raise Exception(f"Ошибка парсинга JSONL: {str(e)}")
+                    rows.append([str(item.get(h, "")) for h in headers])
+            result: dict[str, Any] = {"headers": headers, "rows": rows}
+            if errors:
+                result["errors"] = errors
+            return result
         except Exception as e:
-            raise Exception(f"Не удалось прочитать JSONL-файл: {str(e)}")
-    
+            raise ValueError(f"Не удалось прочитать JSONL-файл: {e}") from e
+
     @staticmethod
-    def read_excel_data(
-        file_path: str,
-        sheet_name: str,
-        header_row: int = 0
-    ) -> List[Dict[str, Any]]:
-        """Читает все данные из Excel-файла."""
+    def read_excel_data(file_path: str, sheet_name: str, header_row: int = 0) -> list:
+        _check_size(file_path)
+        wb = openpyxl.load_workbook(file_path, read_only=True, data_only=True)
         try:
-            wb = openpyxl.load_workbook(file_path, read_only=True, data_only=True)
+            if sheet_name not in wb.sheetnames:
+                raise ValueError(f"Лист {sheet_name!r} не найден")
             ws = wb[sheet_name]
-            
-            rows = list(ws.iter_rows(values_only=True))
-            wb.close()
-            
-            if not rows or header_row >= len(rows):
-                return []
-            
-            headers = [str(h) if h else f"col_{i}" for i, h in enumerate(rows[header_row])]
             data = []
-            
-            for row in rows[header_row + 1:]:
-                if all(cell is None or str(cell).strip() == '' for cell in row):
+            headers: list = []
+            seen_header = False
+            for i, row in enumerate(ws.iter_rows(values_only=True)):
+                if i < header_row:
                     continue
-                
+                if not seen_header:
+                    headers = [str(h) if h not in (None, "") else f"col_{j}" for j, h in enumerate(row)]
+                    seen_header = True
+                    continue
+                if all(c is None or str(c).strip() == "" for c in row):
+                    continue
                 row_dict = {}
-                for i, header in enumerate(headers):
-                    if i < len(row):
-                        value = row[i]
-                        row_dict[header] = str(value) if value is not None else ''
-                    else:
-                        row_dict[header] = ''
+                for j, header in enumerate(headers):
+                    v = row[j] if j < len(row) else None
+                    row_dict[header] = "" if v is None else v
                 data.append(row_dict)
-            
             return data
+        except ValueError:
+            raise
         except Exception as e:
-            raise Exception(f"Ошибка чтения Excel: {str(e)}")
-    
+            raise ValueError(f"Ошибка чтения Excel: {e}") from e
+        finally:
+            wb.close()
+
     @staticmethod
     def read_csv_data(
-        file_path: str,
-        encoding: str = 'utf-8',
-        delimiter: str = ',',
-        header_row: int = 0
-    ) -> List[Dict[str, Any]]:
-        """Читает все данные из CSV-файла."""
+        file_path: str, encoding: str = "utf-8-sig", delimiter: str = ",", header_row: int = 0
+    ) -> list:
+        _validate_delimiter(delimiter)
+        _check_size(file_path)
         try:
-            rows = []
-            with open(file_path, 'r', encoding=encoding) as f:
-                reader = csv.reader(f, delimiter=delimiter)
-                rows = list(reader)
-            
+            with open(file_path, encoding=encoding, newline="") as f:
+                rows = list(csv.reader(f, delimiter=delimiter))
             if not rows or header_row >= len(rows):
                 return []
-            
             headers = [h if h else f"col_{i}" for i, h in enumerate(rows[header_row])]
             data = []
-            
             for row in rows[header_row + 1:]:
-                if all(cell.strip() == '' for cell in row):
+                if all((c or "").strip() == "" for c in row):
                     continue
-                
-                row_dict = {}
-                for i, header in enumerate(headers):
-                    if i < len(row):
-                        row_dict[header] = row[i]
-                    else:
-                        row_dict[header] = ''
-                data.append(row_dict)
-            
+                data.append({h: (row[i] if i < len(row) else "") for i, h in enumerate(headers)})
             return data
-        except UnicodeDecodeError:
-            raise Exception("Ошибка кодировки")
+        except UnicodeDecodeError as e:
+            raise ValueError("Ошибка кодировки") from e
         except Exception as e:
-            raise Exception(f"Ошибка чтения CSV: {str(e)}")
-    
+            raise ValueError(f"Ошибка чтения CSV: {e}") from e
+
     @staticmethod
-    def read_json_data(file_path: str) -> List[Dict[str, Any]]:
-        """Читает все данные из JSON-файла."""
+    def read_json_data(file_path: str) -> tuple:
+        """Возвращает (rows, errors): битые/не-объекты не теряются молча."""
+        _check_size(file_path)
         try:
-            with open(file_path, 'r', encoding='utf-8') as f:
+            with open(file_path, encoding="utf-8-sig") as f:
                 data = json.load(f)
-            
             if not isinstance(data, list):
-                raise Exception("JSON должен содержать массив объектов")
-            
-            result = []
-            for item in data:
-                # Пропускаем пустые объекты
+                raise ValueError("JSON должен содержать массив объектов")
+            result, errors = [], []
+            for i, item in enumerate(data):
+                if not isinstance(item, dict):
+                    errors.append({"line": i + 1, "error": "not an object, skipped"})
+                    continue
                 if not item:
                     continue
-                
-                # Конвертируем все значения в строки
                 row_dict = {}
                 for key, value in item.items():
                     if isinstance(value, (dict, list)):
                         row_dict[key] = json.dumps(value, ensure_ascii=False)
                     else:
-                        row_dict[key] = str(value) if value is not None else ''
-                
+                        row_dict[key] = "" if value is None else value
                 result.append(row_dict)
-            
-            return result
+            return result, errors
         except json.JSONDecodeError as e:
-            raise Exception(f"Ошибка парсинга JSON: {str(e)}")
-        except Exception as e:
-            raise Exception(f"Ошибка чтения JSON: {str(e)}")
-    
+            raise ValueError(f"Ошибка парсинга JSON: {e}") from e
+
     @staticmethod
-    def read_jsonl_data(file_path: str) -> List[Dict[str, Any]]:
-        """Читает все данные из JSONL-файла."""
+    def read_jsonl_data(file_path: str) -> tuple:
+        _check_size(file_path)
+        result, errors = [], []
         try:
-            result = []
-            
-            with open(file_path, 'r', encoding='utf-8') as f:
+            with open(file_path, encoding="utf-8-sig") as f:
                 for line_num, line in enumerate(f, 1):
-                    line = line.strip()
-                    if not line:
+                    s = line.strip()
+                    if not s:
                         continue
-                    
                     try:
-                        item = json.loads(line)
-                        
-                        # Конвертируем все значения в строки
-                        row_dict = {}
-                        for key, value in item.items():
-                            if isinstance(value, (dict, list)):
-                                row_dict[key] = json.dumps(value, ensure_ascii=False)
-                            else:
-                                row_dict[key] = str(value) if value is not None else ''
-                        
-                        result.append(row_dict)
-                    except json.JSONDecodeError:
-                        # Пропускаем некорректные строки
+                        item = json.loads(s)
+                    except json.JSONDecodeError as e:
+                        errors.append({"line": line_num, "error": str(e)})
                         continue
-            
-            return result
+                    if not isinstance(item, dict):
+                        errors.append({"line": line_num, "error": "not an object, skipped"})
+                        continue
+                    row_dict = {}
+                    for key, value in item.items():
+                        if isinstance(value, (dict, list)):
+                            row_dict[key] = json.dumps(value, ensure_ascii=False)
+                        else:
+                            row_dict[key] = "" if value is None else value
+                    result.append(row_dict)
+            return result, errors
         except Exception as e:
-            raise Exception(f"Ошибка чтения JSONL: {str(e)}")
+            raise ValueError(f"Ошибка чтения JSONL: {e}") from e

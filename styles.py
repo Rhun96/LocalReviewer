@@ -1,6 +1,8 @@
 """
 Продвинутая чёрно-зелёная тема для Local Reviewer.
 Версия 3: боковая панель, компактные кнопки.
+Плюс FLUENT_BASE_* — нейтральные базовые темы для Fluent-режима
+(Fluent красит только свои виджеты, обычные QWidget красим сами под тему).
 """
 
 from PySide6.QtWidgets import QGraphicsDropShadowEffect
@@ -31,15 +33,23 @@ COLORS = {
 }
 
 def apply_shadow(widget, color='#00FF41', blur=25, offset=4, alpha=50):
-    """Добавляет тень к виджету."""
-    shadow = QGraphicsDropShadowEffect()
+    """Добавляет тень к виджету. Хранит ссылку на виджете, чтобы GC не съел эффект."""
+    if not isinstance(color, str) or len(color) != 7 or not color.startswith('#'):
+        raise ValueError(f"Bad color: {color!r}, expected '#RRGGBB'")
+    try:
+        r, g, b = int(color[1:3], 16), int(color[3:5], 16), int(color[5:7], 16)
+    except ValueError:
+        raise ValueError(f"Bad color: {color!r}, expected '#RRGGBB'")
+    shadow = QGraphicsDropShadowEffect(widget)
     shadow.setBlurRadius(blur)
-    r = int(color[1:3], 16)
-    g = int(color[3:5], 16)
-    b = int(color[5:7], 16)
     shadow.setColor(QColor(r, g, b, alpha))
     shadow.setOffset(0, offset)
     widget.setGraphicsEffect(shadow)
+    # Удерживаем ссылку: без этого PySide может собрать эффект и тени пропадут/упадёт
+    widget.setProperty("_shadow", shadow)
+    if not hasattr(widget, "_shadows"):
+        widget._shadows = []
+    widget._shadows.append(shadow)
     return shadow
 
 # Глобальный стиль приложения
@@ -85,10 +95,11 @@ QPushButton {{
     color: {COLORS['green_bright']};
     border: 2px solid {COLORS['green_dark']};
     border-radius: 8px;
-    padding: 10px 20px;
+    padding: 8px 10px;
     font-size: 13px;
     font-weight: bold;
-    min-width: 100px;
+    text-align: center;
+    min-width: 60px;
     min-height: 35px;
 }}
 QPushButton:hover {{
@@ -523,3 +534,147 @@ QPushButton:hover {{
 }}
 """,
 }
+
+
+# === Базовые темы для Fluent-режима ===
+# Fluent-виджеты красятся сами через setTheme. Здесь — только обычные
+# Qt-виджеты, которые Fluent не трогает. Пер-виджетные QSS (у fluent-виджетов)
+# приоритетнее app-level, конфликтов нет.
+def _fluent_base(bg, bg_card, bg_input, text, text_dim, border, accent, accent_soft, header_bg):
+    return f"""
+QWidget {{
+    background-color: {bg};
+    color: {text};
+}}
+QLabel {{
+    color: {text};
+    background: transparent;
+}}
+QPushButton {{
+    background-color: {bg_card};
+    color: {text};
+    border: 1px solid {border};
+    border-radius: 6px;
+    padding: 6px 12px;
+    text-align: center;
+}}
+QPushButton:hover {{
+    border-color: {accent};
+}}
+QPushButton:disabled {{
+    color: {text_dim};
+}}
+QGroupBox {{
+    background-color: {bg_card};
+    border: 1px solid {border};
+    border-radius: 8px;
+    margin-top: 12px;
+    padding: 16px 12px 12px 12px;
+    font-weight: bold;
+}}
+QGroupBox::title {{
+    subcontrol-origin: margin;
+    left: 10px;
+    padding: 0 4px;
+    color: {text};
+}}
+QTableWidget {{
+    background-color: {bg_card};
+    alternate-background-color: {bg};
+    color: {text};
+    gridline-color: {border};
+    selection-background-color: {accent_soft};
+    selection-color: {text};
+    border: 1px solid {border};
+    border-radius: 6px;
+}}
+QTableWidget::item {{
+    padding: 4px;
+}}
+QHeaderView::section {{
+    background-color: {header_bg};
+    color: {text};
+    border: none;
+    border-right: 1px solid {border};
+    border-bottom: 1px solid {border};
+    padding: 6px;
+    font-weight: bold;
+}}
+QListWidget {{
+    background-color: {bg_card};
+    color: {text};
+    border: 1px solid {border};
+    border-radius: 6px;
+}}
+QListWidget::item:selected {{
+    background-color: {accent_soft};
+    color: {text};
+}}
+QLineEdit, QTextEdit, QPlainTextEdit, QSpinBox, QComboBox {{
+    background-color: {bg_input};
+    color: {text};
+    border: 1px solid {border};
+    border-radius: 6px;
+    padding: 4px 8px;
+    selection-background-color: {accent_soft};
+}}
+QComboBox QAbstractItemView {{
+    background-color: {bg_card};
+    color: {text};
+    selection-background-color: {accent_soft};
+}}
+QTabWidget::pane {{
+    border: 1px solid {border};
+    border-radius: 6px;
+    background-color: {bg};
+}}
+QTabBar::tab {{
+    background-color: {bg_card};
+    color: {text_dim};
+    border: 1px solid {border};
+    border-bottom: none;
+    border-top-left-radius: 6px;
+    border-top-right-radius: 6px;
+    padding: 8px 16px;
+}}
+QTabBar::tab:selected {{
+    color: {text};
+    border-color: {accent};
+    background-color: {bg};
+}}
+QToolTip {{
+    background-color: {bg_card};
+    color: {text};
+    border: 1px solid {border};
+}}
+QMenu {{
+    background-color: {bg_card};
+    color: {text};
+    border: 1px solid {border};
+}}
+QMenu::item:selected {{
+    background-color: {accent_soft};
+}}
+QProgressBar {{
+    background-color: {bg_card};
+    border: 1px solid {border};
+    border-radius: 4px;
+    text-align: center;
+}}
+QProgressBar::chunk {{
+    background-color: {accent};
+    border-radius: 3px;
+}}
+"""
+
+FLUENT_BASE_LIGHT = _fluent_base(
+    bg="#f3f3f3", bg_card="#ffffff", bg_input="#ffffff",
+    text="#1b1b1b", text_dim="#616161", border="#e0e0e0",
+    accent="#0b7a34", accent_soft="#d3e9dc", header_bg="#ececec",
+)
+
+FLUENT_BASE_DARK = _fluent_base(
+    bg="#202020", bg_card="#2b2b2b", bg_input="#2b2b2b",
+    text="#ffffff", text_dim="#a0a0a0", border="#3a3a3a",
+    accent="#4ade80", accent_soft="#1d3a28", header_bg="#2d2d2d",
+)

@@ -1,12 +1,14 @@
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
-    QTableWidget, QTableWidgetItem, QComboBox, QMessageBox
+    QTableWidget, QTableWidgetItem, QComboBox
 )
 from PySide6.QtCore import Qt, Signal
-from database import get_db_connection
+from database import db
+from ui_base import BaseScreen
+from ui_compat import FComboBox, FPushButton, clear_in_fluent, confirm, notify
 
 
-class HistoryScreen(QWidget):
+class HistoryScreen(BaseScreen):
     """Экран истории изменений."""
     
     history_closed = Signal()
@@ -34,7 +36,7 @@ class HistoryScreen(QWidget):
         filter_layout = QHBoxLayout()
         filter_layout.addWidget(QLabel("Тип события:"))
         
-        self.event_filter = QComboBox()
+        self.event_filter = FComboBox()
         self.event_filter.addItem("Все события", None)
         self.event_filter.addItem("Изменение статуса", "status_changed")
         self.event_filter.addItem("Изменение комментария", "comment_changed")
@@ -67,14 +69,15 @@ class HistoryScreen(QWidget):
             }
         """)
         layout.addWidget(self.history_table)
+        clear_in_fluent(self.history_table)
         
         # Кнопки
         buttons_layout = QHBoxLayout()
         
-        btn_refresh = QPushButton("Обновить")
+        btn_refresh = FPushButton("Обновить")
         btn_refresh.clicked.connect(self.load_history)
         
-        btn_back = QPushButton("Назад к проекту")
+        btn_back = FPushButton("Назад к проекту")
         btn_back.setObjectName("danger")
         btn_back.clicked.connect(self.on_back)
         
@@ -90,35 +93,34 @@ class HistoryScreen(QWidget):
         event_type = self.event_filter.currentData()
         
         try:
-            conn = get_db_connection(self.project_path)
-            cursor = conn.cursor()
-            
-            query = """
-                SELECT 
-                    h.history_id,
-                    h.event_type,
-                    h.field_name,
-                    h.old_value,
-                    h.new_value,
-                    h.created_at,
-                    c.case_id,
-                    f.file_name
-                FROM history h
-                JOIN cases c ON h.case_id = c.case_id
-                JOIN files f ON c.file_id = f.file_id
-            """
-            
-            params = []
-            if event_type:
-                query += " WHERE h.event_type = ?"
-                params.append(event_type)
-            
-            query += " ORDER BY h.created_at DESC LIMIT 500"
-            
-            cursor.execute(query, params)
-            events = cursor.fetchall()
-            conn.close()
-            
+            with db(self.project_path) as conn:
+                cursor = conn.cursor()
+
+                query = """
+                    SELECT
+                        h.history_id,
+                        h.event_type,
+                        h.field_name,
+                        h.old_value,
+                        h.new_value,
+                        h.created_at,
+                        c.case_id,
+                        f.file_name
+                    FROM history h
+                    LEFT JOIN cases c ON h.case_id = c.case_id
+                    LEFT JOIN files f ON c.file_id = f.file_id
+                """
+
+                params = []
+                if event_type:
+                    query += " WHERE h.event_type = ?"
+                    params.append(event_type)
+
+                query += " ORDER BY h.created_at DESC LIMIT 500"
+
+                cursor.execute(query, params)
+                events = cursor.fetchall()
+
             self.history_table.clear()
             self.history_table.setColumnCount(7)
             self.history_table.setRowCount(len(events))
@@ -134,9 +136,10 @@ class HistoryScreen(QWidget):
             }
             
             for row, event in enumerate(events):
-                self.history_table.setItem(row, 0, QTableWidgetItem(event['created_at'][:19]))
-                self.history_table.setItem(row, 1, QTableWidgetItem(str(event['case_id'])))
-                self.history_table.setItem(row, 2, QTableWidgetItem(event['file_name']))
+                created = (event['created_at'] or '')[:19]
+                self.history_table.setItem(row, 0, QTableWidgetItem(created))
+                self.history_table.setItem(row, 1, QTableWidgetItem(str(event['case_id'] or '')))
+                self.history_table.setItem(row, 2, QTableWidgetItem(event['file_name'] or '(удалён)'))
                 self.history_table.setItem(row, 3, QTableWidgetItem(event_names.get(event['event_type'], event['event_type'])))
                 self.history_table.setItem(row, 4, QTableWidgetItem(event['field_name'] or ''))
                 self.history_table.setItem(row, 5, QTableWidgetItem(event['old_value'] or ''))
@@ -145,8 +148,11 @@ class HistoryScreen(QWidget):
             self.history_table.resizeColumnsToContents()
             
         except Exception as e:
-            QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить историю: {str(e)}")
-    
+            notify(self, "error", "Ошибка", f"Не удалось загрузить историю: {str(e)}")
+
+    def refresh(self):
+        self.load_history()
+
     def on_back(self):
         """Возврат к проекту."""
         self.history_closed.emit()

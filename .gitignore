@@ -6,7 +6,7 @@ env/
 # Сборка PyInstaller — САМОЕ ВАЖНОЕ
 dist/
 build/
-*.spec
+*.spec.py
 
 # Python кэш
 __pycache__/
@@ -36,3 +36,18 @@ desktop.ini
 
 # Тестовые данные
 TestData/
+
+# Отчёты/артефакты в корне
+*.xlsx
+report_*.xlsx
+
+# Тесты/линт/покрытие
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+htmlcov/
+.coverage
+.coverage.*
+
+# Env
+.env

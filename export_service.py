@@ -1,201 +1,193 @@
-import json
-from datetime import datetime
+"""Экспорт в xlsx: защита от formula injection, чанки IN(), потоковая запись, атомарность."""
+import logging
+import os
+import tempfile
 from pathlib import Path
-from database import get_db_connection
+
+from constants import MAX_EXPORT_IN_CHUNK, STATUS_NAMES
+from database import db
+
+logger = logging.getLogger(__name__)
 
 
-def export_results_to_xlsx(project_path: str, output_path: str, file_id=None):
-    """
-    Экспортирует результаты разметки в Excel.
-    Если указан file_id — только кейсы этого файла.
-    """
-    import openpyxl
-    from openpyxl.styles import Font, PatternFill, Alignment
+def safe_cell(v) -> str:
+    """Защита от Excel formula injection: '=+-@' и управляющие в начале."""
+    s = "" if v is None else str(v)
+    if s and s[0] in ("=", "+", "-", "@", "\t", "\r"):
+        return "'" + s
+    return s
 
-    conn = get_db_connection(project_path)
-    cursor = conn.cursor()
 
-    file_condition = ""
-    params = []
-    if file_id:
-        file_condition = " WHERE c.file_id = ?"
-        params.append(file_id)
+def _resolve_output(output_path: str) -> Path:
+    p = Path(output_path)
+    if not p.parent.exists():
+        raise FileNotFoundError(f"Папка не найдена: {p.parent}")
+    if p.suffix.lower() != ".xlsx":
+        raise ValueError("Файл экспорта должен иметь расширение .xlsx")
+    return p
 
-    cursor.execute(f"""
-        SELECT
-            c.case_id,
-            c.row_index,
-            c.source_id,
-            c.primary_text,
-            c.response_text,
-            c.group_name,
-            c.comment_from_source,
-            c.raw_json,
-            f.file_name,
-            COALESCE(a.status, 'unreviewed') as status,
-            a.comment as review_comment,
-            a.updated_at as reviewed_at
-        FROM cases c
-        JOIN files f ON c.file_id = f.file_id
-        LEFT JOIN annotations a ON c.case_id = a.case_id
-        {file_condition}
-        ORDER BY f.imported_at, c.row_index
-    """, params)
-    rows = cursor.fetchall()
 
-    # Загружаем теги
-    case_ids = [row['case_id'] for row in rows]
-    tags_map = {}
-    if case_ids:
-        placeholders = ','.join(['?' for _ in case_ids])
+def _atomic_save(wb, output_path: Path) -> None:
+    tmp_fd, tmp_name = tempfile.mkstemp(suffix=".xlsx", dir=str(output_path.parent))
+    os.close(tmp_fd)
+    try:
+        wb.save(tmp_name)
+        os.replace(tmp_name, output_path)
+    finally:
+        try:
+            if os.path.exists(tmp_name):
+                os.remove(tmp_name)
+        except OSError:
+            pass
+
+
+def _tags_chunked(cursor, case_ids: list) -> dict:
+    tags_map: dict = {}
+    for i in range(0, len(case_ids), MAX_EXPORT_IN_CHUNK):
+        chunk = case_ids[i:i + MAX_EXPORT_IN_CHUNK]
+        placeholders = ",".join(["?"] * len(chunk))
         cursor.execute(f"""
             SELECT ct.case_id, t.tag_name
             FROM case_tags ct
             JOIN tags t ON ct.tag_id = t.tag_id
             WHERE ct.case_id IN ({placeholders})
-        """, case_ids)
+        """, chunk)
         for row in cursor.fetchall():
-            case_id = row['case_id']
-            if case_id not in tags_map:
-                tags_map[case_id] = []
-            tags_map[case_id].append(row['tag_name'])
+            tags_map.setdefault(row["case_id"], []).append(row["tag_name"])
+    return tags_map
 
-    conn.close()
 
-    # Создаём книгу Excel
-    wb = openpyxl.Workbook()
+def export_results_to_xlsx(project_path: str, output_path: str, file_id=None):
+    import openpyxl
+    from openpyxl.styles import Alignment, Font, PatternFill
+    from openpyxl.utils import get_column_letter
+
+    out = _resolve_output(output_path)
+
+    with db(project_path) as conn:
+        cursor = conn.cursor()
+        file_condition = ""
+        params: list = []
+        if file_id:
+            file_condition = " WHERE c.file_id = ?"
+            params.append(file_id)
+        cursor.execute(f"""
+            SELECT
+                c.case_id, c.row_index, c.primary_text, c.response_text,
+                c.group_name, f.file_name,
+                COALESCE(a.status, 'unreviewed') as status,
+                a.comment as review_comment, a.updated_at as reviewed_at
+            FROM cases c
+            JOIN files f ON c.file_id = f.file_id
+            LEFT JOIN annotations a ON c.case_id = a.case_id
+            {file_condition}
+            ORDER BY f.imported_at, c.row_index
+        """, params)
+        rows = cursor.fetchall()
+        case_ids = [r["case_id"] for r in rows]
+        tags_map = _tags_chunked(cursor, case_ids) if case_ids else {}
+
+    wb = openpyxl.Workbook(write_only=False)
     ws = wb.active
     ws.title = "Результаты разметки"
-
-    headers = [
-        "№", "Файл", "Строка", "Запрос", "Ответ", "Группа",
-        "Статус", "Теги", "Комментарий", "Дата проверки"
-    ]
-
+    headers = ["№", "Файл", "Строка", "Запрос", "Ответ", "Группа",
+               "Статус", "Теги", "Комментарий", "Дата проверки"]
     header_font = Font(bold=True, color="00FF41")
-    header_fill = PatternFill(
-        start_color="003300", end_color="003300", fill_type="solid"
-    )
-
+    header_fill = PatternFill(start_color="003300", end_color="003300", fill_type="solid")
     for col, header in enumerate(headers, 1):
         cell = ws.cell(row=1, column=col, value=header)
         cell.font = header_font
         cell.fill = header_fill
-        cell.alignment = Alignment(horizontal='center')
-
-    status_names = {
-        'unreviewed': 'Не проверено',
-        'good': 'Хорошо',
-        'bad': 'Плохо',
-        'uncertain': 'Сомневаюсь',
-        'duplicate': 'Дубль',
-        'skip': 'Пропустить',
-    }
+        cell.alignment = Alignment(horizontal="center")
 
     for row_idx, row in enumerate(rows, 2):
-        tags = tags_map.get(row['case_id'], [])
+        tags = tags_map.get(row["case_id"], [])
         ws.cell(row=row_idx, column=1, value=row_idx - 1)
-        ws.cell(row=row_idx, column=2, value=row['file_name'])
-        ws.cell(row=row_idx, column=3, value=row['row_index'] + 1)
-        ws.cell(row=row_idx, column=4, value=row['primary_text'] or '')
-        ws.cell(row=row_idx, column=5, value=row['response_text'] or '')
-        ws.cell(row=row_idx, column=6, value=row['group_name'] or '')
-        ws.cell(
-            row=row_idx, column=7,
-            value=status_names.get(row['status'], row['status'])
-        )
-        ws.cell(row=row_idx, column=8, value=', '.join(tags))
-        ws.cell(row=row_idx, column=9, value=row['review_comment'] or '')
-        ws.cell(row=row_idx, column=10, value=row['reviewed_at'] or '')
+        ws.cell(row=row_idx, column=2, value=safe_cell(row["file_name"]))
+        ws.cell(row=row_idx, column=3, value=row["row_index"] + 1)
+        ws.cell(row=row_idx, column=4, value=safe_cell(row["primary_text"] or ""))
+        ws.cell(row=row_idx, column=5, value=safe_cell(row["response_text"] or ""))
+        ws.cell(row=row_idx, column=6, value=safe_cell(row["group_name"] or ""))
+        ws.cell(row=row_idx, column=7, value=STATUS_NAMES.get(row["status"], row["status"]))
+        ws.cell(row=row_idx, column=8, value=safe_cell(", ".join(tags)))
+        ws.cell(row=row_idx, column=9, value=safe_cell(row["review_comment"] or ""))
+        ws.cell(row=row_idx, column=10, value=row["reviewed_at"] or "")
 
-    # Ширина колонок
-    column_widths = [5, 20, 8, 50, 50, 15, 12, 25, 30, 20]
-    for i, width in enumerate(column_widths, 1):
-        col_letter = chr(64 + i) if i <= 26 else 'A' + chr(64 + i - 26)
-        ws.column_dimensions[col_letter].width = width
+    for i, width in enumerate([5, 20, 8, 50, 50, 15, 12, 25, 30, 20], 1):
+        ws.column_dimensions[get_column_letter(i)].width = width
 
-    wb.save(output_path)
+    _atomic_save(wb, out)
+    logger.info("exported %s rows -> %s", len(rows), out)
     return len(rows)
 
 
 def export_report_to_xlsx(project_path: str, output_path: str, file_id=None):
-    """
-    Экспортирует отчёт в Excel.
-    Если указан file_id — отчёт только по этому файлу.
-    """
     import openpyxl
     from openpyxl.styles import Font
     from report_service import (
-        get_overall_report, get_files_report, get_tags_report, get_checks_report
+        get_checks_report, get_files_report, get_overall_report, get_tags_report,
     )
 
+    out = _resolve_output(output_path)
     wb = openpyxl.Workbook()
 
-    # Лист 1: Общий отчёт
     ws1 = wb.active
     ws1.title = "Общий отчёт"
     overall = get_overall_report(project_path, file_id)
-
-    overall_data = [
-        ("Всего кейсов", overall['total']),
-        ("Проверено", overall['reviewed']),
-        ("Не проверено", overall['unreviewed']),
-        ("Хорошо", overall['good']),
-        ("Плохо", overall['bad']),
-        ("Сомневаюсь", overall['uncertain']),
-        ("Дубль", overall['duplicate']),
-        ("Пропущено", overall['skip']),
-    ]
-
     ws1.cell(row=1, column=1, value="Показатель").font = Font(bold=True)
     ws1.cell(row=1, column=2, value="Значение").font = Font(bold=True)
-    for i, (name, value) in enumerate(overall_data, 2):
+    for i, (name, value) in enumerate([
+        ("Всего кейсов", overall["total"]),
+        ("Проверено", overall["reviewed"]),
+        ("Не проверено", overall["unreviewed"]),
+        ("Хорошо", overall["good"]),
+        ("Плохо", overall["bad"]),
+        ("Сомневаюсь", overall["uncertain"]),
+        ("Дубль", overall["duplicate"]),
+        ("Пропущено", overall["skip"]),
+    ], 2):
         ws1.cell(row=i, column=1, value=name)
         ws1.cell(row=i, column=2, value=value)
-    ws1.column_dimensions['A'].width = 20
-    ws1.column_dimensions['B'].width = 15
+    ws1.column_dimensions["A"].width = 20
+    ws1.column_dimensions["B"].width = 15
 
-    # Лист 2: По файлам
     ws2 = wb.create_sheet("По файлам")
     files = get_files_report(project_path)
-    file_headers = ["Файл", "Всего", "Проверено", "Дата импорта"]
-    for col, header in enumerate(file_headers, 1):
+    if file_id:
+        files = [f for f in files if f["file_id"] == file_id]
+    for col, header in enumerate(["Файл", "Всего", "Проверено", "Дата импорта"], 1):
         ws2.cell(row=1, column=col, value=header).font = Font(bold=True)
     for i, f in enumerate(files, 2):
-        ws2.cell(row=i, column=1, value=f['file_name'])
-        ws2.cell(row=i, column=2, value=f['cases_count'])
-        ws2.cell(row=i, column=3, value=f['reviewed_count'])
-        ws2.cell(row=i, column=4, value=f['imported_at'])
-    ws2.column_dimensions['A'].width = 30
-    ws2.column_dimensions['B'].width = 12
-    ws2.column_dimensions['C'].width = 12
-    ws2.column_dimensions['D'].width = 20
+        ws2.cell(row=i, column=1, value=safe_cell(f["file_name"]))
+        ws2.cell(row=i, column=2, value=f["cases_count"])
+        ws2.cell(row=i, column=3, value=f["reviewed_count"])
+        ws2.cell(row=i, column=4, value=f["imported_at"])
+    ws2.column_dimensions["A"].width = 30
+    ws2.column_dimensions["B"].width = 12
+    ws2.column_dimensions["C"].width = 12
+    ws2.column_dimensions["D"].width = 20
 
-    # Лист 3: По тегам
     ws3 = wb.create_sheet("По тегам")
     tags = get_tags_report(project_path, file_id)
-    tag_headers = ["Тег", "Кейсов", "Системный"]
-    for col, header in enumerate(tag_headers, 1):
+    for col, header in enumerate(["Тег", "Кейсов", "Системный"], 1):
         ws3.cell(row=1, column=col, value=header).font = Font(bold=True)
     for i, tag in enumerate(tags, 2):
-        ws3.cell(row=i, column=1, value=tag['tag_name'])
-        ws3.cell(row=i, column=2, value=tag['cases_count'])
-        ws3.cell(row=i, column=3, value="Да" if tag['is_system'] else "Нет")
-    ws3.column_dimensions['A'].width = 25
-    ws3.column_dimensions['B'].width = 12
-    ws3.column_dimensions['C'].width = 12
+        ws3.cell(row=i, column=1, value=safe_cell(tag["tag_name"]))
+        ws3.cell(row=i, column=2, value=tag["cases_count"])
+        ws3.cell(row=i, column=3, value="Да" if tag["is_system"] else "Нет")
+    ws3.column_dimensions["A"].width = 25
+    ws3.column_dimensions["B"].width = 12
+    ws3.column_dimensions["C"].width = 12
 
-    # Лист 4: Автопроверки
     ws4 = wb.create_sheet("Автопроверки")
     checks = get_checks_report(project_path, file_id)
-    check_headers = ["Проверка", "Срабатываний"]
-    for col, header in enumerate(check_headers, 1):
+    for col, header in enumerate(["Проверка", "Срабатываний"], 1):
         ws4.cell(row=1, column=col, value=header).font = Font(bold=True)
     for i, check in enumerate(checks, 2):
-        ws4.cell(row=i, column=1, value=check['check_name'])
-        ws4.cell(row=i, column=2, value=check['count'])
-    ws4.column_dimensions['A'].width = 30
-    ws4.column_dimensions['B'].width = 15
+        ws4.cell(row=i, column=1, value=safe_cell(check["check_name"]))
+        ws4.cell(row=i, column=2, value=check["count"])
+    ws4.column_dimensions["A"].width = 30
+    ws4.column_dimensions["B"].width = 15
 
-    wb.save(output_path)
+    _atomic_save(wb, out)
     return True

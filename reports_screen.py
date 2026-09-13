@@ -1,21 +1,34 @@
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
-    QFileDialog, QMessageBox, QTableWidget, QTableWidgetItem,
+    QFileDialog, QTableWidget, QTableWidgetItem,
     QTabWidget, QGroupBox, QScrollArea, QSizePolicy
 )
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QPixmap
-from database import get_db_connection
 from report_service import get_overall_report, get_files_report, get_tags_report, get_checks_report
 from export_service import export_results_to_xlsx, export_report_to_xlsx
 from datetime import datetime
+from ui_base import BaseScreen
+from ui_compat import FPrimaryButton, FPushButton, FTable, clear_in_fluent, effective_theme, notify
+from workers import run_in_background
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from io import BytesIO
 
 
-class ReportsScreen(QWidget):
+def _chart_palette() -> dict:
+    """Цвета графиков под текущую тему (иначе тёмные графики на светлом фоне)."""
+    if effective_theme() == "dark":
+        return {"style": "dark_background", "bg": "#0A0F0A", "fg": "#e8e8e8",
+                "spine": "#3a3a3a", "bar_total": "#1d5c33", "bar_done": "#00CC66",
+                "pct_stroke": "#000000"}
+    return {"style": "default", "bg": "#ffffff", "fg": "#1b1b1b",
+            "spine": "#cccccc", "bar_total": "#bcd8c6", "bar_done": "#0b7a34",
+            "pct_stroke": "#ffffff"}
+
+
+class ReportsScreen(BaseScreen):
     """Экран отчётов."""
     reports_closed = Signal()
 
@@ -79,20 +92,21 @@ class ReportsScreen(QWidget):
         self.tabs.addTab(self.checks_tab, "⚠️ Автопроверки")
 
         layout.addWidget(self.tabs)
+        clear_in_fluent(self.tabs)
 
         # Кнопки
         buttons_layout = QHBoxLayout()
         buttons_layout.setSpacing(15)
 
-        btn_export_results = QPushButton("📥 Экспорт результатов (xlsx)")
+        btn_export_results = FPushButton("📥 Экспорт результатов (xlsx)")
         btn_export_results.setMinimumHeight(45)
         btn_export_results.clicked.connect(self.on_export_results)
 
-        btn_export_report = QPushButton("📊 Экспорт отчёта (xlsx)")
+        btn_export_report = FPushButton("📊 Экспорт отчёта (xlsx)")
         btn_export_report.setMinimumHeight(45)
         btn_export_report.clicked.connect(self.on_export_report)
 
-        btn_back = QPushButton("🚪 Назад к проекту")
+        btn_back = FPushButton("🚪 Назад к проекту")
         btn_back.setObjectName("danger")
         btn_back.setMinimumHeight(45)
         btn_back.clicked.connect(self.on_back)
@@ -108,7 +122,7 @@ class ReportsScreen(QWidget):
     def create_overall_tab(self):
         widget = QWidget()
         layout = QVBoxLayout()
-        self.overall_table = QTableWidget()
+        self.overall_table = FTable()
         self.overall_table.setStyleSheet("""
             QTableWidget {
                 background-color: #001A0A;
@@ -127,6 +141,7 @@ class ReportsScreen(QWidget):
             }
         """)
         layout.addWidget(self.overall_table)
+        clear_in_fluent(self.overall_table)
         widget.setLayout(layout)
         return widget
 
@@ -135,7 +150,7 @@ class ReportsScreen(QWidget):
         layout = QVBoxLayout()
         layout.setSpacing(15)
 
-        btn_refresh = QPushButton("🔄 Обновить графики")
+        btn_refresh = FPushButton("🔄 Обновить графики")
         btn_refresh.setMinimumHeight(35)
         btn_refresh.setStyleSheet("""
             QPushButton { border-color: #00AAFF; color: #00AAFF; }
@@ -161,7 +176,7 @@ class ReportsScreen(QWidget):
     def create_files_tab(self):
         widget = QWidget()
         layout = QVBoxLayout()
-        self.files_table = QTableWidget()
+        self.files_table = FTable()
         self.files_table.setStyleSheet("""
             QTableWidget {
                 background-color: #001A0A;
@@ -180,13 +195,14 @@ class ReportsScreen(QWidget):
             }
         """)
         layout.addWidget(self.files_table)
+        clear_in_fluent(self.files_table)
         widget.setLayout(layout)
         return widget
 
     def create_tags_tab(self):
         widget = QWidget()
         layout = QVBoxLayout()
-        self.tags_table = QTableWidget()
+        self.tags_table = FTable()
         self.tags_table.setStyleSheet("""
             QTableWidget {
                 background-color: #001A0A;
@@ -205,13 +221,14 @@ class ReportsScreen(QWidget):
             }
         """)
         layout.addWidget(self.tags_table)
+        clear_in_fluent(self.tags_table)
         widget.setLayout(layout)
         return widget
 
     def create_checks_tab(self):
         widget = QWidget()
         layout = QVBoxLayout()
-        self.checks_table = QTableWidget()
+        self.checks_table = FTable()
         self.checks_table.setStyleSheet("""
             QTableWidget {
                 background-color: #001A0A;
@@ -230,15 +247,22 @@ class ReportsScreen(QWidget):
             }
         """)
         layout.addWidget(self.checks_table)
+        clear_in_fluent(self.checks_table)
         widget.setLayout(layout)
         return widget
 
     def load_reports(self):
-        self.load_overall_report()
-        self.load_files_report()
-        self.load_tags_report()
-        self.load_checks_report()
-        self.refresh_charts()
+        try:
+            self.load_overall_report()
+            self.load_files_report()
+            self.load_tags_report()
+            self.load_checks_report()
+            self.refresh_charts()
+        except Exception as e:
+            self.show_error("Не удалось загрузить отчёты", e)
+
+    def refresh(self):
+        self.load_reports()
 
     def load_overall_report(self):
         report = get_overall_report(self.project_path)
@@ -246,15 +270,16 @@ class ReportsScreen(QWidget):
         self.overall_table.setColumnCount(2)
         self.overall_table.setRowCount(8)
         self.overall_table.setHorizontalHeaderLabels(["Показатель", "Значение"])
+        self.overall_table.setSortingEnabled(False)
         data = [
-            ("Всего кейсов", report['total']),
-            ("Проверено", report['reviewed']),
-            ("Не проверено", report['unreviewed']),
-            ("Хорошо", report['good']),
-            ("Плохо", report['bad']),
-            ("Сомневаюсь", report['uncertain']),
-            ("Дубль", report['duplicate']),
-            ("Пропущено", report['skip']),
+            ("Всего кейсов", report.get('total', 0)),
+            ("Проверено", report.get('reviewed', 0)),
+            ("Не проверено", report.get('unreviewed', 0)),
+            ("Хорошо", report.get('good', 0)),
+            ("Плохо", report.get('bad', 0)),
+            ("Сомневаюсь", report.get('uncertain', 0)),
+            ("Дубль", report.get('duplicate', 0)),
+            ("Пропущено", report.get('skip', 0)),
         ]
         for row, (name, value) in enumerate(data):
             self.overall_table.setItem(row, 0, QTableWidgetItem(name))
@@ -269,11 +294,12 @@ class ReportsScreen(QWidget):
         self.files_table.setHorizontalHeaderLabels([
             "Файл", "Всего кейсов", "Проверено", "Дата импорта"
         ])
+        self.files_table.setSortingEnabled(True)
         for row, file in enumerate(files):
             self.files_table.setItem(row, 0, QTableWidgetItem(file['file_name']))
             self.files_table.setItem(row, 1, QTableWidgetItem(str(file['cases_count'])))
             self.files_table.setItem(row, 2, QTableWidgetItem(str(file['reviewed_count'])))
-            self.files_table.setItem(row, 3, QTableWidgetItem(file['imported_at'][:19]))
+            self.files_table.setItem(row, 3, QTableWidgetItem((file['imported_at'] or '')[:19]))
         self.files_table.resizeColumnsToContents()
 
     def load_tags_report(self):
@@ -327,6 +353,7 @@ class ReportsScreen(QWidget):
 
     def _create_pie_chart(self, report):
         """Круговая диаграмма распределения статусов с легендой."""
+        pal = _chart_palette()
         labels = []
         sizes = []
         colors = []
@@ -353,20 +380,24 @@ class ReportsScreen(QWidget):
             self.charts_layout.addWidget(lbl)
             return
 
-        plt.style.use('dark_background')
+        plt.style.use(pal["style"])
         fig, ax = plt.subplots(figsize=(10, 6), dpi=100)
-        fig.patch.set_facecolor('#0A0F0A')
-        ax.set_facecolor('#0A0F0A')
+        fig.patch.set_facecolor(pal["bg"])
+        ax.set_facecolor(pal["bg"])
 
-        # Круговая диаграмма БЕЗ подписей на секторах
+        # Круговая диаграмма БЕЗ подписей на секторах.
+        # Проценты — цветом темы с обводкой: читаются на любом секторе в обеих темах.
+        import matplotlib.patheffects as _pe
         wedges, texts, autotexts = ax.pie(
             sizes,
             colors=colors,
             autopct='%1.1f%%',
             startangle=90,
             pctdistance=0.75,
-            textprops={'color': 'white', 'fontsize': 11, 'fontweight': 'bold'}
+            textprops={'color': pal["fg"], 'fontsize': 11, 'fontweight': 'bold'},
         )
+        for t in autotexts:
+            t.set_path_effects([_pe.withStroke(linewidth=3, foreground=pal["pct_stroke"])])
 
         # Убираем подписи на секторах, оставляем только проценты
         for text in texts:
@@ -380,12 +411,12 @@ class ReportsScreen(QWidget):
             bbox_to_anchor=(1.05, 0.5),
             fontsize=11,
             title_fontsize=12,
-            facecolor='#0A0F0A',
-            edgecolor='#00FF41',
-            labelcolor='#00FF41'
+            facecolor=pal["bg"],
+            edgecolor=pal["fg"],
+            labelcolor=pal["fg"]
         )
 
-        ax.set_title('Распределение статусов', color='#00FF41', fontsize=14, pad=15)
+        ax.set_title('Распределение статусов', color=pal["fg"], fontsize=14, pad=15)
 
         fig.tight_layout()
 
@@ -408,32 +439,33 @@ class ReportsScreen(QWidget):
 
     def _create_files_bar_chart(self, files):
         """Столбчатая диаграмма по файлам."""
+        pal = _chart_palette()
         names = [f['file_name'][:20] for f in files]
         totals = [f['cases_count'] for f in files]
         reviewed = [f['reviewed_count'] for f in files]
 
-        plt.style.use('dark_background')
+        plt.style.use(pal["style"])
         fig, ax = plt.subplots(figsize=(10, 6), dpi=100)
-        fig.patch.set_facecolor('#0A0F0A')
-        ax.set_facecolor('#0A0F0A')
+        fig.patch.set_facecolor(pal["bg"])
+        ax.set_facecolor(pal["bg"])
 
         x = range(len(names))
         width = 0.35
 
         ax.bar([i - width/2 for i in x], totals, width,
-               label='Всего', color='#00441A', edgecolor='#00FF41')
+               label='Всего', color=pal["bar_total"], edgecolor=pal["spine"])
         ax.bar([i + width/2 for i in x], reviewed, width,
-               label='Проверено', color='#00AA2A', edgecolor='#00FF41')
+               label='Проверено', color=pal["bar_done"], edgecolor=pal["spine"])
 
-        ax.set_ylabel('Кейсы', color='#00FF41', fontsize=12)
-        ax.set_title('Прогресс по файлам', color='#00FF41', fontsize=14, pad=15)
+        ax.set_ylabel('Кейсы', color=pal["fg"], fontsize=12)
+        ax.set_title('Прогресс по файлам', color=pal["fg"], fontsize=14, pad=15)
         ax.set_xticks(list(x))
-        ax.set_xticklabels(names, rotation=45, ha='right', color='#00FF41', fontsize=10)
-        ax.tick_params(colors='#00FF41', labelsize=10)
-        ax.legend(facecolor='#0A0F0A', edgecolor='#00FF41', labelcolor='#00FF41', fontsize=11)
+        ax.set_xticklabels(names, rotation=45, ha='right', color=pal["fg"], fontsize=10)
+        ax.tick_params(colors=pal["fg"], labelsize=10)
+        ax.legend(facecolor=pal["bg"], edgecolor=pal["fg"], labelcolor=pal["fg"], fontsize=11)
 
         for spine in ax.spines.values():
-            spine.set_color('#00441A')
+            spine.set_color(pal["spine"])
 
         fig.tight_layout()
 
@@ -456,25 +488,26 @@ class ReportsScreen(QWidget):
 
     def _create_tags_bar_chart(self, tags):
         """Горизонтальная диаграмма тегов."""
+        pal = _chart_palette()
         names = [t['tag_name'] for t in tags]
         counts = [t['cases_count'] for t in tags]
 
-        plt.style.use('dark_background')
+        plt.style.use(pal["style"])
         fig, ax = plt.subplots(figsize=(10, max(4, len(tags) * 0.5)), dpi=100)
-        fig.patch.set_facecolor('#0A0F0A')
-        ax.set_facecolor('#0A0F0A')
+        fig.patch.set_facecolor(pal["bg"])
+        ax.set_facecolor(pal["bg"])
 
         y_pos = range(len(names))
-        ax.barh(y_pos, counts, color='#00AA2A', edgecolor='#00FF41', height=0.6)
+        ax.barh(y_pos, counts, color=pal["bar_done"], edgecolor=pal["spine"], height=0.6)
         ax.set_yticks(y_pos)
-        ax.set_yticklabels(names, color='#00FF41', fontsize=11)
-        ax.set_xlabel('Количество кейсов', color='#00FF41', fontsize=12)
-        ax.set_title('Топ тегов', color='#00FF41', fontsize=14, pad=15)
-        ax.tick_params(colors='#00FF41', labelsize=10)
+        ax.set_yticklabels(names, color=pal["fg"], fontsize=11)
+        ax.set_xlabel('Количество кейсов', color=pal["fg"], fontsize=12)
+        ax.set_title('Топ тегов', color=pal["fg"], fontsize=14, pad=15)
+        ax.tick_params(colors=pal["fg"], labelsize=10)
         ax.invert_yaxis()
 
         for spine in ax.spines.values():
-            spine.set_color('#00441A')
+            spine.set_color(pal["spine"])
 
         fig.tight_layout()
 
@@ -505,15 +538,17 @@ class ReportsScreen(QWidget):
             "Excel файлы (*.xlsx)"
         )
         if file_path:
-            try:
-                count = export_results_to_xlsx(self.project_path, file_path)
-                QMessageBox.information(
-                    self,
-                    "Экспорт завершён",
-                    f"Экспортировано {count} кейсов в:\n{file_path}"
-                )
-            except Exception as e:
-                QMessageBox.critical(self, "Ошибка", f"Не удалось экспортировать: {str(e)}")
+            self.setEnabled(False)
+            run_in_background(
+                export_results_to_xlsx, self.project_path, file_path,
+                on_finished=lambda count: (
+                    self.setEnabled(True),
+                    notify(self, "success", "Экспорт завершён",
+                           f"Экспортировано {count} кейсов в:\n{file_path}")),
+                on_error=lambda msg: (
+                    self.setEnabled(True),
+                    notify(self, "error", "Ошибка", f"Не удалось экспортировать:\n{msg}")),
+            )
 
     def on_export_report(self):
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -525,15 +560,17 @@ class ReportsScreen(QWidget):
             "Excel файлы (*.xlsx)"
         )
         if file_path:
-            try:
-                export_report_to_xlsx(self.project_path, file_path)
-                QMessageBox.information(
-                    self,
-                    "Экспорт завершён",
-                    f"Отчёт сохранён в:\n{file_path}"
-                )
-            except Exception as e:
-                QMessageBox.critical(self, "Ошибка", f"Не удалось экспортировать: {str(e)}")
+            self.setEnabled(False)
+            run_in_background(
+                export_report_to_xlsx, self.project_path, file_path,
+                on_finished=lambda _r: (
+                    self.setEnabled(True),
+                    notify(self, "success", "Экспорт завершён",
+                           f"Отчёт сохранён в:\n{file_path}")),
+                on_error=lambda msg: (
+                    self.setEnabled(True),
+                    notify(self, "error", "Ошибка", f"Не удалось экспортировать:\n{msg}")),
+            )
 
     def on_back(self):
         self.reports_closed.emit()
