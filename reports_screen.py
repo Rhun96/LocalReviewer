@@ -1,7 +1,7 @@
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
-    QFileDialog, QTableWidget, QTableWidgetItem,
-    QTabWidget, QGroupBox, QScrollArea, QSizePolicy
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel,
+    QFileDialog, QTableWidgetItem,
+    QTabWidget, QScrollArea
 )
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QPixmap
@@ -9,7 +9,7 @@ from report_service import get_overall_report, get_files_report, get_tags_report
 from export_service import export_results_to_xlsx, export_report_to_xlsx
 from datetime import datetime
 from ui_base import BaseScreen
-from ui_compat import FPrimaryButton, FPushButton, FTable, clear_in_fluent, effective_theme, notify
+from ui_compat import FPushButton, FTable, clear_in_fluent, effective_theme, notify
 from workers import run_in_background
 import matplotlib
 matplotlib.use('Agg')

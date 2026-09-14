@@ -6,7 +6,8 @@ from database import db, utcnow
 def list_saved_filters(project_path: str) -> list:
     with db(project_path) as conn:
         cur = conn.cursor()
-        cur.execute("SELECT filter_id, name, filter_json, sort_order FROM saved_filters ORDER BY sort_order, name")
+        cur.execute("SELECT filter_id, name, filter_json, sort_order "
+                    "FROM saved_filters ORDER BY sort_order, name")
         return [{"filter_id": r["filter_id"], "name": r["name"],
                  "filters": json.loads(r["filter_json"]), "sort_order": r["sort_order"]}
                 for r in cur.fetchall()]

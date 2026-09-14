@@ -64,7 +64,8 @@ def filter_from(filters: dict):
     search_text = ((filters or {}).get("search_text") or "").strip()
     if search_text:
         esc = _escape_like(search_text)
-        conditions.append("(c.primary_text LIKE ? ESCAPE '\\' OR c.response_text LIKE ? ESCAPE '\\')")
+        conditions.append("(c.primary_text LIKE ? ESCAPE '\\' "
+                          "OR c.response_text LIKE ? ESCAPE '\\')")
         params.extend([f"%{esc}%", f"%{esc}%"])
 
     return extra_joins, conditions, params
@@ -84,7 +85,8 @@ def build_filter_query(filters: dict):
     return query, params
 
 
-def get_filtered_case_ids(project_path: str, filters: dict, limit: int = 0, offset: int = 0) -> list:
+def get_filtered_case_ids(project_path: str, filters: dict,
+                            limit: int = 0, offset: int = 0) -> list:
     """Ошибки БД пробрасываются (не маскируются под пустой результат)."""
     if not filters:
         return get_all_case_ids(project_path, limit=limit, offset=offset)

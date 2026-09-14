@@ -2,7 +2,6 @@
 import hashlib
 import json
 import logging
-from database import utcnow
 
 logger = logging.getLogger(__name__)
 

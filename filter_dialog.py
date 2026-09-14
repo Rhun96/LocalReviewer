@@ -6,20 +6,23 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt
 from constants import CHECK_OPTIONS, STATUS_OPTIONS
 from database import db
-from ui_compat import FCheckBox, FComboBox, FLineEdit, FPrimaryButton, FPushButton, clear_in_fluent, notify
+from ui_compat import (
+    FCheckBox, FComboBox, FLineEdit, FPrimaryButton, FPushButton,
+    clear_in_fluent, notify,
+)
 
 
 class FilterDialog(QDialog):
     """Диалог выбора фильтров."""
-    
+
     def __init__(self, project_path: str, parent=None):
         super().__init__(parent)
         self.project_path = project_path
-        
+
         self.setWindowTitle("Фильтры")
         self.setMinimumWidth(600)
         self.setMinimumHeight(500)
-        
+
         self.filters = {
             'statuses': [],
             'file_id': None,
@@ -28,24 +31,24 @@ class FilterDialog(QDialog):
             'search_text': '',
             'checks': [],
         }
-        
+
         self.status_checkboxes = {}
         self.tag_checkboxes = {}
         self.check_checkboxes = {}
-        
+
         self.init_ui()
-    
+
     def init_ui(self):
         # Основной лейаут диалога
         main_layout = QVBoxLayout()
         main_layout.setSpacing(10)
         main_layout.setContentsMargins(10, 10, 10, 10)
-        
+
         title = QLabel("🎛️ ФИЛЬТРЫ")
         title.setStyleSheet("font-size: 20px; font-weight: bold;")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         main_layout.addWidget(title)
-        
+
         # Прокручиваемая область для контента
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
@@ -55,7 +58,7 @@ class FilterDialog(QDialog):
                 background-color: #000000;
             }
         """)
-        
+
         content_widget = QWidget()
         layout = QVBoxLayout()
         layout.setSpacing(15)
@@ -84,100 +87,100 @@ class FilterDialog(QDialog):
         # Статусы
         status_group = QGroupBox("Статус")
         status_layout = QGridLayout()
-        
+
         for i, (code, name) in enumerate(STATUS_OPTIONS):
             cb = FCheckBox(name)
             self.status_checkboxes[code] = cb
             status_layout.addWidget(cb, i // 3, i % 3)
-        
+
         status_group.setLayout(status_layout)
         layout.addWidget(status_group)
-        
+
         # Файл
         file_group = QGroupBox("Файл")
         file_layout = QHBoxLayout()
-        
+
         self.file_combo = FComboBox()
         self.file_combo.addItem("Все файлы", None)
         self.load_files()
-        
+
         file_layout.addWidget(QLabel("Файл:"))
         file_layout.addWidget(self.file_combo)
         file_group.setLayout(file_layout)
         layout.addWidget(file_group)
-        
+
         # Комментарий
         comment_group = QGroupBox("Комментарий")
         comment_layout = QHBoxLayout()
-        
+
         self.comment_combo = FComboBox()
         self.comment_combo.addItem("Не важно", None)
         self.comment_combo.addItem("С комментарием", True)
         self.comment_combo.addItem("Без комментария", False)
-        
+
         comment_layout.addWidget(QLabel("Наличие комментария:"))
         comment_layout.addWidget(self.comment_combo)
         comment_group.setLayout(comment_layout)
         layout.addWidget(comment_group)
-        
+
         # Теги
         tags_group = QGroupBox("Теги")
         self.tags_layout = QGridLayout()
         self.load_tags()
         tags_group.setLayout(self.tags_layout)
         layout.addWidget(tags_group)
-        
+
         # Автопроверки
         checks_group = QGroupBox("Автопроверки")
         self.checks_layout = QGridLayout()
-        
+
         for i, (code, name) in enumerate(CHECK_OPTIONS):
             cb = FCheckBox(name)
             self.check_checkboxes[code] = cb
             self.checks_layout.addWidget(cb, i // 3, i % 3)
-        
+
         checks_group.setLayout(self.checks_layout)
         layout.addWidget(checks_group)
-        
+
         # Текстовый поиск
         search_group = QGroupBox("Поиск по тексту")
         search_layout = QHBoxLayout()
-        
+
         self.search_input = FLineEdit()
         self.search_input.setPlaceholderText("Введите текст для поиска...")
-        
+
         search_layout.addWidget(self.search_input)
         search_group.setLayout(search_layout)
         layout.addWidget(search_group)
-        
+
         content_widget.setLayout(layout)
         scroll.setWidget(content_widget)
         main_layout.addWidget(scroll)
         clear_in_fluent(scroll)
-        
+
         # Кнопки
         buttons_layout = QHBoxLayout()
-        
+
         btn_apply = FPrimaryButton("✅ Применить фильтры")
         btn_apply.setMinimumHeight(45)
         btn_apply.clicked.connect(self.on_apply)
-        
+
         btn_reset = FPushButton("🔄 Сбросить")
         btn_reset.setMinimumHeight(45)
         btn_reset.clicked.connect(self.on_reset)
-        
+
         btn_cancel = FPushButton("❌ Отмена")
         btn_cancel.setObjectName("danger")
         btn_cancel.setMinimumHeight(45)
         btn_cancel.clicked.connect(self.reject)
-        
+
         buttons_layout.addWidget(btn_apply)
         buttons_layout.addWidget(btn_reset)
         buttons_layout.addWidget(btn_cancel)
         main_layout.addLayout(buttons_layout)
-        
+
         self.setLayout(main_layout)
-    
+
     def load_files(self):
         try:
             with db(self.project_path) as conn:
@@ -196,7 +199,7 @@ class FilterDialog(QDialog):
                 cursor = conn.cursor()
                 cursor.execute("SELECT tag_id, tag_name FROM tags ORDER BY tag_name")
                 tags = cursor.fetchall()
-            
+
             row, col = 0, 0
             for tag in tags:
                 cb = FCheckBox(tag['tag_name'])
@@ -206,44 +209,44 @@ class FilterDialog(QDialog):
                 if col >= 3:
                     col = 0
                     row += 1
-        except:
+        except Exception:
             pass
-    
+
     def on_apply(self):
         self.filters['statuses'] = [
             code for code, cb in self.status_checkboxes.items() if cb.isChecked()
         ]
-        
+
         self.filters['file_id'] = self.file_combo.currentData()
         self.filters['has_comment'] = self.comment_combo.currentData()
-        
+
         self.filters['tags'] = [
             tag_id for tag_id, cb in self.tag_checkboxes.items() if cb.isChecked()
         ]
-        
+
         self.filters['checks'] = [
             code for code, cb in self.check_checkboxes.items() if cb.isChecked()
         ]
-        
+
         self.filters['search_text'] = self.search_input.text().strip()
-        
+
         self.accept()
-    
+
     def on_reset(self):
         for cb in self.status_checkboxes.values():
             cb.setChecked(False)
-        
+
         self.file_combo.setCurrentIndex(0)
         self.comment_combo.setCurrentIndex(0)
-        
+
         for cb in self.tag_checkboxes.values():
             cb.setChecked(False)
-        
+
         for cb in self.check_checkboxes.values():
             cb.setChecked(False)
-        
+
         self.search_input.clear()
-    
+
     def get_filters(self):
         import copy
         return copy.deepcopy(self.filters)
@@ -300,7 +303,7 @@ class FilterDialog(QDialog):
                 self.reload_saved_filters()
         except Exception as e:
             notify(self, "warning", "Ошибка", str(e))
-    
+
     def set_filters(self, filters):
         if not filters:
             self.on_reset()
@@ -324,11 +327,11 @@ class FilterDialog(QDialog):
                 if self.comment_combo.itemData(i) == has_comment:
                     self.comment_combo.setCurrentIndex(i)
                     break
-        
+
         for tag_id, cb in self.tag_checkboxes.items():
             cb.setChecked(tag_id in filters.get('tags', []))
-        
+
         for code, cb in self.check_checkboxes.items():
             cb.setChecked(code in filters.get('checks', []))
-        
+
         self.search_input.setText(filters.get('search_text', ''))

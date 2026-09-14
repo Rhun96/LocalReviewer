@@ -39,7 +39,7 @@ def apply_shadow(widget, color='#00FF41', blur=25, offset=4, alpha=50):
     try:
         r, g, b = int(color[1:3], 16), int(color[3:5], 16), int(color[5:7], 16)
     except ValueError:
-        raise ValueError(f"Bad color: {color!r}, expected '#RRGGBB'")
+        raise ValueError(f"Bad color: {color!r}, expected '#RRGGBB'") from None
     shadow = QGraphicsDropShadowEffect(widget)
     shadow.setBlurRadius(blur)
     shadow.setColor(QColor(r, g, b, alpha))
@@ -443,8 +443,8 @@ QMessageBox QLabel {{
 
 # Дополнительные стили для статусных кнопок с эмодзи
 STATUS_STYLES = {
-    'good': f"""
-QPushButton {{
+    'good': """
+QPushButton {
     background: qlineargradient(
         x1:0, y1:0, x2:0, y2:1,
         stop:0 #003300, stop:1 #002200
@@ -452,14 +452,14 @@ QPushButton {{
     border-color: #00FF00;
     color: #00FF00;
     font-size: 14px;
-}}
-QPushButton:hover {{
+}
+QPushButton:hover {
     background: qlineargradient(
         x1:0, y1:0, x2:0, y2:1,
         stop:0 #005500, stop:1 #003300
     );
     border-color: #66FF66;
-}}
+}
 """,
     'bad': f"""
 QPushButton {{

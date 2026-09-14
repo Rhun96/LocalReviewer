@@ -10,7 +10,7 @@ from database import init_database
 from styles import APP_STYLE
 from ui_compat import (
     FLUENT, FPrimaryButton, FPushButton, FSubtitleLabel, FTitleLabel,
-    apply_theme, confirm, get_theme_mode, notify,
+    apply_theme, get_theme_mode, notify,
 )
 
 
@@ -78,7 +78,8 @@ class StartScreen(QWidget):
         if folder:
             db_path = Path(folder) / "project.sqlite"
             if not db_path.exists():
-                notify(self, "warning", "Проект не найден", f"В папке {folder} не найдена база данных.")
+                notify(self, "warning", "Проект не найден",
+                       f"В папке {folder} не найдена база данных.")
                 return
             self.main_window.open_project(folder)
 

@@ -1,23 +1,28 @@
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QTextEdit, QScrollArea, QGroupBox, QFrame,
     QGridLayout, QSizePolicy, QMenu, QInputDialog, QStackedWidget,
-    QTableWidget, QTableWidgetItem, QComboBox, QDialog, QCheckBox,
-    QAbstractItemView,
+    QTableWidget, QTableWidgetItem, QComboBox, QDialog, QAbstractItemView,
 )
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QShortcut, QKeySequence
 from PySide6.QtWidgets import QApplication
 from constants import COLUMN_TO_SQL, STATUS_NAMES, TABLE_SYSTEM_COLUMNS
 from database import db
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from filter_dialog import FilterDialog
 from filter_service import get_filtered_case_ids, get_all_case_ids
 from autocheck_service import check_case, get_check_settings
-from templates_service import get_comment_templates, add_comment_template, delete_comment_template, get_user_templates
-from styles import STATUS_STYLES, apply_shadow
+from templates_service import (
+    add_comment_template, delete_comment_template, get_comment_templates,
+    get_user_templates,
+)
+from styles import STATUS_STYLES
 from ui_base import BaseScreen
-from ui_compat import FLUENT, FCheckBox, FComboBox, FPushButton, FTable, clear_in_fluent, confirm, notify
+from ui_compat import (
+    FLUENT, FCheckBox, FComboBox, FPushButton, FTable, clear_in_fluent,
+    confirm, notify,
+)
 import json
 import logging
 
@@ -119,7 +124,8 @@ class ReviewScreen(BaseScreen):
         try:
             with db(self.project_path) as conn:
                 cursor = conn.cursor()
-                cursor.execute("SELECT metadata_json FROM cases WHERE metadata_json IS NOT NULL LIMIT 100")
+                cursor.execute("SELECT metadata_json FROM cases "
+                               "WHERE metadata_json IS NOT NULL LIMIT 100")
                 rows = cursor.fetchall()
             metadata_keys = set()
             for row in rows:
@@ -153,7 +159,7 @@ class ReviewScreen(BaseScreen):
         if focus is None:
             return True
         # Не перехватываем цифры/стрелки при вводе текста или выборе в комбо
-        from PySide6.QtWidgets import QLineEdit, QTextEdit, QComboBox, QSpinBox
+        from PySide6.QtWidgets import QLineEdit, QTextEdit, QSpinBox
         return not isinstance(focus, (QLineEdit, QTextEdit, QComboBox, QSpinBox))
 
     def init_shortcuts(self):
@@ -470,7 +476,8 @@ class ReviewScreen(BaseScreen):
         btn_bulk_undo.clicked.connect(self.on_bulk_undo)
         btn_recheck = FPushButton("🔄 Пересчитать проверки")
         btn_recheck.setMinimumHeight(30)
-        btn_recheck.setToolTip("Записать автопроверки в БД: нужно для фильтров по проверкам и проблемной очереди")
+        btn_recheck.setToolTip("Записать автопроверки в БД: нужно для фильтров "
+                               "по проверкам и проблемной очереди")
         btn_recheck.clicked.connect(self.on_recheck_all)
         self.queue_combo = FComboBox()
         self.queue_combo.addItem("Очередь: обычная", "normal")
@@ -602,7 +609,8 @@ class ReviewScreen(BaseScreen):
                     cursor.execute(query)
                     values = [row['value'] for row in cursor.fetchall()]
                 else:
-                    cursor.execute("SELECT metadata_json FROM cases WHERE metadata_json IS NOT NULL LIMIT 2000")
+                    cursor.execute("SELECT metadata_json FROM cases "
+                                   "WHERE metadata_json IS NOT NULL LIMIT 2000")
                     rows = cursor.fetchall()
                     values = set()
                     for row in rows:
@@ -668,10 +676,12 @@ class ReviewScreen(BaseScreen):
                 """ + BASE_FROM
                 if conditions:
                     data_query += " WHERE " + " AND ".join(conditions)
-                data_query += f" ORDER BY f.imported_at, c.row_index LIMIT {self.page_size} OFFSET {offset}"
+                data_query += (" ORDER BY f.imported_at, c.row_index "
+                                 f"LIMIT {self.page_size} OFFSET {offset}")
                 cursor.execute(data_query, params)
                 cases = cursor.fetchall()
-            if self.column_filter and self.value_filter and self.column_filter not in TABLE_SYSTEM_COLUMNS:
+            if (self.column_filter and self.value_filter
+                    and self.column_filter not in TABLE_SYSTEM_COLUMNS):
                 filtered_cases = []
                 for case in cases:
                     if case['metadata_json']:
@@ -699,7 +709,8 @@ class ReviewScreen(BaseScreen):
                                 WHERE case_id IN ({ph})
                                 GROUP BY case_id, severity
                             """, chunk).fetchall():
-                                checks_map.setdefault(r['case_id'], {})[r['severity'] or 'warning'] = r['n']
+                                sev = r["severity"] or "warning"
+                                checks_map.setdefault(r["case_id"], {})[sev] = r["n"]
                 except Exception as e:
                     logger.warning("checks summary failed: %s", e)
             self.cases_table.blockSignals(True)
@@ -790,7 +801,9 @@ class ReviewScreen(BaseScreen):
             for _c in range(1, self.cases_table.columnCount()):
                 if self.cases_table.columnWidth(_c) > 440:
                     self.cases_table.setColumnWidth(_c, 440)
-            self.page_label.setText(f"Страница {self.current_page + 1} / {self.total_pages} (всего: {total})")
+            self.page_label.setText(
+                f"Страница {self.current_page + 1} / {self.total_pages} "
+                f"(всего: {total})")
             self._update_bulk_label()
         except Exception as e:
             self.show_error("Не удалось загрузить таблицу", e)
@@ -978,9 +991,11 @@ class ReviewScreen(BaseScreen):
                     pass
                 notify(
                     self, "warning", "Автопроверки",
-                    f"{msg}\nЧастичные результаты сохранены — запустите снова для полного пересчёта.")
+                    f"{msg}\nЧастичные результаты сохранены — "
+                    "запустите снова для полного пересчёта.")
             else:
-                notify(self, "error", "Ошибка", f"Не удалось пересчитать проверки:\n{msg}")
+                notify(self, "error", "Ошибка",
+                       f"Не удалось пересчитать проверки:\n{msg}")
 
         # _work создаёт воркер и цепляет сигналы: запуск через очередь событий,
         # чтобы progress успел отрисоваться до старта тяжёлой задачи
@@ -992,7 +1007,8 @@ class ReviewScreen(BaseScreen):
         try:
             with _db(self.project_path) as conn:
                 row = conn.execute(
-                    "SELECT operation_id FROM bulk_operations WHERE undone=0 ORDER BY operation_id DESC LIMIT 1"
+                    "SELECT operation_id FROM bulk_operations "
+                    "WHERE undone=0 ORDER BY operation_id DESC LIMIT 1"
                 ).fetchone()
             if not row:
                 notify(self, "success", "Отмена", "Нет операций для отмены")
@@ -1458,7 +1474,7 @@ class ReviewScreen(BaseScreen):
         if not self.current_case_id:
             return
         try:
-            now = datetime.now(timezone.utc).isoformat()
+            now = datetime.now(UTC).isoformat()
             with db(self.project_path) as conn:
                 cursor = conn.cursor()
                 cursor.execute("DELETE FROM case_tags WHERE case_id = ?", (self.current_case_id,))
@@ -1481,7 +1497,7 @@ class ReviewScreen(BaseScreen):
             return
         try:
             comment = self.comment_edit.toPlainText().strip()
-            now = datetime.now(timezone.utc).isoformat()
+            now = datetime.now(UTC).isoformat()
             with db(self.project_path) as conn:
                 cursor = conn.cursor()
                 cursor.execute("""
@@ -1522,11 +1538,12 @@ class ReviewScreen(BaseScreen):
                 if not confirm(
                     self,
                     "Рекомендация",
-                    "Для статуса «Плохо» рекомендуется добавить комментарий.\n\nПродолжить без комментария?",
+                    "Для статуса «Плохо» рекомендуется добавить комментарий.\n\n"
+                    "Продолжить без комментария?",
                 ):
                     return
         try:
-            now = datetime.now(timezone.utc).isoformat()
+            now = datetime.now(UTC).isoformat()
             with db(self.project_path) as conn:
                 cursor = conn.cursor()
                 cursor.execute(
@@ -1548,7 +1565,8 @@ class ReviewScreen(BaseScreen):
                 ))
                 if old_status != status:
                     cursor.execute("""
-                        INSERT INTO history (case_id, event_type, field_name, old_value, new_value, created_at)
+                        INSERT INTO history
+                            (case_id, event_type, field_name, old_value, new_value, created_at)
                         VALUES (?, 'status_changed', 'status', ?, ?, ?)
                     """, (self.current_case_id, old_status, status, now))
             self.current_case['status'] = status

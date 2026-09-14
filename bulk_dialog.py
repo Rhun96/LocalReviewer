@@ -1,6 +1,5 @@
 """Диалог массовой операции: подтверждает count + операцию, запускает в фоне."""
 from PySide6.QtWidgets import QDialog, QHBoxLayout, QLabel, QVBoxLayout
-from PySide6.QtCore import Qt
 from ui_compat import FComboBox, FPrimaryButton, FPushButton, FTextEdit
 
 

@@ -2,12 +2,15 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QTableWidgetItem, QFileDialog,
     QGroupBox, QScrollArea,
-    QFormLayout, QSizePolicy
+    QFormLayout
 )
 from PySide6.QtCore import Qt, Signal
 from file_reader import FileReader
 from pathlib import Path
-from ui_compat import FComboBox, FPrimaryButton, FPushButton, FSpinBox, FTable, clear_in_fluent, notify
+from ui_compat import (
+    FComboBox, FPrimaryButton, FPushButton, FSpinBox, FTable,
+    clear_in_fluent, notify,
+)
 
 from constants import MAPPING_ROLES
 
@@ -171,7 +174,8 @@ class ImportWizard(QWidget):
         custom_layout = QHBoxLayout()
         btn_custom = FPushButton("＋ Своя категория…")
         btn_custom.setMinimumHeight(32)
-        btn_custom.setToolTip("Создать свою категорию маппинга — значение попадёт в метаданные кейса")
+        btn_custom.setToolTip("Создать свою категорию маппинга — "
+                              "значение попадёт в метаданные кейса")
         btn_custom.clicked.connect(self.on_add_custom_role)
         custom_layout.addWidget(btn_custom)
         custom_layout.addStretch()
@@ -357,8 +361,8 @@ class ImportWizard(QWidget):
             return
         self.extra_roles.append((code, f"📎 {name}"))
         self.build_mapping_ui()
-        notify(
-            self, "success", "Категория", f"Категория «{name}» добавлена — выбери её в нужных колонках")
+        notify(self, "success", "Категория",
+               f"Категория «{name}» добавлена — выбери её в нужных колонках")
 
     def on_back_step(self):
         self.step2_widget.setVisible(False)

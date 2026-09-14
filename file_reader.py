@@ -1,4 +1,4 @@
-"""Чтение xlsx/csv/json/jsonl: лимиты размера, utf-8-sig, корректные ошибки, отчёт о битых строках."""
+"""Чтение xlsx/csv/json/jsonl: лимиты, utf-8-sig, корректные ошибки."""
 import csv
 import json
 import logging
@@ -165,7 +165,8 @@ class FileReader:
                 if i < header_row:
                     continue
                 if not seen_header:
-                    headers = [str(h) if h not in (None, "") else f"col_{j}" for j, h in enumerate(row)]
+                    headers = [str(h) if h not in (None, "") else f"col_{j}"
+                               for j, h in enumerate(row)]
                     seen_header = True
                     continue
                 if all(c is None or str(c).strip() == "" for c in row):

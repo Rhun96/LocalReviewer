@@ -2,7 +2,7 @@
 import logging
 import sqlite3
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -12,7 +12,7 @@ DB_TIMEOUT = 10.0
 
 
 def utcnow() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _apply_pragmas(conn: sqlite3.Connection) -> None:
@@ -209,7 +209,8 @@ def _migrate_to_v2(cursor: sqlite3.Cursor) -> None:
         "Грамматические ошибки", "Стилистические проблемы",
     ]:
         cursor.execute(
-            "INSERT OR IGNORE INTO comment_templates (text, is_system, created_at) VALUES (?, 1, ?)",
+            "INSERT OR IGNORE INTO comment_templates "
+            "(text, is_system, created_at) VALUES (?, 1, ?)",
             (t, now),
         )
     # Дедуп повторных импортов: старые БД могут содержать дубли от импортёра

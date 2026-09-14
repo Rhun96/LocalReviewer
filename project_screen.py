@@ -1,5 +1,5 @@
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
+    QVBoxLayout, QHBoxLayout, QLabel,
     QListWidget, QListWidgetItem,
     QGridLayout, QSizePolicy, QGroupBox
 )
@@ -141,11 +141,13 @@ class ProjectScreen(BaseScreen):
         try:
             with db(self.project_path) as conn:
                 cursor = conn.cursor()
-                cursor.execute("SELECT file_id, file_name, row_count FROM files ORDER BY imported_at DESC")
+                cursor.execute("SELECT file_id, file_name, row_count FROM files "
+                               "ORDER BY imported_at DESC")
                 files = cursor.fetchall()
                 cursor.execute("SELECT COUNT(*) AS total FROM cases")
                 total = cursor.fetchone()["total"]
-                cursor.execute("SELECT COUNT(*) AS reviewed FROM annotations WHERE status != 'unreviewed'")
+                cursor.execute("SELECT COUNT(*) AS reviewed FROM annotations "
+                               "WHERE status != 'unreviewed'")
                 reviewed = cursor.fetchone()["reviewed"]
             pct = int(reviewed / total * 100) if total else 0
             self.info_label.setText(
@@ -204,7 +206,8 @@ class ProjectScreen(BaseScreen):
         if not confirm(
             self,
             "Подтверждение",
-            f"Удалить файл и все связанные кейсы?\n\n{file_name}\n\n⚠️ Это действие нельзя отменить.",
+            f"Удалить файл и все связанные кейсы?\n\n{file_name}\n\n"
+            "⚠️ Это действие нельзя отменить.",
         ):
             return
         try:

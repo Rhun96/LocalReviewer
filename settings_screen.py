@@ -1,28 +1,30 @@
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
-    QSpinBox, QCheckBox, QGroupBox, QFormLayout,
-    QComboBox
+    QVBoxLayout, QHBoxLayout, QLabel,
+    QGroupBox, QFormLayout
 )
 from PySide6.QtCore import Qt, Signal
 from database import db
 from ui_base import BaseScreen
-from ui_compat import FLUENT, FCheckBox, FComboBox, FPrimaryButton, FPushButton, FSpinBox, THEME_NAMES, apply_theme, get_theme_mode, notify, set_theme_mode
-from datetime import datetime, timezone
+from ui_compat import (
+    FLUENT, FCheckBox, FComboBox, FPrimaryButton, FPushButton, FSpinBox,
+    THEME_NAMES, apply_theme, get_theme_mode, notify, set_theme_mode,
+)
+from datetime import datetime, UTC
 
 
 class SettingsScreen(BaseScreen):
     """Экран настроек приложения."""
-    
+
     settings_closed = Signal()
-    
+
     def __init__(self, project_path: str, parent=None):
         super().__init__(parent)
         self.project_path = project_path
         self.parent_window = parent
-        
+
         self.init_ui()
         self.load_settings()
-    
+
     def init_ui(self):
         layout = QVBoxLayout()
         layout.setSpacing(12)
@@ -33,22 +35,23 @@ class SettingsScreen(BaseScreen):
         title.setObjectName("title")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(title)
-        
+
         # Настройки ревью
         review_group = QGroupBox("Режим ревью")
         review_layout = QFormLayout()
-        
-        self.auto_next_checkbox = FCheckBox("Автоматически переходить к следующему кейсу после выбора статуса")
+
+        self.auto_next_checkbox = FCheckBox(
+            "Автоматически переходить к следующему кейсу после выбора статуса")
         self.auto_next_checkbox.setChecked(True)
         review_layout.addRow(self.auto_next_checkbox)
-        
+
         self.comment_for_bad_combo = FComboBox()
         self.comment_for_bad_combo.addItem("Не обязателен", "none")
         self.comment_for_bad_combo.addItem("Мягкое предупреждение", "warn")
         self.comment_for_bad_combo.addItem("Обязателен", "required")
         self.comment_for_bad_combo.setCurrentIndex(1)
         review_layout.addRow("Комментарий для статуса «Плохо»:", self.comment_for_bad_combo)
-        
+
         review_group.setLayout(review_layout)
         layout.addWidget(review_group)
 
@@ -66,39 +69,39 @@ class SettingsScreen(BaseScreen):
         ui_layout.addRow(self.fluent_hint)
         ui_group.setLayout(ui_layout)
         layout.addWidget(ui_group)
-        
+
         # Настройки автопроверок
         checks_group = QGroupBox("Автопроверки")
         checks_layout = QFormLayout()
-        
+
         self.min_length_spin = FSpinBox()
         self.min_length_spin.setMinimum(0)
         self.min_length_spin.setMaximum(1000)
         self.min_length_spin.setValue(10)
         checks_layout.addRow("Минимальная длина текста:", self.min_length_spin)
-        
+
         self.max_length_spin = FSpinBox()
         self.max_length_spin.setMinimum(100)
         self.max_length_spin.setMaximum(100000)
         self.max_length_spin.setValue(10000)
         checks_layout.addRow("Максимальная длина текста:", self.max_length_spin)
-        
+
         self.check_url_checkbox = FCheckBox("Проверять наличие URL")
         self.check_url_checkbox.setChecked(True)
         checks_layout.addRow(self.check_url_checkbox)
-        
+
         self.check_email_checkbox = FCheckBox("Проверять наличие email")
         self.check_email_checkbox.setChecked(True)
         checks_layout.addRow(self.check_email_checkbox)
-        
+
         self.check_phone_checkbox = FCheckBox("Проверять наличие телефона")
         self.check_phone_checkbox.setChecked(True)
         checks_layout.addRow(self.check_phone_checkbox)
-        
+
         self.check_spaces_checkbox = FCheckBox("Проверять много пробелов")
         self.check_spaces_checkbox.setChecked(True)
         checks_layout.addRow(self.check_spaces_checkbox)
-        
+
         self.check_caps_checkbox = FCheckBox("Проверять много заглавных букв")
         self.check_caps_checkbox.setChecked(True)
         checks_layout.addRow(self.check_caps_checkbox)
@@ -120,34 +123,38 @@ class SettingsScreen(BaseScreen):
         self.max_sentence_spin.setMaximum(5000)
         self.max_sentence_spin.setValue(400)
         checks_layout.addRow("Макс. длина предложения:", self.max_sentence_spin)
-        
+
         checks_group.setLayout(checks_layout)
         layout.addWidget(checks_group)
-        
+
         # Кнопки
         buttons_layout = QHBoxLayout()
-        
+
         btn_save = FPrimaryButton("Сохранить настройки")
         btn_save.setMinimumHeight(50)
         btn_save.clicked.connect(self.on_save)
-        
+
         btn_reset = FPushButton("Сбросить по умолчанию")
         btn_reset.setMinimumHeight(50)
         btn_reset.clicked.connect(self.on_reset)
-        
+
         btn_back = FPushButton("Назад к проекту")
         btn_back.setObjectName("danger")
         btn_back.setMinimumHeight(50)
         btn_back.clicked.connect(self.on_back)
-        
+
         buttons_layout.addWidget(btn_save)
         buttons_layout.addWidget(btn_reset)
         buttons_layout.addStretch()
         buttons_layout.addWidget(btn_back)
         layout.addLayout(buttons_layout)
-        
+
         self.setLayout(layout)
-    
+
+    @staticmethod
+    def _apply_check(checkbox, value) -> None:
+        checkbox.setChecked((value if value is not None else 'true') == 'true')
+
     def load_settings(self):
         """Загружает настройки из базы."""
         mode = get_theme_mode()
@@ -192,14 +199,15 @@ class SettingsScreen(BaseScreen):
             except ValueError:
                 max_sent = 400
             self.max_sentence_spin.setValue(max(50, min(max_sent, 5000)))
-            self.check_url_checkbox.setChecked(settings.get('checks_url', 'true') == 'true')
-            self.check_email_checkbox.setChecked(settings.get('checks_email', 'true') == 'true')
-            self.check_phone_checkbox.setChecked(settings.get('checks_phone', 'true') == 'true')
-            self.check_spaces_checkbox.setChecked(settings.get('checks_spaces', 'true') == 'true')
-            self.check_caps_checkbox.setChecked(settings.get('checks_caps', 'true') == 'true')
-            self.check_duplicate_checkbox.setChecked(settings.get('checks_duplicate', 'true') == 'true')
-            self.check_repeat_checkbox.setChecked(settings.get('checks_repeat_words', 'true') == 'true')
-            self.check_junk_checkbox.setChecked(settings.get('checks_junk', 'true') == 'true')
+            _set = self._apply_check
+            _set(self.check_url_checkbox, settings.get('checks_url'))
+            _set(self.check_email_checkbox, settings.get('checks_email'))
+            _set(self.check_phone_checkbox, settings.get('checks_phone'))
+            _set(self.check_spaces_checkbox, settings.get('checks_spaces'))
+            _set(self.check_caps_checkbox, settings.get('checks_caps'))
+            _set(self.check_duplicate_checkbox, settings.get('checks_duplicate'))
+            _set(self.check_repeat_checkbox, settings.get('checks_repeat_words'))
+            _set(self.check_junk_checkbox, settings.get('checks_junk'))
 
         except Exception:
             # Тихие дефолты только если БД недоступна; виджеты уже с дефолтами из init_ui
@@ -218,14 +226,15 @@ class SettingsScreen(BaseScreen):
             self.fluent_hint.setText(
                 "Fluent-библиотека не установлена (pip install PySide6-Fluent-Widgets) — "
                 "используется классическая тема.")
-    
+
     def on_save(self):
         """Сохраняет настройки."""
         if self.min_length_spin.value() > self.max_length_spin.value():
-            notify(self, "warning", "Настройки", "Минимальная длина не может быть больше максимальной")
+            notify(self, "warning", "Настройки",
+                   "Минимальная длина не может быть больше максимальной")
             return
         try:
-            now = datetime.now(timezone.utc).isoformat()
+            now = datetime.now(UTC).isoformat()
             with db(self.project_path) as conn:
                 cursor = conn.cursor()
 
@@ -265,7 +274,7 @@ class SettingsScreen(BaseScreen):
 
         except Exception as e:
             notify(self, "error", "Ошибка", f"Не удалось сохранить настройки: {str(e)}")
-    
+
     def on_reset(self):
         """Сбрасывает настройки по умолчанию."""
         self.auto_next_checkbox.setChecked(True)
@@ -281,7 +290,7 @@ class SettingsScreen(BaseScreen):
         self.check_duplicate_checkbox.setChecked(True)
         self.check_repeat_checkbox.setChecked(True)
         self.check_junk_checkbox.setChecked(True)
-    
+
     def on_back(self):
         """Возврат к проекту."""
         mw = getattr(getattr(self, "parent_window", None), "main_window", None)

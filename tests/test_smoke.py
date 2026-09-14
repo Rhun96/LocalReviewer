@@ -1,5 +1,4 @@
 """Smoke-тесты без Qt: БД, импорт, фильтры, автопроверки, экспорт, бэкап."""
-import json
 import tempfile
 from pathlib import Path
 

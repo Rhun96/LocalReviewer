@@ -1,6 +1,6 @@
 """Умная очередь ревью (ТЗ §8-11): режимы + приоритет без ML + индикатор."""
 import logging
-from filter_service import build_filter_query, get_all_case_ids
+from filter_service import build_filter_query
 from database import db
 
 logger = logging.getLogger(__name__)

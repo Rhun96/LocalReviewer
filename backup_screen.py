@@ -1,6 +1,6 @@
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
-    QListWidget, QListWidgetItem, QFileDialog
+    QListWidget, QListWidgetItem
 )
 from PySide6.QtCore import Qt, Signal
 from backup_service import create_backup, get_backups_list, restore_backup, delete_backup
@@ -11,48 +11,48 @@ from workers import run_in_background
 
 class BackupScreen(BaseScreen):
     """Экран резервного копирования."""
-    
+
     backup_closed = Signal()
-    
+
     def __init__(self, project_path: str, parent=None):
         super().__init__(parent)
         self.project_path = project_path
         self.parent_window = parent
-        
+
         self.init_ui()
         self.load_backups()
-    
+
     def init_ui(self):
         layout = QVBoxLayout()
         layout.setSpacing(20)
         layout.setContentsMargins(40, 20, 40, 20)
-        
+
         # Заголовок
         title = QLabel("РЕЗЕРВНОЕ КОПИРОВАНИЕ")
         title.setObjectName("title")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(title)
-        
+
         # Кнопки действий
         buttons_layout = QHBoxLayout()
-        
+
         btn_create = FPrimaryButton("Создать резервную копию")
         btn_create.setMinimumHeight(50)
         btn_create.clicked.connect(self.on_create_backup)
-        
+
         btn_refresh = FPushButton("Обновить список")
         btn_refresh.setMinimumHeight(50)
         btn_refresh.clicked.connect(self.load_backups)
-        
+
         buttons_layout.addWidget(btn_create)
         buttons_layout.addWidget(btn_refresh)
         layout.addLayout(buttons_layout)
-        
+
         # Список резервных копий
         list_label = QLabel("Резервные копии:")
         list_label.setStyleSheet("font-size: 16px; font-weight: bold;")
         layout.addWidget(list_label)
-        
+
         self.backups_list = QListWidget()
         self.backups_list.setStyleSheet("""
             QListWidget {
@@ -71,10 +71,10 @@ class BackupScreen(BaseScreen):
         """)
         layout.addWidget(self.backups_list)
         clear_in_fluent(self.backups_list)
-        
+
         # Кнопки для выбранной копии
         actions_layout = QHBoxLayout()
-        
+
         btn_restore = FPushButton("Восстановить выбранную копию")
         btn_restore.setMinimumHeight(50)
         btn_restore.setStyleSheet("""
@@ -82,25 +82,25 @@ class BackupScreen(BaseScreen):
             QPushButton:hover { background-color: #332200; }
         """)
         btn_restore.clicked.connect(self.on_restore_backup)
-        
+
         btn_delete = FPushButton("Удалить выбранную копию")
         btn_delete.setMinimumHeight(50)
         btn_delete.setObjectName("danger")
         btn_delete.clicked.connect(self.on_delete_backup)
-        
+
         actions_layout.addWidget(btn_restore)
         actions_layout.addWidget(btn_delete)
         layout.addLayout(actions_layout)
-        
+
         # Кнопка назад
         btn_back = FPushButton("Назад к проекту")
         btn_back.setObjectName("danger")
         btn_back.setMinimumHeight(50)
         btn_back.clicked.connect(self.on_back)
         layout.addWidget(btn_back)
-        
+
         self.setLayout(layout)
-    
+
     def load_backups(self):
         """Загружает список резервных копий."""
         try:
@@ -117,14 +117,14 @@ class BackupScreen(BaseScreen):
             item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsSelectable)
             self.backups_list.addItem(item)
             return
-        
+
         for backup in backups:
             size_mb = backup['size'] / (1024 * 1024)
             text = f"{backup['name']} ({size_mb:.2f} МБ, {backup['created'][:19]})"
             item = QListWidgetItem(text)
             item.setData(Qt.ItemDataRole.UserRole, backup['path'])
             self.backups_list.addItem(item)
-    
+
     def on_create_backup(self):
         """Создаёт резервную копию (в фоне, чтобы не морозить UI)."""
         self.set_buttons_enabled(False)
@@ -152,7 +152,7 @@ class BackupScreen(BaseScreen):
 
     def refresh(self):
         self.load_backups()
-    
+
     def on_restore_backup(self):
         """Восстанавливает выбранную резервную копию."""
         current_item = self.backups_list.currentItem()
@@ -178,7 +178,8 @@ class BackupScreen(BaseScreen):
                 self,
                 "success",
                 "Восстановление завершено",
-                "База данных восстановлена из резервной копии.\nТекущая база была сохранена как резервная копия."
+                "База данных восстановлена из резервной копии.\n"
+                "Текущая база была сохранена как резервная копия."
             )
             self.load_backups()
             if self.parent_window and hasattr(self.parent_window, "refresh_all"):
@@ -188,7 +189,7 @@ class BackupScreen(BaseScreen):
                     pass
         except Exception as e:
             notify(self, "error", "Ошибка", f"Не удалось восстановить: {str(e)}")
-    
+
     def on_delete_backup(self):
         """Удаляет выбранную резервную копию."""
         current_item = self.backups_list.currentItem()
@@ -208,7 +209,7 @@ class BackupScreen(BaseScreen):
             self.load_backups()
         else:
             notify(self, "error", "Ошибка", "Не удалось удалить резервную копию")
-    
+
     def on_back(self):
         """Возврат к проекту."""
         mw = getattr(getattr(self, "parent_window", None), "main_window", None)

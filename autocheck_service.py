@@ -156,9 +156,11 @@ def check_case(case: dict, settings: dict = None) -> list:
         checks.append(("empty_text", RULES["empty_text"]["name"], "Текст полностью пуст"))
         return checks
     if len(full_text) < settings.get("min_length", 10):
-        checks.append(("too_short", RULES["too_short"]["name"], f"Длина: {len(full_text)} символов"))
+        checks.append(("too_short", RULES["too_short"]["name"],
+                       f"Длина: {len(full_text)} символов"))
     if len(full_text) > settings.get("max_length", 10000):
-        checks.append(("too_long", RULES["too_long"]["name"], f"Длина: {len(full_text)} символов"))
+        checks.append(("too_long", RULES["too_long"]["name"],
+                       f"Длина: {len(full_text)} символов"))
     if on("check_url"):
         urls = re.findall(r"https?://[^\s<>\"']+|www\.[^\s<>\"']+", full_text)
         if urls:
@@ -176,7 +178,8 @@ def check_case(case: dict, settings: dict = None) -> list:
         spaces = sum(1 for c in full_text if c.isspace())
         ratio = spaces / len(full_text)
         if ratio > 0.3:
-            checks.append(("many_spaces", RULES["many_spaces"]["name"], f"{int(ratio * 100)}% текста"))
+            checks.append(("many_spaces", RULES["many_spaces"]["name"],
+                           f"{int(ratio * 100)}% текста"))
     if on("check_caps"):
         letters = [c for c in full_text if c.isalpha()]
         if len(letters) > 10:
@@ -224,11 +227,13 @@ def check_case(case: dict, settings: dict = None) -> list:
             checks.append(("markdown_heavy", RULES["markdown_heavy"]["name"],
                            f"Markdown-блоков: {md}"))
     if on("check_encoding"):
-        if "�" in full_text or re.search(r"[А-Яа-яЁё][a-zA-Z]{3,}|[a-zA-Z][А-Яа-яЁё]{3,}", full_text):
+        mixed = r"[А-Яа-яЁё][a-zA-Z]{3,}|[a-zA-Z][А-Яа-яЁё]{3,}"
+        if "�" in full_text or re.search(mixed, full_text):
             checks.append(("broken_encoding", RULES["broken_encoding"]["name"],
                            "Возможна битая кодировка"))
     if on("check_suspicious"):
-        bad = [c for c in full_text if unicodedata.category(c) in ("Cf", "Cc") and c not in ("\n", "\t")]
+        bad = [c for c in full_text
+               if unicodedata.category(c) in ("Cf", "Cc") and c not in ("\n", "\t")]
         if bad:
             checks.append(("suspicious_chars", RULES["suspicious_chars"]["name"],
                            f"Невидимых символов: {len(bad)}"))
@@ -247,7 +252,7 @@ def run_autochecks(project_path: str, file_id: int = None,
     отображается через progress_callback(done, total), отмена — через cancel_event.
     """
     import sqlite3 as _sqlite3
-    from database import get_db_connection, DB_TIMEOUT
+    from database import DB_TIMEOUT
     from pathlib import Path as _Path
 
     settings = get_check_settings(project_path)
@@ -266,7 +271,8 @@ def run_autochecks(project_path: str, file_id: int = None,
             ([file_id] if file_id else [])).fetchone()["c"]
         if file_id:
             cursor.execute(
-                "DELETE FROM case_checks WHERE case_id IN (SELECT case_id FROM cases WHERE file_id = ?)",
+                "DELETE FROM case_checks WHERE case_id IN "
+                "(SELECT case_id FROM cases WHERE file_id = ?)",
                 (file_id,),
             )
         else:
@@ -288,7 +294,8 @@ def run_autochecks(project_path: str, file_id: int = None,
             nonlocal batch, total_flags
             if batch:
                 wcur.executemany("""
-                    INSERT INTO case_checks (case_id, check_code, check_name, details, severity, created_at)
+                    INSERT INTO case_checks
+                        (case_id, check_code, check_name, details, severity, created_at)
                     VALUES (?, ?, ?, ?, ?, ?)
                 """, batch)
                 batch = []
@@ -310,7 +317,7 @@ def run_autochecks(project_path: str, file_id: int = None,
             hashes = [compute_text_hash(f"{r['primary_text'] or ''} {r['response_text'] or ''}")
                       for r in rows]
             counts = Counter(hashes)
-            for case, h in zip(rows, hashes):
+            for case, h in zip(rows, hashes, strict=True):
                 total_checked += 1
                 d = {"primary_text": case["primary_text"], "response_text": case["response_text"]}
                 flags = check_case(d, settings)

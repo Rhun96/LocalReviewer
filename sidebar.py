@@ -1,6 +1,6 @@
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QPushButton, QLabel,
-    QSizePolicy, QProgressBar, QSpacerItem
+    QWidget, QVBoxLayout, QLabel,
+    QProgressBar
 )
 from PySide6.QtCore import Qt, Signal
 from database import db

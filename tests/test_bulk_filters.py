@@ -46,7 +46,9 @@ def test_bulk_status_and_undo():
     from pathlib import Path
     conn = sqlite3.connect(str(Path(p) / "project.sqlite"))
     try:
-        op = conn.execute("SELECT operation_id FROM bulk_operations ORDER BY operation_id DESC LIMIT 1").fetchone()[0]
+        op = conn.execute(
+            "SELECT operation_id FROM bulk_operations "
+            "ORDER BY operation_id DESC LIMIT 1").fetchone()[0]
     finally:
         conn.close()
     undone = undo_bulk_operation(p, op)
