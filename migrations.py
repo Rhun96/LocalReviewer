@@ -63,6 +63,226 @@ def migrate_to_v4(cursor) -> None:
     logger.info("migrated to v4 (case_checks.severity)")
 
 
+DEFAULT_TAXONOMY = [
+    ("correctness", "Правильность", None, [
+        ("correctness.factual", "Фактическая ошибка"),
+        ("correctness.hallucination", "Галлюцинация"),
+        ("correctness.wrong_condition", "Неверное условие"),
+        ("correctness.wrong_calc", "Неверный расчёт"),
+    ]),
+    ("completeness", "Полнота", None, [
+        ("completeness.incomplete", "Неполный ответ"),
+        ("completeness.missed_condition", "Пропущено важное условие"),
+        ("completeness.missed_scenario", "Не рассмотрен сценарий"),
+    ]),
+    ("relevance", "Релевантность", None, [
+        ("relevance.off_topic", "Не отвечает на вопрос"),
+        ("relevance.extra_info", "Лишняя информация"),
+        ("relevance.evasion", "Уход от темы"),
+    ]),
+    ("format", "Формат", None, [
+        ("format.wrong_format", "Неверный формат"),
+        ("format.too_long", "Слишком длинный"),
+        ("format.too_short", "Слишком короткий"),
+    ]),
+    ("safety", "Безопасность", None, [
+        ("safety.dangerous", "Опасный ответ"),
+        ("safety.policy", "Нарушение политики"),
+        ("safety.personal_data", "Работа с персональными данными"),
+    ]),
+    ("other", "Другое", None, [
+        ("other.other", "Другое"),
+    ]),
+]
+
+
+def _utcnow() -> str:
+    from datetime import UTC, datetime
+    return datetime.now(UTC).isoformat()
+
+
+DEFAULT_PROFILE_CONFIG = {
+    "statuses": [
+        {"code": "good", "name": "Хорошо", "hotkey": "1", "enabled": True},
+        {"code": "bad", "name": "Плохо", "hotkey": "2", "enabled": True},
+        {"code": "uncertain", "name": "Сомневаюсь", "hotkey": "3", "enabled": True},
+        {"code": "duplicate", "name": "Дубль", "hotkey": "4", "enabled": True},
+        {"code": "skip", "name": "Пропустить", "hotkey": "5", "enabled": True},
+    ],
+    "require_category_for_bad": False,
+    "require_comment_for_bad": None,  # None = брать из настроек проекта
+}
+
+
+def migrate_to_v6(cursor) -> None:
+    """Профили ревью (ТЗ §31-36). Старые проекты → Default-профиль."""
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS review_profiles (
+            profile_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE,
+            description TEXT,
+            config_json TEXT NOT NULL,
+            is_default INTEGER DEFAULT 0,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+    """)
+    now = _utcnow()
+    cursor.execute("""
+        INSERT INTO review_profiles (name, description, config_json, is_default,
+                                     created_at, updated_at)
+        VALUES (?, ?, ?, 1, ?, ?)
+        ON CONFLICT(name) DO NOTHING
+    """, ("Default", "Стандартная схема: 5 статусов, клавиши 1–5",
+          json.dumps(DEFAULT_PROFILE_CONFIG, ensure_ascii=False), now, now))
+    logger.info("migrated to v6 (review_profiles)")
+
+
+def migrate_to_v7(cursor) -> None:
+    """Версии датасетов и Golden (ТЗ §37-42, §61-63).
+
+    Версия — неизменяемый снимок: dataset_cases хранит case_id + статус
+    и комментарий на момент фиксации. Заморозка = статус, правок не бывает.
+    """
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS datasets (
+            dataset_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE,
+            description TEXT,
+            dataset_type TEXT NOT NULL DEFAULT 'working'
+                CHECK (dataset_type IN ('working','golden','test','safety','archive')),
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS dataset_versions (
+            version_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            dataset_id INTEGER NOT NULL,
+            version_number INTEGER NOT NULL,
+            description TEXT,
+            status TEXT NOT NULL DEFAULT 'draft'
+                CHECK (status IN ('draft','review','frozen','archived')),
+            case_count INTEGER DEFAULT 0,
+            content_hash TEXT,
+            created_at TEXT NOT NULL,
+            frozen_at TEXT,
+            UNIQUE (dataset_id, version_number),
+            FOREIGN KEY (dataset_id) REFERENCES datasets(dataset_id) ON DELETE CASCADE
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS dataset_cases (
+            version_id INTEGER NOT NULL,
+            case_id INTEGER NOT NULL,
+            status TEXT,
+            comment TEXT,
+            PRIMARY KEY (version_id, case_id),
+            FOREIGN KEY (version_id) REFERENCES dataset_versions(version_id)
+                ON DELETE CASCADE
+        )
+    """)
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_dataset_cases_case "
+        "ON dataset_cases(case_id)"
+    )
+    logger.info("migrated to v7 (datasets)")
+
+
+def stable_key_for(source_id, content_hash, case_id) -> str:
+    """Стабильный ключ кейса: source_id → content_hash → case_id."""
+    if source_id and str(source_id).strip():
+        return "src:" + str(source_id).strip()
+    if content_hash:
+        return "hash:" + str(content_hash)
+    return f"case:{case_id}"
+
+
+def ensure_dataset_keys(cursor) -> int:
+    """Backfill stable_key для старых снимков. Возвращает число строк."""
+    cols = [r[1] for r in cursor.execute("PRAGMA table_info(dataset_cases)").fetchall()]
+    if "stable_key" not in cols:
+        cursor.execute("ALTER TABLE dataset_cases ADD COLUMN stable_key TEXT")
+    rows = cursor.execute("""
+        SELECT dc.version_id, dc.case_id, c.source_id, c.content_hash
+        FROM dataset_cases dc
+        LEFT JOIN cases c ON c.case_id = dc.case_id
+        WHERE dc.stable_key IS NULL
+    """).fetchall()
+    for r in rows:
+        key = stable_key_for(r["source_id"] if r else None,
+                             r["content_hash"] if r else None,
+                             r["case_id"])
+        cursor.execute("UPDATE dataset_cases SET stable_key=? "
+                       "WHERE version_id=? AND case_id=?",
+                       (key, r["version_id"], r["case_id"]))
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_dataset_cases_key "
+        "ON dataset_cases(version_id, stable_key)"
+    )
+    if rows:
+        logger.info("backfilled %s dataset stable_keys", len(rows))
+    return len(rows)
+
+
+def migrate_to_v8(cursor) -> None:
+    """Сравнение версий по стабильным ключам (ТЗ §53)."""
+    ensure_dataset_keys(cursor)
+    logger.info("migrated to v8 (dataset stable keys)")
+
+
+def migrate_to_v5(cursor) -> None:
+    """Таксономия ошибок + классификация кейсов (ТЗ §19-23)."""
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS error_categories (
+            category_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            parent_id INTEGER,
+            code TEXT NOT NULL UNIQUE,
+            name TEXT NOT NULL,
+            description TEXT,
+            sort_order INTEGER DEFAULT 0,
+            is_active INTEGER DEFAULT 1,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (parent_id) REFERENCES error_categories(category_id)
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS case_errors (
+            case_id INTEGER PRIMARY KEY,
+            category_id INTEGER,
+            subcategory_id INTEGER,
+            severity TEXT DEFAULT 'medium'
+                CHECK (severity IN ('low', 'medium', 'high', 'critical')),
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (case_id) REFERENCES cases(case_id) ON DELETE CASCADE
+        )
+    """)
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_case_errors_cat "
+        "ON case_errors(category_id, subcategory_id)"
+    )
+    now = _utcnow()
+    order = 0
+    for code, name, _desc, subs in DEFAULT_TAXONOMY:
+        cursor.execute("""
+            INSERT INTO error_categories
+                (parent_id, code, name, sort_order, is_active, created_at)
+            VALUES (NULL, ?, ?, ?, 1, ?)
+            ON CONFLICT(code) DO UPDATE SET name=name
+        """, (code, name, order, now))
+        parent_id = cursor.execute(
+            "SELECT category_id FROM error_categories WHERE code=?", (code,)).fetchone()[0]
+        order += 1
+        for sub_order, (sub_code, sub_name) in enumerate(subs):
+            cursor.execute("""
+                INSERT INTO error_categories
+                    (parent_id, code, name, sort_order, is_active, created_at)
+                VALUES (?, ?, ?, ?, 1, ?)
+                ON CONFLICT(code) DO UPDATE SET name=name
+            """, (parent_id, sub_code, sub_name, sub_order, now))
+    logger.info("migrated to v5 (error taxonomy)")
+
+
 def _backfill_null_hashes(cursor) -> int:
     """У старых строк content_hash может быть NULL — считаем из raw_json/текстов.
 

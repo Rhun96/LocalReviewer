@@ -52,6 +52,21 @@ class SettingsScreen(BaseScreen):
         self.comment_for_bad_combo.setCurrentIndex(1)
         review_layout.addRow("Комментарий для статуса «Плохо»:", self.comment_for_bad_combo)
 
+        self.btn_taxonomy = FPushButton("⚠ Таксономия ошибок…")
+        self.btn_taxonomy.setToolTip("Категории и подкатегории причин, архив, свои категории")
+        self.btn_taxonomy.clicked.connect(self.open_taxonomy)
+        review_layout.addRow(self.btn_taxonomy)
+
+        profile_row = QHBoxLayout()
+        self.profile_combo = FComboBox()
+        self.profile_combo.setMinimumHeight(30)
+        profile_row.addWidget(self.profile_combo)
+        self.btn_profiles = FPushButton("Профили…")
+        self.btn_profiles.setToolTip("Редактор схем разметки: статусы, клавиши, обязательные поля")
+        self.btn_profiles.clicked.connect(self.open_profiles)
+        profile_row.addWidget(self.btn_profiles)
+        review_layout.addRow("Профиль ревью:", profile_row)
+
         review_group.setLayout(review_layout)
         layout.addWidget(review_group)
 
@@ -78,12 +93,15 @@ class SettingsScreen(BaseScreen):
         self.min_length_spin.setMinimum(0)
         self.min_length_spin.setMaximum(1000)
         self.min_length_spin.setValue(10)
+        # Спины компактные: иначе строка тянется на всю ширину и выглядит криво
+        self.min_length_spin.setMaximumWidth(180)
         checks_layout.addRow("Минимальная длина текста:", self.min_length_spin)
 
         self.max_length_spin = FSpinBox()
         self.max_length_spin.setMinimum(100)
         self.max_length_spin.setMaximum(100000)
         self.max_length_spin.setValue(10000)
+        self.max_length_spin.setMaximumWidth(180)
         checks_layout.addRow("Максимальная длина текста:", self.max_length_spin)
 
         self.check_url_checkbox = FCheckBox("Проверять наличие URL")
@@ -122,6 +140,7 @@ class SettingsScreen(BaseScreen):
         self.max_sentence_spin.setMinimum(50)
         self.max_sentence_spin.setMaximum(5000)
         self.max_sentence_spin.setValue(400)
+        self.max_sentence_spin.setMaximumWidth(180)
         checks_layout.addRow("Макс. длина предложения:", self.max_sentence_spin)
 
         checks_group.setLayout(checks_layout)
@@ -208,13 +227,43 @@ class SettingsScreen(BaseScreen):
             _set(self.check_duplicate_checkbox, settings.get('checks_duplicate'))
             _set(self.check_repeat_checkbox, settings.get('checks_repeat_words'))
             _set(self.check_junk_checkbox, settings.get('checks_junk'))
+            self.reload_profiles()
 
         except Exception:
             # Тихие дефолты только если БД недоступна; виджеты уже с дефолтами из init_ui
             pass
 
+    def reload_profiles(self):
+        from review_profile_service import get_active_profile, list_profiles
+        try:
+            profiles = list_profiles(self.project_path)
+            active = get_active_profile(self.project_path)
+        except Exception:
+            profiles, active = [], None
+        self.profile_combo.blockSignals(True)
+        self.profile_combo.clear()
+        for p in profiles:
+            self.profile_combo.addItem(p["name"], p["profile_id"])
+        if active:
+            for i in range(self.profile_combo.count()):
+                if self.profile_combo.itemData(i) == active["profile_id"]:
+                    self.profile_combo.setCurrentIndex(i)
+                    break
+        self.profile_combo.blockSignals(False)
+
+    def open_profiles(self):
+        from profile_dialog import ProfileDialog
+        dlg = ProfileDialog(self.project_path, self)
+        dlg.exec()
+        self.reload_profiles()
+
     def refresh(self):
         self.load_settings()
+
+    def open_taxonomy(self):
+        from taxonomy_editor import TaxonomyDialog
+        dlg = TaxonomyDialog(self.project_path, self)
+        dlg.exec()
 
     def on_theme_changed(self):
         mode = self.theme_combo.currentData() or "system"
@@ -227,6 +276,47 @@ class SettingsScreen(BaseScreen):
                 "Fluent-библиотека не установлена (pip install PySide6-Fluent-Widgets) — "
                 "используется классическая тема.")
 
+    def _collect_settings(self) -> list:
+        return [
+            ('auto_next_case', str(self.auto_next_checkbox.isChecked()).lower()),
+            ('require_comment_for_bad', self.comment_for_bad_combo.currentData()),
+            ('checks_min_length', str(self.min_length_spin.value())),
+            ('checks_max_length', str(self.max_length_spin.value())),
+            ('checks_max_sentence_len', str(self.max_sentence_spin.value())),
+            ('checks_url', str(self.check_url_checkbox.isChecked()).lower()),
+            ('checks_email', str(self.check_email_checkbox.isChecked()).lower()),
+            ('checks_phone', str(self.check_phone_checkbox.isChecked()).lower()),
+            ('checks_spaces', str(self.check_spaces_checkbox.isChecked()).lower()),
+            ('checks_caps', str(self.check_caps_checkbox.isChecked()).lower()),
+            ('checks_duplicate', str(self.check_duplicate_checkbox.isChecked()).lower()),
+            ('checks_repeat_words', str(self.check_repeat_checkbox.isChecked()).lower()),
+            ('checks_punct', str(self.check_repeat_checkbox.isChecked()).lower()),
+            ('checks_repeat_chars', str(self.check_repeat_checkbox.isChecked()).lower()),
+            ('checks_long_sentence', 'true'),
+            ('checks_junk', str(self.check_junk_checkbox.isChecked()).lower()),
+            ('checks_html', str(self.check_junk_checkbox.isChecked()).lower()),
+            ('checks_markdown', str(self.check_junk_checkbox.isChecked()).lower()),
+            ('checks_encoding', str(self.check_junk_checkbox.isChecked()).lower()),
+            ('checks_suspicious', str(self.check_junk_checkbox.isChecked()).lower()),
+        ]
+
+    def _write_settings(self) -> None:
+        now = datetime.now(UTC).isoformat()
+        with db(self.project_path) as conn:
+            cursor = conn.cursor()
+            for key, value in self._collect_settings():
+                cursor.execute("""
+                    INSERT INTO settings (key, value, updated_at)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT(key) DO UPDATE SET
+                        value = ?,
+                        updated_at = ?
+                """, (key, value, now, value, now))
+        pid = self.profile_combo.currentData()
+        if pid:
+            from review_profile_service import set_active_profile
+            set_active_profile(self.project_path, int(pid))
+
     def on_save(self):
         """Сохраняет настройки."""
         if self.min_length_spin.value() > self.max_length_spin.value():
@@ -234,44 +324,8 @@ class SettingsScreen(BaseScreen):
                    "Минимальная длина не может быть больше максимальной")
             return
         try:
-            now = datetime.now(UTC).isoformat()
-            with db(self.project_path) as conn:
-                cursor = conn.cursor()
-
-                settings = [
-                    ('auto_next_case', str(self.auto_next_checkbox.isChecked()).lower()),
-                    ('require_comment_for_bad', self.comment_for_bad_combo.currentData()),
-                    ('checks_min_length', str(self.min_length_spin.value())),
-                    ('checks_max_length', str(self.max_length_spin.value())),
-                    ('checks_max_sentence_len', str(self.max_sentence_spin.value())),
-                    ('checks_url', str(self.check_url_checkbox.isChecked()).lower()),
-                    ('checks_email', str(self.check_email_checkbox.isChecked()).lower()),
-                    ('checks_phone', str(self.check_phone_checkbox.isChecked()).lower()),
-                    ('checks_spaces', str(self.check_spaces_checkbox.isChecked()).lower()),
-                    ('checks_caps', str(self.check_caps_checkbox.isChecked()).lower()),
-                    ('checks_duplicate', str(self.check_duplicate_checkbox.isChecked()).lower()),
-                    ('checks_repeat_words', str(self.check_repeat_checkbox.isChecked()).lower()),
-                    ('checks_punct', str(self.check_repeat_checkbox.isChecked()).lower()),
-                    ('checks_repeat_chars', str(self.check_repeat_checkbox.isChecked()).lower()),
-                    ('checks_long_sentence', 'true'),
-                    ('checks_junk', str(self.check_junk_checkbox.isChecked()).lower()),
-                    ('checks_html', str(self.check_junk_checkbox.isChecked()).lower()),
-                    ('checks_markdown', str(self.check_junk_checkbox.isChecked()).lower()),
-                    ('checks_encoding', str(self.check_junk_checkbox.isChecked()).lower()),
-                    ('checks_suspicious', str(self.check_junk_checkbox.isChecked()).lower()),
-                ]
-
-                for key, value in settings:
-                    cursor.execute("""
-                        INSERT INTO settings (key, value, updated_at)
-                        VALUES (?, ?, ?)
-                        ON CONFLICT(key) DO UPDATE SET
-                            value = ?,
-                            updated_at = ?
-                    """, (key, value, now, value, now))
-
+            self._write_settings()
             notify(self, "success", "Настройки", "Настройки сохранены")
-
         except Exception as e:
             notify(self, "error", "Ошибка", f"Не удалось сохранить настройки: {str(e)}")
 

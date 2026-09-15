@@ -76,10 +76,15 @@ def export_results_to_xlsx(project_path: str, output_path: str, file_id=None):
                 c.case_id, c.row_index, c.primary_text, c.response_text,
                 c.group_name, f.file_name,
                 COALESCE(a.status, 'unreviewed') as status,
-                a.comment as review_comment, a.updated_at as reviewed_at
+                a.comment as review_comment, a.updated_at as reviewed_at,
+                ec.name as error_category, es.name as error_subcategory,
+                e.severity as error_severity
             FROM cases c
             JOIN files f ON c.file_id = f.file_id
             LEFT JOIN annotations a ON c.case_id = a.case_id
+            LEFT JOIN case_errors e ON e.case_id = c.case_id
+            LEFT JOIN error_categories ec ON ec.category_id = e.category_id
+            LEFT JOIN error_categories es ON es.category_id = e.subcategory_id
             {file_condition}
             ORDER BY f.imported_at, c.row_index
         """, params)
@@ -91,7 +96,8 @@ def export_results_to_xlsx(project_path: str, output_path: str, file_id=None):
     ws = wb.active
     ws.title = "Результаты разметки"
     headers = ["№", "Файл", "Строка", "Запрос", "Ответ", "Группа",
-               "Статус", "Теги", "Комментарий", "Дата проверки"]
+               "Статус", "Теги", "Комментарий", "Дата проверки",
+               "Категория ошибки", "Подкатегория", "Критичность"]
     header_font = Font(bold=True, color="00FF41")
     header_fill = PatternFill(start_color="003300", end_color="003300", fill_type="solid")
     for col, header in enumerate(headers, 1):
@@ -112,8 +118,11 @@ def export_results_to_xlsx(project_path: str, output_path: str, file_id=None):
         ws.cell(row=row_idx, column=8, value=safe_cell(", ".join(tags)))
         ws.cell(row=row_idx, column=9, value=safe_cell(row["review_comment"] or ""))
         ws.cell(row=row_idx, column=10, value=row["reviewed_at"] or "")
+        ws.cell(row=row_idx, column=11, value=safe_cell(row["error_category"] or ""))
+        ws.cell(row=row_idx, column=12, value=safe_cell(row["error_subcategory"] or ""))
+        ws.cell(row=row_idx, column=13, value=safe_cell(row["error_severity"] or ""))
 
-    for i, width in enumerate([5, 20, 8, 50, 50, 15, 12, 25, 30, 20], 1):
+    for i, width in enumerate([5, 20, 8, 50, 50, 15, 12, 25, 30, 20, 20, 20, 12], 1):
         ws.column_dimensions[get_column_letter(i)].width = width
 
     _atomic_save(wb, out)

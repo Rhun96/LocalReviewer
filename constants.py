@@ -56,7 +56,8 @@ MAPPING_ROLES = [
 TABLE_SYSTEM_COLUMNS = ["ID", "Строка", "Файл", "Запрос", "Ответ", "Статус", "Комментарий"]
 
 COLUMN_TO_SQL = {
-    "ID": "c.case_id",
+    # ID показывает идентификатор из маппинга (source_id), иначе внутренний номер
+    "ID": "COALESCE(NULLIF(c.source_id, ''), CAST(c.case_id AS TEXT))",
     "Строка": "c.row_index + 1",
     "Файл": "f.file_name",
     "Запрос": "c.primary_text",

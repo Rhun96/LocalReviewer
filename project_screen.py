@@ -127,8 +127,14 @@ class ProjectScreen(BaseScreen):
         btn_back.clicked.connect(self.on_back)
         apply_shadow(btn_back, color='#FF3B3B')
 
+        btn_datasets = FPushButton("🗂 Датасеты")
+        btn_datasets.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        btn_datasets.setMinimumHeight(45)
+        btn_datasets.clicked.connect(self.on_datasets)
+
         buttons_grid.addWidget(btn_settings, 1, 0)
-        buttons_grid.addWidget(btn_back, 1, 1, 1, 3)
+        buttons_grid.addWidget(btn_datasets, 1, 1)
+        buttons_grid.addWidget(btn_back, 1, 2, 1, 2)
         actions_group.setLayout(buttons_grid)
         apply_shadow(actions_group)
         layout.addWidget(actions_group)
@@ -246,6 +252,12 @@ class ProjectScreen(BaseScreen):
     def on_settings(self):
         """Переход к настройкам."""
         self.parent_window.main_window.show_screen("settings")
+
+    def on_datasets(self):
+        """Датасеты и версии."""
+        from datasets_dialog import DatasetsDialog
+        DatasetsDialog(self.project_path, self).exec()
+        self.load_project_info()
 
     def on_back(self):
         """Возврат на стартовый экран."""

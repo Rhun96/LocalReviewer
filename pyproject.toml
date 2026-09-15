@@ -1,6 +1,6 @@
 [project]
 name = "localreviewer"
-version = "0.2.0"
+version = "0.3.0"
 description = "Локальное десктоп-приложение для ревью и разметки датасетов"
 requires-python = ">=3.11"
 dependencies = [

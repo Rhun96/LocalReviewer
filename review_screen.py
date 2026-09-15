@@ -41,6 +41,10 @@ class ReviewScreen(BaseScreen):
         self.settings = self.load_review_settings()
         self.current_case = None
         self.current_case_id = None
+        self.current_error = None
+        # Строгий режим «Плохо»: после «Нет» в диалоге выход с кейса
+        # заблокирован, пока не допишут комментарий и причину
+        self._bad_pending = False
         self.current_file_mapping = {}  # Маппинг текущего файла
         self.case_ids = []
         self.current_index = 0
@@ -79,6 +83,8 @@ class ReviewScreen(BaseScreen):
     def refresh(self):
         """Перезагрузка при возврате на экран (требуется сайдбару)."""
         self.settings = self.load_review_settings()
+        self.load_profile()
+        self.apply_profile()
         self.load_case_ids()
         self.load_available_columns()
         self.update_column_filter_combo()
@@ -87,6 +93,48 @@ class ReviewScreen(BaseScreen):
             self.load_case(self.current_index)
         self.update_filter_indicator()
         self.update_queue_indicator()
+
+    def load_profile(self) -> dict:
+        """Активный профиль ревью; fallback — дефолтная схема."""
+        try:
+            from review_profile_service import get_active_profile
+            self.profile = get_active_profile(self.project_path)
+        except Exception as e:
+            logger.warning("profile fallback: %s", e)
+            from migrations import DEFAULT_PROFILE_CONFIG
+            import copy
+            self.profile = {"profile_id": 0, "name": "Default",
+                            "config": copy.deepcopy(DEFAULT_PROFILE_CONFIG)}
+        return self.profile
+
+    def profile_statuses(self) -> list:
+        cfg = (getattr(self, "profile", None) or {}).get("config", {})
+        return [s for s in cfg.get("statuses", []) if s.get("enabled")]
+
+    def apply_profile(self):
+        """Кнопки и хоткеи из активного профиля."""
+        if getattr(self, "profile", None) is None:
+            self.load_profile()
+        emoji = {"good": "✅", "bad": "❌", "uncertain": "❓",
+                 "duplicate": "🔄", "skip": "⏭️"}
+        by_code = {s["code"]: s for s in
+                   (self.profile.get("config", {}).get("statuses", []))}
+        for code, btn in (("good", getattr(self, "btn_good", None)),
+                          ("bad", getattr(self, "btn_bad", None)),
+                          ("uncertain", getattr(self, "btn_uncertain", None)),
+                          ("duplicate", getattr(self, "btn_duplicate", None)),
+                          ("skip", getattr(self, "btn_skip", None))):
+            if btn is None:
+                continue
+            spec = by_code.get(code, {})
+            if not spec.get("enabled", True):
+                btn.setVisible(False)
+                continue
+            btn.setVisible(True)
+            hotkey = (spec.get("hotkey") or "").strip()
+            suffix = f" [{hotkey}]" if hotkey else ""
+            btn.setText(f"{emoji.get(code, '')} {spec.get('name', code)}{suffix}")
+        self.rebuild_shortcuts()
 
     def load_review_settings(self) -> dict:
         try:
@@ -163,17 +211,43 @@ class ReviewScreen(BaseScreen):
         return not isinstance(focus, (QLineEdit, QTextEdit, QComboBox, QSpinBox))
 
     def init_shortcuts(self):
+        self._shortcuts = []
+        self.rebuild_shortcuts()
+
+    def rebuild_shortcuts(self):
+        """Хоткеи из профиля (+ стрелки всегда). Старые удаляем."""
+        for sc in getattr(self, "_shortcuts", []):
+            try:
+                sc.setParent(None)
+                sc.deleteLater()
+            except Exception:
+                pass
+        self._shortcuts = []
+
         def guarded(fn):
             return lambda: fn() if self._shortcuts_allowed() else None
-        for key, status in (("1", "good"), ("2", "bad"), ("3", "uncertain"),
-                            ("4", "duplicate"), ("5", "skip")):
-            sc = QShortcut(QKeySequence(key), self)
-            sc.setContext(Qt.ShortcutContext.WindowShortcut)
-            sc.activated.connect(guarded(lambda s=status: self.set_status(s)))
-        for key, fn in (("Right", self.next_case), ("Left", self.prev_case)):
+
+        def _add(key, fn):
             sc = QShortcut(QKeySequence(key), self)
             sc.setContext(Qt.ShortcutContext.WindowShortcut)
             sc.activated.connect(guarded(fn))
+            self._shortcuts.append(sc)
+
+        try:
+            statuses = self.profile_statuses()
+        except Exception:
+            statuses = []
+        if not statuses:
+            statuses = [{"code": c, "hotkey": k} for c, k in
+                        (("good", "1"), ("bad", "2"), ("uncertain", "3"),
+                         ("duplicate", "4"), ("skip", "5"))]
+        for spec in statuses:
+            hotkey = (spec.get("hotkey") or "").strip()
+            code = spec.get("code")
+            if hotkey and code:
+                _add(hotkey, lambda s=code: self.set_status(s))
+        _add("Right", self.next_case)
+        _add("Left", self.prev_case)
 
     def init_ui(self):
         main_layout = QVBoxLayout()
@@ -296,11 +370,17 @@ class ReviewScreen(BaseScreen):
         btn_back.setMinimumHeight(30)
         btn_back.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         btn_back.clicked.connect(self.on_back)
+        self.btn_finish = FPushButton("🏁 Завершить ревью")
+        self.btn_finish.setMinimumHeight(30)
+        self.btn_finish.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.btn_finish.setToolTip("Сохранить версию датасета (снимок всех оценок)")
+        self.btn_finish.clicked.connect(self.on_finish_review)
         nav_layout.addWidget(btn_prev)
         nav_layout.addWidget(btn_filters)
         nav_layout.addWidget(btn_next)
         nav_layout.addWidget(btn_back)
-        for _i in range(4):
+        nav_layout.addWidget(self.btn_finish)
+        for _i in range(5):
             nav_layout.setStretch(_i, 1)
         nav_group.setLayout(nav_layout)
         layout.addWidget(nav_group)
@@ -409,7 +489,14 @@ class ReviewScreen(BaseScreen):
             QPushButton:hover { background-color: #002233; }
         """)
         self.btn_toggle_tags.clicked.connect(self.toggle_tags)
-        layout.addWidget(self.btn_toggle_tags)
+        tags_row = QHBoxLayout()
+        tags_row.addWidget(self.btn_toggle_tags)
+        self.btn_taxonomy = FPushButton("⚠ Таксономия…")
+        self.btn_taxonomy.setMinimumHeight(30)
+        self.btn_taxonomy.setToolTip("Редактор категорий и подкатегорий ошибок")
+        self.btn_taxonomy.clicked.connect(self.open_taxonomy_editor)
+        tags_row.addWidget(self.btn_taxonomy)
+        layout.addLayout(tags_row)
         self.tags_group = QGroupBox("🏷️ Теги")
         self.tags_layout = QGridLayout()
         self.tags_layout.setSpacing(4)
@@ -557,6 +644,14 @@ class ReviewScreen(BaseScreen):
             self.tags_group.setVisible(False)
             self.btn_toggle_tags.setText("🏷️ Теги (нажмите для раскрытия)")
 
+    def open_taxonomy_editor(self):
+        """Редактор таксономии прямо из ревью — всё под рукой."""
+        try:
+            from taxonomy_editor import TaxonomyDialog
+            TaxonomyDialog(self.project_path, self).exec()
+        except Exception as e:
+            self.show_error("Не удалось открыть таксономию", e)
+
     def update_column_filter_combo(self):
         """Обновляет список столбцов для фильтра."""
         if not hasattr(self, 'column_filter_combo'):
@@ -669,7 +764,7 @@ class ReviewScreen(BaseScreen):
                 self.current_page = min(self.current_page, self.total_pages - 1)
                 offset = self.current_page * self.page_size
                 data_query = """
-                    SELECT c.case_id, c.row_index + 1 as row_num, f.file_name,
+                    SELECT c.case_id, c.source_id, c.row_index + 1 as row_num, f.file_name,
                            c.primary_text, c.response_text,
                            COALESCE(a.status, 'unreviewed') as status,
                            a.comment, c.metadata_json
@@ -751,7 +846,8 @@ class ReviewScreen(BaseScreen):
                 self.cases_table.setCellWidget(row, 0, check_wrap)
                 for col_idx, col_name in enumerate(self.selected_columns, start=1):
                     if col_name == 'ID':
-                        value = str(case['case_id'])
+                        # Идентификатор из маппинга (001, 1kij…), иначе внутренний номер
+                        value = case['source_id'] or str(case['case_id'])
                     elif col_name == 'Строка':
                         value = str(case['row_num'])
                     elif col_name == 'Файл':
@@ -1039,6 +1135,10 @@ class ReviewScreen(BaseScreen):
             self.load_table_data()
 
     def on_table_double_click(self, index):
+        if not self._bad_can_leave():
+            self.view_stack.setCurrentIndex(0)
+            self.btn_toggle_view.setText("📋 Таблица")
+            return
         row = index.row()
         item = self.cases_table.item(row, 0)
         if not item:
@@ -1207,6 +1307,7 @@ class ReviewScreen(BaseScreen):
             return
         if self.current_case_id:
             self.save_comment(silent=True)
+        self._bad_pending = False  # новый кейс — чистый лист
         self.current_index = index
         self.current_case_id = self.case_ids[index]
         try:
@@ -1243,6 +1344,11 @@ class ReviewScreen(BaseScreen):
                     WHERE ct.case_id = ?
                 """, (self.current_case_id,))
                 case_tags = {r['tag_id'] for r in cursor.fetchall()}
+            try:
+                from taxonomy_service import get_case_error
+                self.current_error = get_case_error(self.project_path, self.current_case_id)
+            except Exception:
+                self.current_error = None
             self.update_case_display()
             self.update_tags_display(case_tags)
             self.update_info_label()
@@ -1366,11 +1472,93 @@ class ReviewScreen(BaseScreen):
             'skip': f"⏭️ {STATUS_NAMES['skip']}",
         }
         status = status_map.get(self.current_case.get('status'), '⬜ Не проверено')
-        self.info_label.setText(
+        text = (
             f"📋 Кейс {self.current_index + 1} / {len(self.case_ids)} | "
             f"📄 {self.current_case.get('file_name')} | "
             f"{status}"
         )
+        err = getattr(self, "current_error", None)
+        if err and err.get("category_name"):
+            from taxonomy_service import SEVERITY_NAMES
+            sub = f" → {err['subcategory_name']}" if err.get("subcategory_name") else ""
+            sev = SEVERITY_NAMES.get(err.get("severity", ""), "")
+            text += f" | ⚠ {err['category_name']}{sub} [{sev}]"
+        self.info_label.setText(text)
+        self.update_finish_button()
+
+    def _review_scope(self):
+        """Скоуп ревью: файл из фильтров или весь проект.
+
+        Считаем только то, что проверяется: условный «Ревью 1» — кейсы
+        файла «Ревью 1»; все файлы — только если фильтр по файлу не задан.
+        """
+        return (self.filters or {}).get("file_id")
+
+    def _scope_stats(self) -> dict:
+        from review_queue_service import queue_stats
+        return queue_stats(self.project_path, file_id=self._review_scope())
+
+    def _scope_name(self) -> str:
+        fid = self._review_scope()
+        if fid is None:
+            return "проект"
+        try:
+            with db(self.project_path) as conn:
+                row = conn.cursor().execute(
+                    "SELECT file_name FROM files WHERE file_id=?", (fid,)).fetchone()
+                if row:
+                    return f"файл «{row['file_name']}»"
+        except Exception:
+            pass
+        return "файл"
+
+    def update_finish_button(self):
+        """Кнопка «Завершить ревью» активна только при 100% в текущем скоупе."""
+        btn = getattr(self, "btn_finish", None)
+        if btn is None:
+            return
+        try:
+            stats = self._scope_stats()
+            total, remaining = stats["total"], stats["remaining"]
+        except Exception:
+            btn.setEnabled(False)
+            return
+        if total and remaining == 0:
+            btn.setEnabled(True)
+            btn.setToolTip(f"Всё размечено ({self._scope_name()}) — "
+                           "сохранить версию датасета (снимок всех оценок)")
+        else:
+            btn.setEnabled(False)
+            if total:
+                btn.setToolTip(f"Осталось разметить: {remaining} ({self._scope_name()})")
+            else:
+                btn.setToolTip("Нет кейсов")
+
+    def on_finish_review(self):
+        """Итог по текущему скоупу + переход к сохранению версии датасета."""
+        from report_service import get_overall_report
+        try:
+            rep = get_overall_report(self.project_path, file_id=self._review_scope())
+        except Exception as e:
+            self.show_error("Не удалось посчитать итог", e)
+            return
+        scope = self._scope_name()
+        logger.info("finish review pressed: scope=%s total=%s reviewed=%s",
+                    scope, rep["total"], rep["reviewed"])
+        if not rep["total"] or rep["reviewed"] < rep["total"]:
+            notify(self, "warning", "Ещё не всё",
+                   f"Осталось разметить: {rep['total'] - rep['reviewed']} ({scope})")
+            return
+        summary = (f"{scope.capitalize()}: проверено {rep['reviewed']} из {rep['total']}\n"
+                   f"✅ Хорошо: {rep['good']}\n"
+                   f"❌ Плохо: {rep['bad']}\n"
+                   f"❓ Сомневаюсь: {rep['uncertain']}\n"
+                   f"🔄 Дубль: {rep['duplicate']}\n"
+                   f"⏭️ Пропущено: {rep['skip']}")
+        if confirm(self, "Завершить ревью",
+                   summary + "\n\nСохранить версию датасета?"):
+            from datasets_dialog import DatasetsDialog
+            DatasetsDialog(self.project_path, self).exec()
 
     def update_tags_display(self, selected_tag_ids: set):
         while self.tags_layout.count():
@@ -1520,12 +1708,46 @@ class ReviewScreen(BaseScreen):
             else:
                 logger.warning("save_comment silent failed: %s", e)
 
+    def _bad_can_leave(self) -> bool:
+        """Можно ли уйти с кейса в строгом режиме (всегда True вне pending)."""
+        if not self._bad_pending:
+            return True
+        comment = self.comment_edit.toPlainText().strip()
+        if not comment:
+            notify(self, "warning", "Заполните комментарий",
+                   "Чтобы уйти с кейса: напиши комментарий, нажми «Плохо» "
+                   "и укажи причину. Или выбери другой статус.")
+        else:
+            notify(self, "warning", "Укажите причину",
+                   "Комментарий есть. Нажми «Плохо» и выбери причину — "
+                   "или выбери другой статус.")
+            self.comment_edit.setFocus()
+        if not comment:
+            self.comment_edit.setFocus()
+        return False
+
     def set_status(self, status: str):
         if not self.current_case_id:
             return
+        # Настройки — свежие из БД, а не кэшированные: режимы
+        # «мягкое/обязательное» должны работать сразу после смены в настройках
+        try:
+            self.settings = self.load_review_settings()
+        except Exception as e:
+            logger.warning("settings reload failed: %s", e)
+        try:
+            self.load_profile()
+        except Exception as e:
+            logger.warning("profile reload failed: %s", e)
+        # Выход из строгого режима — выбором любого другого статуса
+        if status != "bad":
+            self._bad_pending = False
         comment = self.comment_edit.toPlainText().strip()
-        if status == 'bad':
+        profile_cfg = (getattr(self, "profile", None) or {}).get("config", {})
+        comment_mode = profile_cfg.get("require_comment_for_bad", None)
+        if comment_mode is None:
             comment_mode = self.settings.get('require_comment_for_bad', 'warn')
+        if status == 'bad':
             if comment_mode == 'required' and not comment:
                 notify(
                     self,
@@ -1533,6 +1755,7 @@ class ReviewScreen(BaseScreen):
                     "Требуется комментарий",
                     "Для статуса «Плохо» необходимо добавить комментарий."
                 )
+                self.comment_edit.setFocus()
                 return
             elif comment_mode == 'warn' and not comment:
                 if not confirm(
@@ -1540,7 +1763,18 @@ class ReviewScreen(BaseScreen):
                     "Рекомендация",
                     "Для статуса «Плохо» рекомендуется добавить комментарий.\n\n"
                     "Продолжить без комментария?",
+                    ok_text="Да",
+                    cancel_text="Нет",
                 ):
+                    # «Нет» = строгий режим: остаёмся, ничего не сохраняем,
+                    # выход с кейса заблокирован до комментария + причины
+                    self._bad_pending = True
+                    self.save_indicator.setText(
+                        "✏️ Напиши комментарий и снова нажми «Плохо»")
+                    notify(self, "warning", "Заполните комментарий",
+                           "Переход заблокирован: напиши комментарий, нажми "
+                           "«Плохо» и укажи причину. Или выбери другой статус.")
+                    self.comment_edit.setFocus()
                     return
         try:
             now = datetime.now(UTC).isoformat()
@@ -1571,6 +1805,22 @@ class ReviewScreen(BaseScreen):
                     """, (self.current_case_id, old_status, status, now))
             self.current_case['status'] = status
             self.current_case['comment'] = comment or None
+            if status == "bad" and comment:
+                # Причина — только если человек реально комментирует:
+                # структурированное поле дополняет свободный текст, а не дублирует.
+                # В строгом режиме и по профилю пропуск запрещён: остаёмся без перехода.
+                pending = self._bad_pending
+                required_by_profile = bool(profile_cfg.get(
+                    "require_category_for_bad", False))
+                completed = self._ask_error_cause()
+                if pending or (required_by_profile and not completed):
+                    if not completed:
+                        notify(self, "warning", "Укажите причину",
+                               "Без причины с кейса не уйти. "
+                               "Выбери причину — или другой статус.")
+                        self.update_info_label()
+                        return
+                    self._bad_pending = False
             self.update_info_label()
             self.save_indicator.setText(f"💾 Статус сохранён: {status}")
             if self.settings.get('auto_next_case', True):
@@ -1578,13 +1828,58 @@ class ReviewScreen(BaseScreen):
         except Exception as e:
             self.show_error("Не удалось сохранить статус", e)
 
+    def _ask_error_cause(self) -> bool:
+        """Быстрый выбор причины после «Плохо» (ТЗ §23).
+
+        Возвращает True, если причина выбрана и сохранена.
+        """
+        try:
+            from taxonomy_dialog import ErrorCauseDialog
+            from taxonomy_service import set_case_error
+        except Exception as e:
+            logger.warning("taxonomy unavailable: %s", e)
+            return True  # не блокируем разметку из-за сломанного модуля
+        try:
+            dlg = ErrorCauseDialog(self.project_path, self)
+            if dlg.exec() == QDialog.DialogCode.Accepted and dlg.result:
+                cat_id, sub_id, sev = dlg.result
+                set_case_error(self.project_path, self.current_case_id,
+                               cat_id, sub_id, sev)
+                # подтянем имена для шапки
+                from taxonomy_service import get_case_error
+                self.current_error = get_case_error(
+                    self.project_path, self.current_case_id)
+                return True
+            return False
+        except Exception as e:
+            logger.warning("error cause dialog failed: %s", e)
+            return True
+
     def next_case(self):
+        if not self._bad_can_leave():
+            return
         if self.current_index < len(self.case_ids) - 1:
             self.load_case(self.current_index + 1)
+            return
+        # Последний кейс выборки: если текущий скоуп готов — тихая подсказка
+        # про версию датасета (без модалок и без флагов «один раз»).
+        try:
+            stats = self._scope_stats()
+            complete = stats["total"] > 0 and stats["remaining"] == 0
+        except Exception:
+            complete = False
+        logger.info("last case reached: scope=%s complete=%s",
+                    self._scope_name(), complete)
+        if complete:
+            notify(self, "success", "Ревью завершено",
+                   f"Всё размечено ({self._scope_name()}). Сохрани версию датасета "
+                   "кнопкой «🏁 Завершить ревью».")
         else:
             notify(self, "success", "Конец", "🎉 Это последний кейс в выборке")
 
     def prev_case(self):
+        if not self._bad_can_leave():
+            return
         if self.current_index > 0:
             self.load_case(self.current_index - 1)
         else:
