@@ -4,7 +4,7 @@ from PySide6.QtWidgets import (
     QScrollArea, QWidget, QInputDialog
 )
 from PySide6.QtCore import Qt
-from constants import CHECK_OPTIONS, STATUS_OPTIONS
+from constants import CHECK_OPTIONS, CHECK_SEVERITIES, STATUS_OPTIONS
 from database import db
 from ui_compat import (
     FCheckBox, FComboBox, FLineEdit, FPrimaryButton, FPushButton,
@@ -30,11 +30,16 @@ class FilterDialog(QDialog):
             'tags': [],
             'search_text': '',
             'checks': [],
+            'check_severities': [],
+            'error_category_id': None,
+            'error_severities': [],
         }
 
         self.status_checkboxes = {}
         self.tag_checkboxes = {}
         self.check_checkboxes = {}
+        self.sev_checkboxes = {}
+        self.err_sev_checkboxes = {}
 
         self.init_ui()
 
@@ -142,6 +147,36 @@ class FilterDialog(QDialog):
         checks_group.setLayout(self.checks_layout)
         layout.addWidget(checks_group)
 
+        # Severity автопроверок
+        sev_group = QGroupBox("Severity автопроверок")
+        sev_layout = QHBoxLayout()
+        for code, name in CHECK_SEVERITIES:
+            cb = FCheckBox(name)
+            self.sev_checkboxes[code] = cb
+            sev_layout.addWidget(cb)
+        sev_group.setLayout(sev_layout)
+        layout.addWidget(sev_group)
+
+        # Таксономия ошибок
+        err_group = QGroupBox("Причина ошибки (таксономия)")
+        err_layout = QVBoxLayout()
+        err_row = QHBoxLayout()
+        self.error_category_combo = FComboBox()
+        self.error_category_combo.addItem("Любая причина", None)
+        self._load_error_categories()
+        err_row.addWidget(QLabel("Категория:"))
+        err_row.addWidget(self.error_category_combo)
+        err_layout.addLayout(err_row)
+        err_sev_row = QHBoxLayout()
+        for code, name in (("low", "Низкая"), ("medium", "Средняя"),
+                           ("high", "Высокая"), ("critical", "Критическая")):
+            cb = FCheckBox(name)
+            self.err_sev_checkboxes[code] = cb
+            err_sev_row.addWidget(cb)
+        err_layout.addLayout(err_sev_row)
+        err_group.setLayout(err_layout)
+        layout.addWidget(err_group)
+
         # Текстовый поиск
         search_group = QGroupBox("Поиск по тексту")
         search_layout = QHBoxLayout()
@@ -212,6 +247,19 @@ class FilterDialog(QDialog):
         except Exception:
             pass
 
+    def _load_error_categories(self):
+        try:
+            from taxonomy_service import list_categories
+            cats = list_categories(self.project_path)
+        except Exception:
+            cats = []
+        for cat in cats:
+            self.error_category_combo.addItem(
+                cat["name"], cat["category_id"])
+            for sub in cat.get("subs", []):
+                self.error_category_combo.addItem(
+                    f"  └ {sub['name']}", sub["category_id"])
+
     def on_apply(self):
         self.filters['statuses'] = [
             code for code, cb in self.status_checkboxes.items() if cb.isChecked()
@@ -226,6 +274,13 @@ class FilterDialog(QDialog):
 
         self.filters['checks'] = [
             code for code, cb in self.check_checkboxes.items() if cb.isChecked()
+        ]
+        self.filters['check_severities'] = [
+            code for code, cb in self.sev_checkboxes.items() if cb.isChecked()
+        ]
+        self.filters['error_category_id'] = self.error_category_combo.currentData()
+        self.filters['error_severities'] = [
+            code for code, cb in self.err_sev_checkboxes.items() if cb.isChecked()
         ]
 
         self.filters['search_text'] = self.search_input.text().strip()
@@ -244,6 +299,14 @@ class FilterDialog(QDialog):
 
         for cb in self.check_checkboxes.values():
             cb.setChecked(False)
+        for cb in self.sev_checkboxes.values():
+            cb.setChecked(False)
+        for cb in self.err_sev_checkboxes.values():
+            cb.setChecked(False)
+        try:
+            self.error_category_combo.setCurrentIndex(0)
+        except Exception:
+            pass
 
         self.search_input.clear()
 
@@ -271,6 +334,11 @@ class FilterDialog(QDialog):
             "has_comment": self.comment_combo.currentData(),
             "tags": [t for t, cb in self.tag_checkboxes.items() if cb.isChecked()],
             "checks": [c for c, cb in self.check_checkboxes.items() if cb.isChecked()],
+            "check_severities": [c for c, cb in self.sev_checkboxes.items()
+                                 if cb.isChecked()],
+            "error_category_id": self.error_category_combo.currentData(),
+            "error_severities": [c for c, cb in self.err_sev_checkboxes.items()
+                                 if cb.isChecked()],
             "search_text": self.search_input.text().strip(),
         }
 
@@ -333,5 +401,19 @@ class FilterDialog(QDialog):
 
         for code, cb in self.check_checkboxes.items():
             cb.setChecked(code in filters.get('checks', []))
+        for code, cb in self.sev_checkboxes.items():
+            cb.setChecked(code in filters.get('check_severities', []))
+        for code, cb in self.err_sev_checkboxes.items():
+            cb.setChecked(code in filters.get('error_severities', []))
+        try:
+            ecid = filters.get('error_category_id')
+            self.error_category_combo.setCurrentIndex(0)
+            if ecid:
+                for i in range(self.error_category_combo.count()):
+                    if self.error_category_combo.itemData(i) == ecid:
+                        self.error_category_combo.setCurrentIndex(i)
+                        break
+        except Exception:
+            pass
 
         self.search_input.setText(filters.get('search_text', ''))

@@ -232,6 +232,12 @@ class MainWindow(_BaseWindow):
     def open_project(self, folder):
         """Открывает проект (старый выгружается, чтобы не было утечек)."""
         try:
+            # Логи — в папку проекта (ТЗ: logs/ проекта, а не CWD exe).
+            try:
+                from app_logging import setup_logging as _setup
+                _setup(project_path=folder)
+            except Exception:
+                pass
             # Миграции должны выполняться и при ОТКРЫТИИ, а не только при создании:
             # иначе старые проекты не получат новые таблицы (bulk_operations, saved_filters...).
             init_database(folder)
@@ -286,10 +292,30 @@ class MainWindow(_BaseWindow):
         """Показать экран проекта; для ревью можно передать фильтры.
 
         Единая точка навигации: подсветка в меню всегда соответствует контенту.
+        Строгий режим «Плохо» блокирует уход с недозаполненного кейса.
         """
         pw = self.project_window
         if not pw or key not in pw.screens:
             return
+        # Не даём тихо сбросить pending переходом через меню/назад.
+        try:
+            cur = None
+            if FLUENT:
+                cur = self.stackedWidget.currentWidget()
+            else:
+                cur = pw.stack.currentWidget()
+            if cur is not None and cur is not pw.screens.get(key):
+                can_leave = getattr(cur, "_bad_can_leave", None)
+                if callable(can_leave) and not can_leave():
+                    # Подсветка меню останется на текущем экране после возврата.
+                    try:
+                        if FLUENT:
+                            self.switchTo(cur)
+                    except Exception:
+                        pass
+                    return
+        except Exception:
+            pass
         screen = pw.screens[key]
         if filters is not None and hasattr(screen, "filters"):
             screen.filters = filters

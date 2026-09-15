@@ -231,6 +231,32 @@ def migrate_to_v8(cursor) -> None:
     logger.info("migrated to v8 (dataset stable keys)")
 
 
+def migrate_to_v9(cursor) -> None:
+    """Полный снимок разметки (исправление неполного dataset_cases).
+
+    Добавляет: error_category_id/subcategory/severity, tags_json, text_hash.
+    Только ADD COLUMN + INDEX, без DROP. Старые снимки остаются с NULL
+    в новых полях (неизвестность, а не «пусто») — compare их учитывает.
+    """
+    cols = [r[1] for r in cursor.execute("PRAGMA table_info(dataset_cases)").fetchall()]
+    for col, ddl in (
+        ("error_category_id", "ALTER TABLE dataset_cases "
+                              "ADD COLUMN error_category_id INTEGER"),
+        ("error_subcategory_id", "ALTER TABLE dataset_cases "
+                                 "ADD COLUMN error_subcategory_id INTEGER"),
+        ("error_severity", "ALTER TABLE dataset_cases ADD COLUMN error_severity TEXT"),
+        ("tags_json", "ALTER TABLE dataset_cases ADD COLUMN tags_json TEXT"),
+        ("text_hash", "ALTER TABLE dataset_cases ADD COLUMN text_hash TEXT"),
+    ):
+        if col not in cols:
+            cursor.execute(ddl)
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_dataset_cases_key "
+        "ON dataset_cases(version_id, stable_key)"
+    )
+    logger.info("migrated to v9 (dataset full snapshot)")
+
+
 def migrate_to_v5(cursor) -> None:
     """Таксономия ошибок + классификация кейсов (ТЗ §19-23)."""
     cursor.execute("""
@@ -337,6 +363,14 @@ def _dedup_cases(cursor) -> int:
             if not has_keeper:
                 cursor.execute(
                     "UPDATE annotations SET case_id=? WHERE case_id=?", (keeper, loser))
+            # Классификация ошибки: перенести, если у keeper нет своей
+            has_err = cursor.execute(
+                "SELECT 1 FROM case_errors WHERE case_id=?", (keeper,)).fetchone()
+            if not has_err:
+                cursor.execute(
+                    "UPDATE case_errors SET case_id=? WHERE case_id=?", (keeper, loser))
+            else:
+                cursor.execute("DELETE FROM case_errors WHERE case_id=?", (loser,))
             # Теги: merge без дублей
             cursor.execute("""
                 INSERT OR IGNORE INTO case_tags (case_id, tag_id, created_at)
@@ -345,6 +379,17 @@ def _dedup_cases(cursor) -> int:
             # История и проверки: перепривязать
             cursor.execute("UPDATE history SET case_id=? WHERE case_id=?", (keeper, loser))
             cursor.execute("UPDATE case_checks SET case_id=? WHERE case_id=?", (keeper, loser))
+            # Bulk/dataset-ссылки: перепривязать, чтобы не было сирот
+            try:
+                cursor.execute("UPDATE bulk_operation_items SET case_id=? WHERE case_id=?",
+                               (keeper, loser))
+            except Exception:
+                pass
+            try:
+                cursor.execute("UPDATE dataset_cases SET case_id=? WHERE case_id=?",
+                               (keeper, loser))
+            except Exception:
+                pass
             cursor.execute("DELETE FROM cases WHERE case_id=?", (loser,))
             removed += 1
     if removed:

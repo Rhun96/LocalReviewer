@@ -246,8 +246,10 @@ class Cancelled(Exception):
 
 def run_autochecks(project_path: str, file_id: int = None,
                    progress_callback=None, cancel_event=None) -> dict:
-    """Батчами по 2000, duplicate через hash-счётчик, severity в БД.
+    """Батчами по 2000, duplicate через глобальный hash-счётчик, severity в БД.
 
+    Дубли считаются по ВСЕЙ выборке (два прохода), а не внутри батча 2000 —
+    иначе дубль через границу батчей терялся.
     Коммит после каждого батча: UI остаётся живым между чанками, прогресс
     отображается через progress_callback(done, total), отмена — через cancel_event.
     """
@@ -285,6 +287,22 @@ def run_autochecks(project_path: str, file_id: int = None,
             base += " WHERE file_id = ?"
             params.append(file_id)
 
+        # Проход 1: глобальные счётчики хэшей для duplicate (вся выборка).
+        global_counts: Counter = Counter()
+        if settings.get("check_duplicate", True):
+            cursor.execute(base, params)
+            while True:
+                if cancel_event is not None and cancel_event.is_set():
+                    raise Cancelled(
+                        f"Прервано пользователем: проверено 0 из {total}")
+                rows = cursor.fetchmany(2000)
+                if not rows:
+                    break
+                for r in rows:
+                    h = compute_text_hash(
+                        f"{r['primary_text'] or ''} {r['response_text'] or ''}")
+                    global_counts[h] += 1
+
         now = utcnow()
         total_checked = 0
         total_flags = 0
@@ -314,16 +332,16 @@ def run_autochecks(project_path: str, file_id: int = None,
             rows = cursor.fetchmany(2000)
             if not rows:
                 break
-            hashes = [compute_text_hash(f"{r['primary_text'] or ''} {r['response_text'] or ''}")
-                      for r in rows]
-            counts = Counter(hashes)
-            for case, h in zip(rows, hashes, strict=True):
+            for case in rows:
                 total_checked += 1
                 d = {"primary_text": case["primary_text"], "response_text": case["response_text"]}
                 flags = check_case(d, settings)
-                if settings.get("check_duplicate", True) and counts[h] > 1:
-                    flags.append(("duplicate", RULES["duplicate"]["name"],
-                                  f"Повторов в выборке: {counts[h]}"))
+                if settings.get("check_duplicate", True):
+                    h = compute_text_hash(
+                        f"{case['primary_text'] or ''} {case['response_text'] or ''}")
+                    if global_counts[h] > 1:
+                        flags.append(("duplicate", RULES["duplicate"]["name"],
+                                      f"Повторов в выборке: {global_counts[h]}"))
                 for code, name, details in flags:
                     batch.append((case["case_id"], code, name, details, rule_severity(code), now))
                     total_flags += 1

@@ -128,13 +128,41 @@ class SettingsScreen(BaseScreen):
         self.check_duplicate_checkbox.setChecked(True)
         checks_layout.addRow(self.check_duplicate_checkbox)
 
-        self.check_repeat_checkbox = FCheckBox("Проверять повторы слов/символов")
-        self.check_repeat_checkbox.setChecked(True)
-        checks_layout.addRow(self.check_repeat_checkbox)
+        self.check_repeat_words_checkbox = FCheckBox("Проверять повторы слов (да да да)")
+        self.check_repeat_words_checkbox.setChecked(True)
+        checks_layout.addRow(self.check_repeat_words_checkbox)
 
-        self.check_junk_checkbox = FCheckBox("Проверять служебный мусор и HTML")
+        self.check_punct_checkbox = FCheckBox("Проверять серии знаков (!!!!!)")
+        self.check_punct_checkbox.setChecked(True)
+        checks_layout.addRow(self.check_punct_checkbox)
+
+        self.check_repeat_chars_checkbox = FCheckBox("Проверять повторы символов (аааааа)")
+        self.check_repeat_chars_checkbox.setChecked(True)
+        checks_layout.addRow(self.check_repeat_chars_checkbox)
+
+        self.check_long_sentence_checkbox = FCheckBox("Проверять длинные предложения")
+        self.check_long_sentence_checkbox.setChecked(True)
+        checks_layout.addRow(self.check_long_sentence_checkbox)
+
+        self.check_junk_checkbox = FCheckBox("Проверять служебный мусор (SYSTEM:, <END>)")
         self.check_junk_checkbox.setChecked(True)
         checks_layout.addRow(self.check_junk_checkbox)
+
+        self.check_html_checkbox = FCheckBox("Проверять HTML-разметку")
+        self.check_html_checkbox.setChecked(True)
+        checks_layout.addRow(self.check_html_checkbox)
+
+        self.check_markdown_checkbox = FCheckBox("Проверять Markdown (заголовки/таблицы)")
+        self.check_markdown_checkbox.setChecked(True)
+        checks_layout.addRow(self.check_markdown_checkbox)
+
+        self.check_encoding_checkbox = FCheckBox("Проверять битую кодировку")
+        self.check_encoding_checkbox.setChecked(True)
+        checks_layout.addRow(self.check_encoding_checkbox)
+
+        self.check_suspicious_checkbox = FCheckBox("Проверять невидимые символы")
+        self.check_suspicious_checkbox.setChecked(True)
+        checks_layout.addRow(self.check_suspicious_checkbox)
 
         self.max_sentence_spin = FSpinBox()
         self.max_sentence_spin.setMinimum(50)
@@ -225,8 +253,22 @@ class SettingsScreen(BaseScreen):
             _set(self.check_spaces_checkbox, settings.get('checks_spaces'))
             _set(self.check_caps_checkbox, settings.get('checks_caps'))
             _set(self.check_duplicate_checkbox, settings.get('checks_duplicate'))
-            _set(self.check_repeat_checkbox, settings.get('checks_repeat_words'))
+            # Совместимость: старые БД могли хранить только групповые ключи.
+            _set(self.check_repeat_words_checkbox, settings.get('checks_repeat_words'))
+            _set(self.check_punct_checkbox, settings.get('checks_punct',
+                  settings.get('checks_repeat_words')))
+            _set(self.check_repeat_chars_checkbox, settings.get('checks_repeat_chars',
+                  settings.get('checks_repeat_words')))
+            _set(self.check_long_sentence_checkbox, settings.get('checks_long_sentence'))
             _set(self.check_junk_checkbox, settings.get('checks_junk'))
+            _set(self.check_html_checkbox, settings.get('checks_html',
+                  settings.get('checks_junk')))
+            _set(self.check_markdown_checkbox, settings.get('checks_markdown',
+                  settings.get('checks_junk')))
+            _set(self.check_encoding_checkbox, settings.get('checks_encoding',
+                  settings.get('checks_junk')))
+            _set(self.check_suspicious_checkbox, settings.get('checks_suspicious',
+                  settings.get('checks_junk')))
             self.reload_profiles()
 
         except Exception:
@@ -277,6 +319,7 @@ class SettingsScreen(BaseScreen):
                 "используется классическая тема.")
 
     def _collect_settings(self) -> list:
+        # 1-в-1 с autocheck_service.DEFAULTS: каждый ключ — свой чекбокс.
         return [
             ('auto_next_case', str(self.auto_next_checkbox.isChecked()).lower()),
             ('require_comment_for_bad', self.comment_for_bad_combo.currentData()),
@@ -289,15 +332,15 @@ class SettingsScreen(BaseScreen):
             ('checks_spaces', str(self.check_spaces_checkbox.isChecked()).lower()),
             ('checks_caps', str(self.check_caps_checkbox.isChecked()).lower()),
             ('checks_duplicate', str(self.check_duplicate_checkbox.isChecked()).lower()),
-            ('checks_repeat_words', str(self.check_repeat_checkbox.isChecked()).lower()),
-            ('checks_punct', str(self.check_repeat_checkbox.isChecked()).lower()),
-            ('checks_repeat_chars', str(self.check_repeat_checkbox.isChecked()).lower()),
-            ('checks_long_sentence', 'true'),
+            ('checks_repeat_words', str(self.check_repeat_words_checkbox.isChecked()).lower()),
+            ('checks_punct', str(self.check_punct_checkbox.isChecked()).lower()),
+            ('checks_repeat_chars', str(self.check_repeat_chars_checkbox.isChecked()).lower()),
+            ('checks_long_sentence', str(self.check_long_sentence_checkbox.isChecked()).lower()),
             ('checks_junk', str(self.check_junk_checkbox.isChecked()).lower()),
-            ('checks_html', str(self.check_junk_checkbox.isChecked()).lower()),
-            ('checks_markdown', str(self.check_junk_checkbox.isChecked()).lower()),
-            ('checks_encoding', str(self.check_junk_checkbox.isChecked()).lower()),
-            ('checks_suspicious', str(self.check_junk_checkbox.isChecked()).lower()),
+            ('checks_html', str(self.check_html_checkbox.isChecked()).lower()),
+            ('checks_markdown', str(self.check_markdown_checkbox.isChecked()).lower()),
+            ('checks_encoding', str(self.check_encoding_checkbox.isChecked()).lower()),
+            ('checks_suspicious', str(self.check_suspicious_checkbox.isChecked()).lower()),
         ]
 
     def _write_settings(self) -> None:
@@ -342,8 +385,15 @@ class SettingsScreen(BaseScreen):
         self.check_spaces_checkbox.setChecked(True)
         self.check_caps_checkbox.setChecked(True)
         self.check_duplicate_checkbox.setChecked(True)
-        self.check_repeat_checkbox.setChecked(True)
+        self.check_repeat_words_checkbox.setChecked(True)
+        self.check_punct_checkbox.setChecked(True)
+        self.check_repeat_chars_checkbox.setChecked(True)
+        self.check_long_sentence_checkbox.setChecked(True)
         self.check_junk_checkbox.setChecked(True)
+        self.check_html_checkbox.setChecked(True)
+        self.check_markdown_checkbox.setChecked(True)
+        self.check_encoding_checkbox.setChecked(True)
+        self.check_suspicious_checkbox.setChecked(True)
 
     def on_back(self):
         """Возврат к проекту."""

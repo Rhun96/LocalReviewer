@@ -9,7 +9,6 @@ from PySide6.QtGui import QShortcut, QKeySequence
 from PySide6.QtWidgets import QApplication
 from constants import COLUMN_TO_SQL, STATUS_NAMES, TABLE_SYSTEM_COLUMNS
 from database import db
-from datetime import datetime, UTC
 from filter_dialog import FilterDialog
 from filter_service import get_filtered_case_ids, get_all_case_ids
 from autocheck_service import check_case, get_check_settings
@@ -206,9 +205,18 @@ class ReviewScreen(BaseScreen):
         focus = QApplication.focusWidget()
         if focus is None:
             return True
-        # Не перехватываем цифры/стрелки при вводе текста или выборе в комбо
+        # Не перехватываем цифры/стрелки при вводе текста или выборе в комбо.
+        # Во Fluent-режиме FLineEdit/FTextEdit/FComboBox — НЕ наследники
+        # QLineEdit/QTextEdit/QComboBox, поэтому проверяем и их явно,
+        # иначе цифры 1–5 меняют статус прямо во время набора комментария.
         from PySide6.QtWidgets import QLineEdit, QTextEdit, QSpinBox
-        return not isinstance(focus, (QLineEdit, QTextEdit, QComboBox, QSpinBox))
+        from ui_compat import FComboBox as _FC, FLineEdit as _FL, FTextEdit as _FT
+        try:
+            fluent_types = tuple(t for t in (_FL, _FT, _FC) if isinstance(t, type))
+        except Exception:
+            fluent_types = ()
+        return not isinstance(
+            focus, (QLineEdit, QTextEdit, QComboBox, QSpinBox, *fluent_types))
 
     def init_shortcuts(self):
         self._shortcuts = []
@@ -496,6 +504,11 @@ class ReviewScreen(BaseScreen):
         self.btn_taxonomy.setToolTip("Редактор категорий и подкатегорий ошибок")
         self.btn_taxonomy.clicked.connect(self.open_taxonomy_editor)
         tags_row.addWidget(self.btn_taxonomy)
+        self.btn_new_tag = FPushButton("＋ Тег")
+        self.btn_new_tag.setMinimumHeight(30)
+        self.btn_new_tag.setToolTip("Создать свой тег")
+        self.btn_new_tag.clicked.connect(self.on_create_tag)
+        tags_row.addWidget(self.btn_new_tag)
         layout.addLayout(tags_row)
         self.tags_group = QGroupBox("🏷️ Теги")
         self.tags_layout = QGridLayout()
@@ -704,18 +717,32 @@ class ReviewScreen(BaseScreen):
                     cursor.execute(query)
                     values = [row['value'] for row in cursor.fetchall()]
                 else:
-                    cursor.execute("SELECT metadata_json FROM cases "
-                                   "WHERE metadata_json IS NOT NULL LIMIT 2000")
-                    rows = cursor.fetchall()
-                    values = set()
-                    for row in rows:
-                        try:
-                            metadata = json.loads(row['metadata_json'])
-                            if column in metadata and metadata[column]:
-                                values.add(str(metadata[column]))
-                        except (ValueError, TypeError):
-                            continue
-                    values = sorted(values)[:100]
+                    # Metadata-значения — одним SQL через json_extract,
+                    # а не перебором 2000 JSON в GUI-потоке.
+                    try:
+                        cursor.execute("""
+                            SELECT DISTINCT json_extract(c.metadata_json, '$.' || ?) AS value
+                            FROM cases c
+                            WHERE c.metadata_json IS NOT NULL
+                              AND json_extract(c.metadata_json, '$.' || ?) IS NOT NULL
+                            ORDER BY value LIMIT 100
+                        """, (column, column))
+                        values = [r["value"] for r in cursor.fetchall()
+                                  if r["value"] not in (None, "")]
+                        values = [str(v) for v in values]
+                    except Exception:
+                        cursor.execute("SELECT metadata_json FROM cases "
+                                       "WHERE metadata_json IS NOT NULL LIMIT 2000")
+                        rows = cursor.fetchall()
+                        values = set()
+                        for row in rows:
+                            try:
+                                metadata = json.loads(row['metadata_json'])
+                                if column in metadata and metadata[column]:
+                                    values.add(str(metadata[column]))
+                            except (ValueError, TypeError):
+                                continue
+                        values = sorted(values)[:100]
             for value in values:
                 self.value_filter_combo.addItem(str(value), str(value))
         except Exception as e:
@@ -732,6 +759,8 @@ class ReviewScreen(BaseScreen):
 
     def toggle_view(self):
         """Переключает между видом кейса и таблицей."""
+        if not self._bad_can_leave():
+            return
         if self.view_stack.currentIndex() == 0:
             self.view_stack.setCurrentIndex(1)
             self.btn_toggle_view.setText("📝 Кейс")
@@ -746,19 +775,31 @@ class ReviewScreen(BaseScreen):
             return
         try:
             from filter_service import filter_from, BASE_FROM
-            _joins, conditions, params = filter_from(self.filters)
+            eff_filters = dict(self.filters or {})
+            # Таблица уважает режим очереди: unreviewed — это фильтр, а не только порядок.
+            if getattr(self, "queue_mode", "normal") == "unreviewed":
+                eff_filters = dict(eff_filters)
+                eff_filters["statuses"] = ["unreviewed"]
+            _joins, conditions, params = filter_from(eff_filters)
             params = list(params)
             with db(self.project_path) as conn:
                 cursor = conn.cursor()
                 count_query = "SELECT COUNT(DISTINCT c.case_id) as total " + BASE_FROM
+                data_conditions = list(conditions)
+                data_params = list(params)
                 if self.column_filter and self.value_filter:
                     if self.column_filter in TABLE_SYSTEM_COLUMNS:
-                        conditions = list(conditions) + [
+                        data_conditions = data_conditions + [
                             f"CAST({COLUMN_TO_SQL[self.column_filter]} AS TEXT) = ?"]
-                        params = params + [self.value_filter]
-                if conditions:
-                    count_query += " WHERE " + " AND ".join(conditions)
-                cursor.execute(count_query, params)
+                        data_params = data_params + [self.value_filter]
+                    else:
+                        # Metadata-фильтр в SQL (иначе total врёт, страница полупустая).
+                        data_conditions = data_conditions + [
+                            "json_extract(c.metadata_json, '$.' || ?) = ?"]
+                        data_params = data_params + [self.column_filter, self.value_filter]
+                if data_conditions:
+                    count_query += " WHERE " + " AND ".join(data_conditions)
+                cursor.execute(count_query, data_params)
                 total = cursor.fetchone()['total']
                 self.total_pages = max(1, (total + self.page_size - 1) // self.page_size)
                 self.current_page = min(self.current_page, self.total_pages - 1)
@@ -769,25 +810,12 @@ class ReviewScreen(BaseScreen):
                            COALESCE(a.status, 'unreviewed') as status,
                            a.comment, c.metadata_json
                 """ + BASE_FROM
-                if conditions:
-                    data_query += " WHERE " + " AND ".join(conditions)
+                if data_conditions:
+                    data_query += " WHERE " + " AND ".join(data_conditions)
                 data_query += (" ORDER BY f.imported_at, c.row_index "
-                                 f"LIMIT {self.page_size} OFFSET {offset}")
-                cursor.execute(data_query, params)
+                               "LIMIT ? OFFSET ?")
+                cursor.execute(data_query, (*data_params, self.page_size, offset))
                 cases = cursor.fetchall()
-            if (self.column_filter and self.value_filter
-                    and self.column_filter not in TABLE_SYSTEM_COLUMNS):
-                filtered_cases = []
-                for case in cases:
-                    if case['metadata_json']:
-                        try:
-                            metadata = json.loads(case['metadata_json'])
-                            if str(metadata.get(self.column_filter, '')) == self.value_filter:
-                                filtered_cases.append(case)
-                        except (ValueError, TypeError):
-                            continue
-                cases = filtered_cases
-                cases = filtered_cases
             # Сводка проверок для строк страницы (видна и в таблице, и в ревью)
             checks_map: dict = {}
             if cases:
@@ -968,18 +996,32 @@ class ReviewScreen(BaseScreen):
             pass
 
     def on_bulk_run(self):
+        if not self._bad_can_leave():
+            return
         ids = self._bulk_target_ids()
         if not ids:
             notify(self, "warning", "Внимание", "Нет кейсов для массовой операции")
             return
+        # Защита от неявного «вся выборка»: пустой ручной выбор подсвечиваем отдельно.
+        if not self.bulk_selected:
+            if not confirm(
+                self, "Подтверждение",
+                f"Ручной выбор пуст — операция применится ко ВСЕЙ текущей выборке "
+                f"({len(ids)} кейсов).\nПродолжить?",
+            ):
+                return
         from bulk_dialog import BulkDialog
-        dlg = BulkDialog(len(ids), self)
+        dlg = BulkDialog(len(ids), self, project_path=self.project_path)
         if dlg.exec() != QDialog.DialogCode.Accepted or not dlg.result_op:
             return
         op, val = dlg.result_op
+        if op == "add_tag":
+            op_label = f"добавить тег (id={val})"
+        else:
+            op_label = f"{op} → {val}"
         if not confirm(
             self, "Подтверждение",
-            f"Вы собираетесь изменить {len(ids)} кейсов.\nОперация: {op} → {val}.\nПродолжить?",
+            f"Вы собираетесь изменить {len(ids)} кейсов.\nОперация: {op_label}.\nПродолжить?",
         ):
             return
         sender_btn = self.sender()
@@ -988,7 +1030,8 @@ class ReviewScreen(BaseScreen):
             sender_btn.setText("⏳ Выполняется…")
 
         def _work():
-            from bulk_operation_service import bulk_set_comment, bulk_set_status
+            from bulk_operation_service import (bulk_add_tag, bulk_set_comment,
+                                                bulk_set_status)
             if op == "status":
                 return bulk_set_status(self.project_path, ids, val)
             if op == "comment_replace":
@@ -997,6 +1040,8 @@ class ReviewScreen(BaseScreen):
                 return bulk_set_comment(self.project_path, ids, val, mode="append")
             if op == "comment_clear":
                 return bulk_set_comment(self.project_path, ids, "", mode="clear")
+            if op == "add_tag":
+                return bulk_add_tag(self.project_path, ids, int(val))
             raise ValueError(op)
 
         def _done(done):
@@ -1107,7 +1152,7 @@ class ReviewScreen(BaseScreen):
                     "WHERE undone=0 ORDER BY operation_id DESC LIMIT 1"
                 ).fetchone()
             if not row:
-                notify(self, "success", "Отмена", "Нет операций для отмены")
+                notify(self, "warning", "Отмена", "Нет операций для отмены")
                 return
             op_id = row["operation_id"]
         except Exception as e:
@@ -1155,6 +1200,8 @@ class ReviewScreen(BaseScreen):
             self.load_case(idx)
 
     def open_table_filters(self):
+        if not self._bad_can_leave():
+            return
         dialog = FilterDialog(self.project_path, self)
         if self.filters:
             dialog.set_filters(self.filters)
@@ -1192,7 +1239,7 @@ class ReviewScreen(BaseScreen):
     def show_templates_menu(self):
         templates = get_comment_templates(self.project_path)
         if not templates:
-            notify(self, "success", "Шаблоны", "Нет доступных шаблонов")
+            notify(self, "warning", "Шаблоны", "Нет доступных шаблонов")
             return
         menu = QMenu(self)
         for template in templates:
@@ -1204,11 +1251,28 @@ class ReviewScreen(BaseScreen):
         menu.exec(anchor.mapToGlobal(anchor.rect().bottomLeft()))
 
     def insert_template(self, text: str):
+        from templates_service import (TEMPLATE_VARS, build_template_context,
+                                       render_template, template_vars)
+        ctx = build_template_context(
+            self.project_path, self.current_case_id or 0,
+            getattr(self, "current_case", None),
+            getattr(self, "current_error", None))
+        rendered = render_template(text, ctx)
+        # Неизвестные переменные — спрашиваем у человека (не придумываем).
+        for var in template_vars(rendered):
+            if var not in TEMPLATE_VARS:
+                continue
+            val, ok = QInputDialog.getText(
+                self, "Шаблон", f"Значение для {{{var}}}:")
+            if not ok:
+                return
+            ctx[var] = (val or "").strip()
+        rendered = render_template(text, ctx)
         current = self.comment_edit.toPlainText()
         if current:
-            self.comment_edit.setPlainText(current + "\n" + text)
+            self.comment_edit.setPlainText(current + "\n" + rendered)
         else:
-            self.comment_edit.setPlainText(text)
+            self.comment_edit.setPlainText(rendered)
 
     def add_new_template(self):
         text, ok = QInputDialog.getText(
@@ -1231,7 +1295,7 @@ class ReviewScreen(BaseScreen):
         """Удаляет пользовательский шаблон."""
         user_templates = get_user_templates(self.project_path)
         if not user_templates:
-            notify(self, "success", "Удаление", "Нет пользовательских шаблонов для удаления")
+            notify(self, "warning", "Удаление", "Нет пользовательских шаблонов для удаления")
             return
         names = [t['text'] for t in user_templates]
         text, ok = QInputDialog.getItem(
@@ -1266,6 +1330,12 @@ class ReviewScreen(BaseScreen):
                 parts.append(f"тегов: {len(self.filters['tags'])}")
             if self.filters.get('checks'):
                 parts.append(f"автопроверок: {len(self.filters['checks'])}")
+            if self.filters.get('check_severities'):
+                parts.append(f"severity: {','.join(self.filters['check_severities'])}")
+            if self.filters.get('error_category_id'):
+                parts.append("по причине ✓")
+            if self.filters.get('error_severities'):
+                parts.append(f"крит.: {','.join(self.filters['error_severities'])}")
             if self.filters.get('search_text'):
                 parts.append(f"поиск: '{self.filters['search_text']}'")
             base = ("⚠️ Фильтры: " + " | ".join(parts)) if parts else "Фильтры не применены"
@@ -1274,6 +1344,8 @@ class ReviewScreen(BaseScreen):
         self.filter_indicator.setText(self._filter_base)
 
     def open_filters(self):
+        if not self._bad_can_leave():
+            return
         dialog = FilterDialog(self.project_path, self)
         if self.filters:
             dialog.set_filters(self.filters)
@@ -1284,14 +1356,16 @@ class ReviewScreen(BaseScreen):
             except Exception as e:
                 self.show_error("Не удалось применить фильтры", e)
                 return
+            # Пустой результат — тоже валиден: показываем пустую выборку,
+            # а не молча оставляем старые фильтры (иначе таблица и кейс-вид расходятся).
             if not filtered_ids:
                 notify(
                     self,
                     "warning",
                     "Внимание",
-                    "Нет кейсов, соответствующих выбранным фильтрам.\nФильтры не будут применены."
+                    "Нет кейсов, соответствующих выбранным фильтрам.\n"
+                    "Показана пустая выборка."
                 )
-                return
             self.filters = new_filters
             self.case_ids = filtered_ids
             self.current_index = 0
@@ -1301,9 +1375,23 @@ class ReviewScreen(BaseScreen):
             notify(self, "success", "Фильтры", f"Найдено кейсов: {len(filtered_ids)}")
             if self.case_ids:
                 self.load_case(0)
+            else:
+                self.current_case = None
+                self.current_case_id = None
 
     def load_case(self, index: int):
         if index < 0 or index >= len(self.case_ids):
+            return
+        # Строгий режим: не даём тихо сменить кейс и сбросить pending.
+        # load_case вызывается только после _bad_can_leave, но bulk/_done и
+        # программные переходы могли прийти в обход — проверяем здесь тоже.
+        try:
+            new_id = self.case_ids[index]
+        except Exception:
+            return
+        if (self._bad_pending and self.current_case_id is not None
+                and new_id != self.current_case_id
+                and not self._bad_can_leave()):
             return
         if self.current_case_id:
             self.save_comment(silent=True)
@@ -1472,9 +1560,11 @@ class ReviewScreen(BaseScreen):
             'skip': f"⏭️ {STATUS_NAMES['skip']}",
         }
         status = status_map.get(self.current_case.get('status'), '⬜ Не проверено')
+        sid = (self.current_case.get('source_id') or "").strip()
+        sid_part = f" | 🆔 {sid}" if sid else f" | 🆔 case:{self.current_case.get('case_id')}"
         text = (
             f"📋 Кейс {self.current_index + 1} / {len(self.case_ids)} | "
-            f"📄 {self.current_case.get('file_name')} | "
+            f"📄 {self.current_case.get('file_name')}{sid_part} | "
             f"{status}"
         )
         err = getattr(self, "current_error", None)
@@ -1536,6 +1626,8 @@ class ReviewScreen(BaseScreen):
 
     def on_finish_review(self):
         """Итог по текущему скоупу + переход к сохранению версии датасета."""
+        if not self._bad_can_leave():
+            return
         from report_service import get_overall_report
         try:
             rep = get_overall_report(self.project_path, file_id=self._review_scope())
@@ -1622,6 +1714,40 @@ class ReviewScreen(BaseScreen):
         except Exception as e:
             logger.warning("tags display failed: %s", e)
 
+    @staticmethod
+    def _style_tag_btn(btn, selected: bool) -> None:
+        if selected:
+            btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #00FF41;
+                    color: #000000;
+                    border-color: #00FF41;
+                    padding: 4px 8px;
+                    border-radius: 4px;
+                    font-weight: bold;
+                    font-size: 11px;
+                }
+            """)
+        else:
+            btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #0D150D;
+                    color: #00FF41;
+                    border-color: #007722;
+                    padding: 4px 8px;
+                    border-radius: 4px;
+                    font-size: 11px;
+                }
+                QPushButton:hover {
+                    background-color: #0F2010;
+                    border-color: #00FF41;
+                }
+                QPushButton:checked {
+                    background-color: #00FF41;
+                    color: #000000;
+                }
+            """)
+
     def toggle_tag(self, tag_id: int):
         if tag_id in self.selected_tags:
             self.selected_tags.remove(tag_id)
@@ -1629,48 +1755,67 @@ class ReviewScreen(BaseScreen):
             self.selected_tags.add(tag_id)
         self.save_tags()
         if tag_id in self.tag_buttons:
-            btn = self.tag_buttons[tag_id]
-            if tag_id in self.selected_tags:
-                btn.setStyleSheet("""
-                    QPushButton {
-                        background-color: #00FF41;
-                        color: #000000;
-                        border-color: #00FF41;
-                        padding: 4px 8px;
-                        border-radius: 4px;
-                        font-weight: bold;
-                        font-size: 11px;
-                    }
-                """)
-            else:
-                btn.setStyleSheet("""
-                    QPushButton {
-                        background-color: #0D150D;
-                        color: #00FF41;
-                        border-color: #007722;
-                        padding: 4px 8px;
-                        border-radius: 4px;
-                        font-size: 11px;
-                    }
-                    QPushButton:hover {
-                        background-color: #0F2010;
-                        border-color: #00FF41;
-                    }
-                """)
+            self._style_tag_btn(self.tag_buttons[tag_id],
+                                tag_id in self.selected_tags)
+
+    def on_create_tag(self):
+        """Создать свой тег (ТЗ: пользовательские теги)."""
+        text, ok = QInputDialog.getText(self, "Новый тег", "Название тега:")
+        if not ok or not (text or "").strip():
+            return
+        name = text.strip()
+        if len(name) > 64:
+            notify(self, "warning", "Ошибка", "Название до 64 символов")
+            return
+        import re as _re
+        code = "user_" + _re.sub(r"\W+", "_", name.lower()).strip("_")[:48] or "user_x"
+        try:
+            from database import utcnow as _utcnow
+            with db(self.project_path) as conn:
+                conn.cursor().execute("""
+                    INSERT INTO tags (tag_code, tag_name, is_system, created_at)
+                    VALUES (?, ?, 0, ?)
+                """, (code, name, _utcnow()))
+        except Exception as e:
+            notify(self, "warning", "Ошибка", f"Не удалось создать тег: {e}")
+            return
+        try:
+            self.update_tags_display(set(self.selected_tags))
+        except Exception:
+            pass
+        notify(self, "success", "Тег", f"Тег «{name}» создан")
 
     def save_tags(self):
         if not self.current_case_id:
             return
         try:
-            now = datetime.now(UTC).isoformat()
+            from database import utcnow as _utcnow
+            now = _utcnow()
             with db(self.project_path) as conn:
                 cursor = conn.cursor()
+                old_rows = cursor.execute(
+                    "SELECT tag_id FROM case_tags WHERE case_id=?",
+                    (self.current_case_id,)).fetchall()
+                old_ids = {r["tag_id"] for r in old_rows}
+                new_ids = set(self.selected_tags)
                 cursor.execute("DELETE FROM case_tags WHERE case_id = ?", (self.current_case_id,))
-                for tag_id in self.selected_tags:
+                for tag_id in new_ids:
                     cursor.execute("""
                         INSERT INTO case_tags (case_id, tag_id, created_at)
                         VALUES (?, ?, ?)
                     """, (self.current_case_id, tag_id, now))
+                for tid in sorted(new_ids - old_ids):
+                    cursor.execute("""
+                        INSERT INTO history (case_id, event_type, field_name,
+                                             old_value, new_value, created_at)
+                        VALUES (?, 'tag_added', 'tag', NULL, ?, ?)
+                    """, (self.current_case_id, str(tid), now))
+                for tid in sorted(old_ids - new_ids):
+                    cursor.execute("""
+                        INSERT INTO history (case_id, event_type, field_name,
+                                             old_value, new_value, created_at)
+                        VALUES (?, 'tag_removed', 'tag', ?, NULL, ?)
+                    """, (self.current_case_id, str(tid), now))
         except Exception as e:
             logger.warning("save_tags failed: %s", e)
 
@@ -1685,7 +1830,8 @@ class ReviewScreen(BaseScreen):
             return
         try:
             comment = self.comment_edit.toPlainText().strip()
-            now = datetime.now(UTC).isoformat()
+            from database import utcnow as _utcnow
+            now = _utcnow()
             with db(self.project_path) as conn:
                 cursor = conn.cursor()
                 cursor.execute("""
@@ -1777,7 +1923,8 @@ class ReviewScreen(BaseScreen):
                     self.comment_edit.setFocus()
                     return
         try:
-            now = datetime.now(UTC).isoformat()
+            from database import utcnow as _utcnow2
+            now = _utcnow2()
             with db(self.project_path) as conn:
                 cursor = conn.cursor()
                 cursor.execute(
@@ -1832,13 +1979,18 @@ class ReviewScreen(BaseScreen):
         """Быстрый выбор причины после «Плохо» (ТЗ §23).
 
         Возвращает True, если причина выбрана и сохранена.
+        При сломанной таксономии/диалоге возвращает False, чтобы обязательный
+        режим не пропускался молча, — выйти можно другим статусом.
         """
         try:
             from taxonomy_dialog import ErrorCauseDialog
             from taxonomy_service import set_case_error
         except Exception as e:
             logger.warning("taxonomy unavailable: %s", e)
-            return True  # не блокируем разметку из-за сломанного модуля
+            notify(self, "error", "Таксономия",
+                   "Не удалось открыть выбор причины. Выбери другой статус "
+                   "или исправь таксономию в настройках.")
+            return False
         try:
             dlg = ErrorCauseDialog(self.project_path, self)
             if dlg.exec() == QDialog.DialogCode.Accepted and dlg.result:
@@ -1853,7 +2005,9 @@ class ReviewScreen(BaseScreen):
             return False
         except Exception as e:
             logger.warning("error cause dialog failed: %s", e)
-            return True
+            notify(self, "error", "Таксономия",
+                   f"Не удалось сохранить причину: {e}")
+            return False
 
     def next_case(self):
         if not self._bad_can_leave():
@@ -1886,6 +2040,8 @@ class ReviewScreen(BaseScreen):
             notify(self, "success", "Начало", "📍 Это первый кейс в выборке")
 
     def on_back(self):
+        if not self._bad_can_leave():
+            return
         if self.current_case_id:
             self.save_comment(silent=True)
         mw = getattr(getattr(self, "parent_window", None), "main_window", None)

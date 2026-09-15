@@ -30,6 +30,22 @@ CHECK_OPTIONS = [
     ("many_spaces", "Много пробелов"),
     ("many_caps", "Много заглавных"),
     ("duplicate", "Дубль"),
+    ("repeat_words", "Повтор слов"),
+    ("many_punct", "Много знаков"),
+    ("repeat_chars", "Повтор символов"),
+    ("long_sentence", "Длинное предложение"),
+    ("junk_markers", "Служебный мусор"),
+    ("html_tags", "HTML-разметка"),
+    ("markdown_heavy", "Много Markdown"),
+    ("broken_encoding", "Битая кодировка"),
+    ("suspicious_chars", "Подозрительные символы"),
+]
+
+CHECK_SEVERITIES = [
+    ("critical", "🔴 critical"),
+    ("error", "🔴 error"),
+    ("warning", "🟡 warning"),
+    ("info", "🔵 info"),
 ]
 
 ALLOWED_ROLES = {

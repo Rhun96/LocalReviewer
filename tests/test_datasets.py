@@ -79,7 +79,11 @@ def test_key_match_across_files():
     res = compare_versions(tmp, v1, v2)
     assert res["counts"]["added"] == 1, res["counts"]  # k3
     assert res["counts"]["removed"] == 1  # k2
-    assert res["counts"]["unchanged"] == 1  # k1, статусы совпали
+    # k1: текст изменился (q1 -> q1 new) — считается changed (сравнение по
+    # статусу+комментарию+ошибке+тегам+тексту), а не unchanged.
+    assert res["counts"]["changed"] == 1, res["counts"]
+    assert res["counts"]["unchanged"] == 0
+    assert res["details"][0]["changes"] == ["text"] or "text" in res["details"][0]["changes"]
     # слепок только из файла B
     versions = list_versions(tmp, ds)
     assert next(v for v in versions if v["version_id"] == v2)["case_count"] == 2

@@ -42,6 +42,8 @@ class HistoryScreen(BaseScreen):
         self.event_filter.addItem("Изменение комментария", "comment_changed")
         self.event_filter.addItem("Добавление тега", "tag_added")
         self.event_filter.addItem("Удаление тега", "tag_removed")
+        self.event_filter.addItem("Причина ошибки", "category_changed")
+        self.event_filter.addItem("Массовая операция", "bulk_undone")
         self.event_filter.currentIndexChanged.connect(self.load_history)
         filter_layout.addWidget(self.event_filter)
         filter_layout.addStretch()
@@ -133,6 +135,8 @@ class HistoryScreen(BaseScreen):
                 'comment_changed': 'Изменение комментария',
                 'tag_added': 'Добавление тега',
                 'tag_removed': 'Удаление тега',
+                'category_changed': 'Причина ошибки',
+                'bulk_undone': 'Отмена bulk',
             }
 
             for row, event in enumerate(events):

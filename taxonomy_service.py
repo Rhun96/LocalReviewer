@@ -88,21 +88,38 @@ def set_category_active(project_path: str, category_id: int, active: bool) -> No
 
 
 def archive_category(project_path: str, category_id: int) -> None:
-    """Архив вместо удаления: старая разметка живёт (ТЗ §22)."""
-    set_category_active(project_path, category_id, False)
-    logger.info("archived category %s", category_id)
+    """Архив вместо удаления: старая разметка живёт (ТЗ §22).
+
+    Архивирует и всех детей (иначе дети остаются активными, а родитель скрыт —
+    отчёт и UI расходятся).
+    """
+    with db(project_path) as conn:
+        cur = conn.cursor()
+        cur.execute("UPDATE error_categories SET is_active=0 WHERE category_id=?",
+                    (category_id,))
+        cur.execute("UPDATE error_categories SET is_active=0 WHERE parent_id=?",
+                    (category_id,))
+    logger.info("archived category %s (+children)", category_id)
 
 
 def delete_category(project_path: str, category_id: int) -> None:
-    """Удаление только неиспользуемой категории, иначе — архив."""
+    """Удаление только неиспользуемой категории (включая детей), иначе — архив."""
     with db(project_path) as conn:
         cur = conn.cursor()
+        children = [r["category_id"] for r in cur.execute(
+            "SELECT category_id FROM error_categories WHERE parent_id=?",
+            (category_id,)).fetchall()]
+        check_ids = [category_id, *children]
+        ph = ",".join(["?"] * len(check_ids))
         used = cur.execute(
-            "SELECT 1 FROM case_errors WHERE category_id=? OR subcategory_id=? LIMIT 1",
-            (category_id, category_id)).fetchone()
+            f"SELECT 1 FROM case_errors WHERE category_id IN ({ph}) "
+            f"OR subcategory_id IN ({ph}) LIMIT 1",
+            (*check_ids, *check_ids)).fetchone()
         if used:
             raise ValueError("Категория используется в разметке — используйте архив")
-        cur.execute("DELETE FROM error_categories WHERE parent_id=?", (category_id,))
+        if children:
+            cur.execute(f"DELETE FROM error_categories WHERE category_id IN ({ph})",
+                        check_ids)
         cur.execute("DELETE FROM error_categories WHERE category_id=?", (category_id,))
 
 

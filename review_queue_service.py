@@ -53,14 +53,19 @@ def build_queue(project_path: str, mode: str = "normal", filters: dict = None) -
         ids = [r["case_id"] for r in cur.fetchall()]
         if not ids or mode == "normal":
             return ids, {}
-        # Проблемные первыми: подтягиваем checks + статусы одним проходом
+        # Проблемные первыми: подтягиваем checks + статусы одним проходом.
+        # severity берём как MAX по весу (не произвольный GROUP BY).
         scored = []
         for i in range(0, len(ids), 500):
             chunk = ids[i:i + 500]
             ph = ",".join(["?"] * len(chunk))
             rows = cur.execute(f"""
                 SELECT c.case_id, COALESCE(a.status,'unreviewed') AS status,
-                       cc.severity AS sev, COUNT(cc.check_id) AS n
+                       MAX(CASE cc.severity
+                           WHEN 'critical' THEN 100 WHEN 'error' THEN 60
+                           WHEN 'warning' THEN 20 WHEN 'info' THEN 5 ELSE 0 END
+                       ) AS max_w,
+                       COUNT(cc.check_id) AS n
                 FROM cases c
                 LEFT JOIN annotations a ON a.case_id = c.case_id
                 LEFT JOIN case_checks cc ON cc.case_id = c.case_id
@@ -69,7 +74,16 @@ def build_queue(project_path: str, mode: str = "normal", filters: dict = None) -
             """, chunk).fetchall()
             for r in rows:
                 n = r["n"] or 0
-                score, reasons = compute_priority(bool(n), r["sev"] or "info", n, r["status"])
+                max_w = r["max_w"] or 0
+                if max_w >= 60:
+                    max_sev = "error"
+                elif max_w >= 20:
+                    max_sev = "warning"
+                elif n:
+                    max_sev = "info"
+                else:
+                    max_sev = "info"
+                score, reasons = compute_priority(bool(n), max_sev, n, r["status"])
                 scored.append((r["case_id"], score, reasons))
         # исходный порядок как tiebreak
         order = {cid: i for i, cid in enumerate(ids)}

@@ -146,7 +146,12 @@ def bulk_set_comment(project_path: str, case_ids: list, text: str, mode: str = "
 
 
 def undo_bulk_operation(project_path: str, operation_id: int) -> int:
-    """Откат массовой операции по сохранённым old_value. Возвращает число откатов."""
+    """Откат массовой операции по сохранённым old_value. Возвращает число откатов.
+
+    Защита от lost update: если текущее значение уже не равно new_value
+    (пользователь правил кейс вручную после bulk), кейс пропускается —
+    молча затирать ручную правку нельзя. Пропуски логируются.
+    """
     now = utcnow()
     with db(project_path) as conn:
         cur = conn.cursor()
@@ -163,23 +168,36 @@ def undo_bulk_operation(project_path: str, operation_id: int) -> int:
             (operation_id,),
         ).fetchall()
         done = 0
+        skipped = 0
         for it in items:
             cid = it["case_id"]
             field, old, _new = it["field_name"], it["old_value"], it["new_value"]
             if field == "status":
+                cur_row = cur.execute(
+                    "SELECT status FROM annotations WHERE case_id=?", (cid,)).fetchone()
+                cur_val = cur_row["status"] if cur_row else "unreviewed"
+                if cur_val != _new:
+                    skipped += 1
+                    continue
                 cur.execute("""
                     INSERT INTO annotations (case_id, status, updated_at)
                     VALUES (?, ?, ?)
                     ON CONFLICT(case_id) DO UPDATE SET status=?, updated_at=?
                 """, (cid, old or "unreviewed", now, old or "unreviewed", now))
             elif field == "comment":
+                cur_row = cur.execute(
+                    "SELECT comment FROM annotations WHERE case_id=?", (cid,)).fetchone()
+                cur_val = (cur_row["comment"] or "") if cur_row else ""
+                if cur_val != (_new or ""):
+                    skipped += 1
+                    continue
                 cur.execute("""
                     INSERT INTO annotations (case_id, comment, updated_at)
                     VALUES (?, ?, ?)
                     ON CONFLICT(case_id) DO UPDATE SET comment=?, updated_at=?
                 """, (cid, old or None, now, old or None, now))
             elif field == "tag_added":
-                # new_value хранит tag_id строкой
+                # new_value хранит tag_id строкой; DELETE идемпотентен.
                 cur.execute("DELETE FROM case_tags WHERE case_id=? AND tag_id=?",
                             (cid, int(_new)))
             else:
@@ -189,5 +207,8 @@ def undo_bulk_operation(project_path: str, operation_id: int) -> int:
             done += 1
         cur.execute("UPDATE bulk_operations SET undone=1 WHERE operation_id=?",
                     (operation_id,))
+    if skipped:
+        logger.warning("undo bulk op=%s skipped=%s (ручные правки)",
+                       operation_id, skipped)
     logger.info("undo bulk op=%s done=%s", operation_id, done)
     return done

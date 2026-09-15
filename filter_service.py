@@ -61,6 +61,33 @@ def filter_from(filters: dict):
         )""")
         params.extend(checks)
 
+    check_severities = (filters or {}).get("check_severities", [])
+    if check_severities:
+        placeholders = ",".join(["?"] * len(check_severities))
+        conditions.append(f"""EXISTS (
+            SELECT 1 FROM case_checks cc
+            WHERE cc.case_id = c.case_id AND cc.severity IN ({placeholders})
+        )""")
+        params.extend(check_severities)
+
+    error_category_id = (filters or {}).get("error_category_id")
+    if error_category_id:
+        conditions.append("""EXISTS (
+            SELECT 1 FROM case_errors e
+            WHERE e.case_id = c.case_id
+              AND (e.category_id = ? OR e.subcategory_id = ?)
+        )""")
+        params.extend([error_category_id, error_category_id])
+
+    error_severities = (filters or {}).get("error_severities", [])
+    if error_severities:
+        placeholders = ",".join(["?"] * len(error_severities))
+        conditions.append(f"""EXISTS (
+            SELECT 1 FROM case_errors e
+            WHERE e.case_id = c.case_id AND e.severity IN ({placeholders})
+        )""")
+        params.extend(error_severities)
+
     search_text = ((filters or {}).get("search_text") or "").strip()
     if search_text:
         esc = _escape_like(search_text)

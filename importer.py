@@ -36,6 +36,10 @@ def _validate_mapping(mapping: dict) -> None:
         raise ValueError(f"Неизвестная роль {role!r} для колонки {col!r}")
 
 
+class Cancelled(Exception):
+    """Отмена длительной операции пользователем."""
+
+
 def import_file(
     project_path: str,
     file_path: str,
@@ -44,8 +48,16 @@ def import_file(
     header_row: int,
     mapping: dict,
     data: list,
+    progress_callback=None,
+    cancel_event=None,
 ) -> tuple:
-    """Возвращает (file_id, imported, skipped). Дубли по content_hash пропускаются."""
+    """Возвращает (file_id, imported, skipped).
+
+    Дедуп внутри файла по content_hash. Дубли source_id внутри файла
+    НЕ пропускаются (нужны для conflicted в датасетах), но считаются
+    и логируются как предупреждение (ТЗ §81).
+    row_count в files — исходное число строк файла, а не imported.
+    """
     _validate_mapping(mapping)
     file_name = Path(file_path).name
     now = utcnow()
@@ -90,6 +102,8 @@ def import_file(
         cases_batch, ann_batch = [], []
         imported = skipped = 0
         seen_hashes: set = set()
+        seen_source_ids: dict = {}
+        dup_source_ids: set = set()
 
         def flush():
             nonlocal imported
@@ -103,6 +117,8 @@ def import_file(
                     comment_from_source, metadata_json, raw_json, created_at
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, cases_batch)
+            # imported считает ТОЛЬКО кейсы: аннотации вставляются ниже
+            # и в дельту уже не входят.
             imported += conn.total_changes - before
             # Аннотации: вставляем для всех hash батча, IGNORE покроет дубли
             cursor.executemany("""
@@ -114,6 +130,8 @@ def import_file(
             ann_batch.clear()
 
         for row_index, row in enumerate(data):
+            if cancel_event is not None and cancel_event.is_set():
+                break
             if not isinstance(row, dict):
                 skipped += 1
                 continue
@@ -140,6 +158,12 @@ def import_file(
                 skipped += 1
                 continue
             seen_hashes.add(content_hash)
+            if source_id and str(source_id).strip():
+                sid = str(source_id).strip()
+                if sid in seen_source_ids:
+                    dup_source_ids.add(sid)
+                else:
+                    seen_source_ids[sid] = row_index
 
             cases_batch.append((
                 file_id, row_index, source_id, content_hash,
@@ -151,15 +175,42 @@ def import_file(
             ann_batch.append((now, file_id, content_hash))
             if len(cases_batch) >= BATCH:
                 flush()
+            if progress_callback and (row_index + 1) % 500 == 0:
+                try:
+                    progress_callback(row_index + 1, len(data))
+                except Exception:
+                    pass
 
         flush()
-        # Пересчёт skipped: дубли внутри файла + IGNORE в БД
+        if cancel_event is not None and cancel_event.is_set():
+            # Частичный импорт при отмене: фиксируем что успели, считаем честно.
+            imported = cursor.execute(
+                "SELECT COUNT(*) AS c FROM cases WHERE file_id=?",
+                (file_id,)).fetchone()["c"]
+            skipped = len(data) - imported
+            logger.info("import file_id=%s CANCELLED imported=%s skipped=%s",
+                        file_id, imported, skipped)
+            raise Cancelled(f"Прервано пользователем: импортировано {imported} из {len(data)}")
+        # Пересчёт skipped: дубли внутри файла + IGNORE в БД.
+        # imported уже посчитан через changes() (только cases); сверяем с фактом.
         total_rows = len(data)
-        # imported уже посчитан через changes(); skipped = всего - вставлено
+        actual = cursor.execute(
+            "SELECT COUNT(*) AS c FROM cases WHERE file_id=?",
+            (file_id,)).fetchone()["c"]
+        if actual != imported:
+            logger.warning("import count mismatch changes=%s actual=%s", imported, actual)
+            imported = actual
+        # skipped = всего - вставлено (покрывает невалидные + дубли)
         skipped = total_rows - imported
+        # row_count — исходное число строк файла (не затираем на imported).
         cursor.execute(
             "UPDATE files SET row_count = ? WHERE file_id = ?",
-            (imported, file_id),
+            (total_rows, file_id),
         )
-        logger.info("import file_id=%s imported=%s skipped=%s", file_id, imported, skipped)
-        return file_id, imported
+        if dup_source_ids:
+            logger.warning("import file_id=%s duplicate source_id: %s (пример: %s)",
+                           file_id, len(dup_source_ids),
+                           sorted(dup_source_ids)[:5])
+        logger.info("import file_id=%s imported=%s skipped=%s dup_source_ids=%s",
+                    file_id, imported, skipped, len(dup_source_ids))
+        return file_id, imported, skipped

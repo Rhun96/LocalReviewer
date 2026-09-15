@@ -238,8 +238,10 @@ class DatasetsDialog(QDialog):
             f"без изменений {c['unchanged']}, конфликтов {c['conflicted']}.")
         self.cmp_details.clear()
         for d in res["details"][:200]:
+            ch = ",".join(d.get("changes", []) or [])
+            extra = f" [{ch}]" if ch else ""
             self.cmp_details.addItem(
-                f"кейс {d['case_id']}: {d['before']} → {d['after']}")
+                f"кейс {d['case_id']}: {d['before']} → {d['after']}{extra}")
         for cf in res.get("conflicted", [])[:50]:
             self.cmp_details.addItem(
                 f"⚠ ключ {cf['key']}: дубли в A{cf['a_cases']} / B{cf['b_cases']}")

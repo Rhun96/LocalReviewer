@@ -19,8 +19,8 @@ def test_init_and_import():
     proj = _make_project()
     data = [{"q": "Привет", "a": "Здравствуйте!"}]
     mapping = {"q": "primary_text", "a": "response_text"}
-    file_id, n = import_file(proj, "f.xlsx", "excel", "Sheet1", 0, mapping, data)
-    assert n == 1 and file_id > 0
+    file_id, n, skipped = import_file(proj, "f.xlsx", "excel", "Sheet1", 0, mapping, data)
+    assert n == 1 and file_id > 0 and skipped == 0
     ids = get_filtered_case_ids(proj, {})
     assert len(ids) == 1
 

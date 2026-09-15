@@ -421,23 +421,108 @@ class ImportWizard(QWidget):
                 notify(self, "warning", "Внимание", "Файл не содержит данных")
                 return
 
-            from importer import import_file
-            file_id, cases_count = import_file(
-                project_path=self.project_path,
-                file_path=self.file_path,
-                file_type=self.file_type,
-                sheet_name=self.sheet_name,
-                header_row=self.header_spin.value(),
-                mapping=mapping,
-                data=data
-            )
-            msg = f"✅ Успешно импортировано {cases_count} кейсов."
-            if errors:
-                msg += f"\n⚠️ Пропущено битых строк: {len(errors)}."
-            notify(self, "success", "Импорт завершён", msg)
-            self.import_finished.emit()
+            # Предупреждение о дублях ID до импорта (ТЗ §81).
+            self._warn_duplicate_ids(mapping, data)
+            self._run_import_in_background(mapping, data, errors)
         except Exception as e:
             notify(self, "error", "Ошибка импорта", str(e))
+
+    def _warn_duplicate_ids(self, mapping: dict, data: list) -> None:
+        """Подсчёт дублей source_id в файле до импорта — только предупреждение."""
+        try:
+            sid_cols = [c for c, r in mapping.items() if r == "source_id"]
+            if not sid_cols:
+                return
+            seen: set = set()
+            dups = 0
+            for row in data:
+                if not isinstance(row, dict):
+                    continue
+                v = str(row.get(sid_cols[0], "") or "").strip()
+                if not v:
+                    continue
+                if v in seen:
+                    dups += 1
+                else:
+                    seen.add(v)
+            if dups:
+                notify(self, "warning", "Дубли ID",
+                       f"В файле {dups} повторяющихся ID. "
+                       "Импорт продолжится; в датасетах они попадут в «конфликты», "
+                       "сопоставление по ним ненадёжно (ТЗ §53).")
+        except Exception:
+            pass
+
+    def _run_import_in_background(self, mapping: dict, data: list, errors: list):
+        """Импорт в фоне с прогрессом, чтобы UI не вис на больших файлах."""
+        import threading
+        from PySide6.QtWidgets import QProgressDialog
+        from PySide6.QtCore import QTimer
+        cancel_event = threading.Event()
+        progress = QProgressDialog("Импорт…", "Отмена", 0, 100, self)
+        progress.setWindowModality(Qt.WindowModality.WindowModal)
+        progress.setMinimumDuration(0)
+        progress.setAutoClose(True)
+        progress.canceled.connect(cancel_event.set)
+        progress.setValue(0)
+
+        def _work():
+            from importer import import_file
+            from workers import run_in_background as _run
+            holder: dict = {}
+
+            def _progress(done, total):
+                pct = int(done / total * 100) if total else 0
+                w = holder.get("w")
+                if w is not None:
+                    w.signals.progress.emit(pct)
+
+            worker = _run(import_file, self.project_path, self.file_path,
+                          self.file_type, self.sheet_name,
+                          self.header_spin.value(), mapping, data,
+                          progress_callback=_progress, cancel_event=cancel_event)
+            holder["w"] = worker
+            worker.signals.progress.connect(progress.setValue)
+            worker.signals.finished.connect(
+                lambda res: self._on_import_done(res, errors, progress))
+            worker.signals.error.connect(
+                lambda msg: self._on_import_error(msg, progress))
+
+        def _noop():
+            pass
+        _ = _noop
+        QTimer.singleShot(0, _work)
+
+    def _on_import_done(self, res, errors: list, progress):
+        try:
+            progress.close()
+        except Exception:
+            pass
+        try:
+            file_id, cases_count, skipped = res
+        except (TypeError, ValueError):
+            # Совместимость со старым 2-tuple (на всякий случай).
+            file_id, cases_count = res
+            skipped = 0
+        msg = f"✅ Успешно импортировано {cases_count} кейсов."
+        if skipped:
+            msg += f"\n⏭ Пропущено дублей/битых: {skipped}."
+        if errors:
+            msg += f"\n⚠️ Битых строк в файле: {len(errors)}."
+        notify(self, "success", "Импорт завершён", msg)
+        self.import_finished.emit()
+
+    def _on_import_error(self, msg: str, progress):
+        try:
+            progress.close()
+        except Exception:
+            pass
+        if "Прервано пользователем" in (msg or ""):
+            notify(self, "warning", "Импорт",
+                   f"{msg}\nЧастичные данные сохранены.")
+            self.import_finished.emit()
+        else:
+            notify(self, "error", "Ошибка импорта", str(msg))
 
     def on_cancel(self):
         self.import_cancelled.emit()
