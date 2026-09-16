@@ -402,6 +402,17 @@ class ModelRunsScreen(BaseScreen):
         dlg = RunImportDialog(self.project_path, self)
         if dlg.exec() != QDialog.DialogCode.Accepted or not dlg.result_rows:
             return
+        try:
+            prev = (runs.get_run(self.project_path, self._run_id) or {}).get(
+                "source_file") or ""
+            if prev and prev == (dlg.file_path or ""):
+                if not confirm(self, "Повторный импорт",
+                               "Этот файл уже импортировался в данный прогон. "
+                               "Повтор перезапишет совпавшие ответы.\n\nПродолжить?",
+                               ok_text="Импортировать", cancel_text="Остановить"):
+                    return
+        except Exception:
+            pass
         import threading
         from PySide6.QtWidgets import QProgressDialog
         from PySide6.QtCore import QTimer

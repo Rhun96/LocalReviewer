@@ -517,29 +517,39 @@ class ImportWizard(QWidget):
             notify(self, "error", "Ошибка импорта", str(e))
 
     def _confirm_file_dup(self) -> bool:
-        """Дубль файла проверяется при попытке импорта (не в маппинге)."""
+        """Дубль файла проверяется при попытке импорта (не в маппинге).
+
+        Проверки независимы: падение хэша не отменяет проверку по имени.
+        """
         from ui_compat import confirm
         from pathlib import Path as _Path
+        import logging as _logging
+        log = _logging.getLogger(__name__)
         try:
-            from importer import file_sha256, find_file_by_hash, find_file_by_name
+            from importer import file_sha256, find_file_by_hash
             dup = find_file_by_hash(self.project_path, file_sha256(self.file_path))
-            if dup:
-                return confirm(
-                    self, "Файл уже импортирован",
-                    f"«{dup['file_name']}» ({dup['row_count']} строк) уже есть в проекте. "
-                    "Повторный импорт создаст дубли кейсов.\n\nПродолжить попытку импорта?",
-                    ok_text="Импортировать", cancel_text="Остановить")
-            same = find_file_by_name(self.project_path, _Path(self.file_path).name)
-            if same:
-                return confirm(
-                    self, "Похоже на повтор",
-                    f"Файл с именем «{same['file_name']}» уже импортирован "
-                    f"({same['row_count']} строк; хэш старого импорта неизвестен). "
-                    "Повтор создаст дубли кейсов.\n\nПродолжить попытку импорта?",
-                    ok_text="Импортировать", cancel_text="Остановить")
         except Exception as e:
-            import logging as _logging
-            _logging.getLogger(__name__).warning("file dup check failed: %s", e)
+            log.warning("file dup check by hash failed: %s", e)
+            dup = None
+        if dup:
+            return confirm(
+                self, "Файл уже импортирован",
+                f"«{dup['file_name']}» ({dup['row_count']} строк) уже есть в проекте. "
+                "Повторный импорт создаст дубли кейсов.\n\nПродолжить попытку импорта?",
+                ok_text="Импортировать", cancel_text="Остановить")
+        try:
+            from importer import find_file_by_name
+            same = find_file_by_name(self.project_path, _Path(self.file_path).name)
+        except Exception as e:
+            log.warning("file dup check by name failed: %s", e)
+            same = None
+        if same:
+            return confirm(
+                self, "Похоже на повтор",
+                f"Файл с именем «{same['file_name']}» уже импортирован "
+                f"({same['row_count']} строк; хэш старого импорта неизвестен). "
+                "Повтор создаст дубли кейсов.\n\nПродолжить попытку импорта?",
+                ok_text="Импортировать", cancel_text="Остановить")
         return True
 
     def _precheck_stats(self, mapping: dict, data: list) -> dict:
