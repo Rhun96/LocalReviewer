@@ -1,4 +1,4 @@
-"""Чтение xlsx/csv/json/jsonl: лимиты, utf-8-sig, корректные ошибки."""
+"""Чтение xlsx/ods/csv/json/jsonl: лимиты, utf-8-sig, корректные ошибки."""
 import csv
 import json
 import logging
@@ -33,6 +33,8 @@ class FileReader:
             return "excel"
         if ext == ".xls":
             raise ValueError(".xls не поддерживается openpyxl — сохраните как .xlsx")
+        if ext == ".ods":
+            return "ods"
         if ext == ".csv":
             return "csv"
         if ext == ".json":
@@ -51,6 +53,107 @@ class FileReader:
             raise ValueError(f"Не удалось открыть Excel-файл: {e}") from e
         finally:
             wb.close()
+
+    @staticmethod
+    def _ods_table(file_path: str, sheet_name: str | None):
+        """Открывает ODS и возвращает (doc, table). Нужен odfpy."""
+        try:
+            from odf.opendocument import load as _ods_load
+        except ImportError as e:
+            raise ValueError("Для .ods установите odfpy: pip install odfpy") from e
+        _check_size(file_path)
+        try:
+            doc = _ods_load(file_path)
+        except Exception as e:
+            raise ValueError(f"Не удалось открыть ODS-файл: {e}") from e
+        from odf.table import Table as _Table
+        tables = doc.getElementsByType(_Table)
+        if not tables:
+            raise ValueError("В ODS нет листов")
+        if sheet_name:
+            for t in tables:
+                if t.getAttribute("name") == sheet_name:
+                    return doc, t
+            raise ValueError(f"Лист {sheet_name!r} не найден")
+        return doc, tables[0]
+
+    @staticmethod
+    def _ods_rows(table, max_rows: int = 0) -> list:
+        """Строки листа как списки строк (с учётом repeated)."""
+        from odf.table import TableRow as _Row, TableCell as _Cell
+        from odf.text import P as _P
+        out = []
+        for row in table.getElementsByType(_Row):
+            if max_rows and len(out) >= max_rows:
+                break
+            cells = []
+            for cell in row.getElementsByType(_Cell):
+                repeat = cell.getAttribute("numbercolumnsrepeated")
+                try:
+                    repeat = int(repeat) if repeat else 1
+                except (TypeError, ValueError):
+                    repeat = 1
+                texts = []
+                for p in cell.getElementsByType(_P):
+                    parts = []
+                    for node in p.childNodes:
+                        if node.nodeType == node.TEXT_NODE:
+                            parts.append(node.data)
+                    texts.append("".join(parts).strip())
+                value = "\n".join(t for t in texts if t)
+                cells.extend([value] * min(repeat, 256))
+            out.append(cells)
+        return out
+
+    @staticmethod
+    def read_ods_sheets(file_path: str) -> list:
+        from odf.table import Table as _Table
+        try:
+            from odf.opendocument import load as _ods_load
+        except ImportError as e:
+            raise ValueError("Для .ods установите odfpy: pip install odfpy") from e
+        _check_size(file_path)
+        try:
+            doc = _ods_load(file_path)
+            return [t.getAttribute("name") or f"Лист{i + 1}"
+                    for i, t in enumerate(doc.getElementsByType(_Table))]
+        except ValueError:
+            raise
+        except Exception as e:
+            raise ValueError(f"Не удалось открыть ODS-файл: {e}") from e
+
+    @staticmethod
+    def read_ods_preview(file_path: str, sheet_name: str, max_rows: int = 100) -> dict:
+        try:
+            _doc, table = FileReader._ods_table(file_path, sheet_name)
+            rows = FileReader._ods_rows(table, max_rows)
+            if not rows:
+                return {"headers": [], "rows": []}
+            return {"headers": rows[0], "rows": rows[1:]}
+        except ValueError:
+            raise
+        except Exception as e:
+            raise ValueError(f"Не удалось прочитать ODS-файл: {e}") from e
+
+    @staticmethod
+    def read_ods_data(file_path: str, sheet_name: str, header_row: int = 0) -> list:
+        try:
+            _doc, table = FileReader._ods_table(file_path, sheet_name)
+            rows = FileReader._ods_rows(table)
+            if not rows or header_row >= len(rows):
+                return []
+            headers = [h if h else f"col_{i}" for i, h in enumerate(rows[header_row])]
+            data = []
+            for row in rows[header_row + 1:]:
+                if all((c or "").strip() == "" for c in row):
+                    continue
+                data.append({h: (row[i] if i < len(row) else "")
+                             for i, h in enumerate(headers)})
+            return data
+        except ValueError:
+            raise
+        except Exception as e:
+            raise ValueError(f"Ошибка чтения ODS: {e}") from e
 
     @staticmethod
     def read_excel_preview(file_path: str, sheet_name: str, max_rows: int = 100) -> dict:

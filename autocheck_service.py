@@ -9,6 +9,7 @@ import unicodedata
 from collections import Counter
 
 from database import db, utcnow
+from workers import Cancelled
 
 logger = logging.getLogger(__name__)
 
@@ -240,11 +241,32 @@ def check_case(case: dict, settings: dict = None) -> list:
     return checks
 
 
-class Cancelled(Exception):
-    """Отмена длительной операции пользователем."""
+def reset_checks(project_path: str, case_ids: list | None = None,
+                 file_id: int | None = None) -> int:
+    """Сбросить автопроверки: вся БД, файл или явная выборка. Возвращает число удалённых."""
+    from database import db as _db
+    with _db(project_path) as conn:
+        cur = conn.cursor()
+        if case_ids is not None:
+            ids = list(dict.fromkeys(int(c) for c in case_ids))
+            if not ids:
+                return 0
+            done = 0
+            for i in range(0, len(ids), 500):
+                chunk = ids[i:i + 500]
+                ph = ",".join(["?"] * len(chunk))
+                cur.execute(f"DELETE FROM case_checks WHERE case_id IN ({ph})", chunk)
+                done += cur.rowcount or 0
+            return done
+        if file_id is not None:
+            cur.execute("DELETE FROM case_checks WHERE case_id IN "
+                        "(SELECT case_id FROM cases WHERE file_id = ?)", (file_id,))
+        else:
+            cur.execute("DELETE FROM case_checks")
+        return cur.rowcount or 0
 
 
-def run_autochecks(project_path: str, file_id: int = None,
+def run_autochecks(project_path: str, file_id: int = None, case_ids: list | None = None,
                    progress_callback=None, cancel_event=None) -> dict:
     """Батчами по 2000, duplicate через глобальный hash-счётчик, severity в БД.
 
@@ -268,10 +290,22 @@ def run_autochecks(project_path: str, file_id: int = None,
         # Отдельный курсор для записи: executemany тем же курсором,
         # которым идёт fetchmany SELECT, обрывает итерацию (проверено: 3000 -> 2000).
         wcur = conn.cursor()
-        total = cursor.execute(
-            "SELECT COUNT(*) AS c FROM cases" + (" WHERE file_id = ?" if file_id else ""),
-            ([file_id] if file_id else [])).fetchone()["c"]
-        if file_id:
+        sel_ids = (list(dict.fromkeys(int(c) for c in case_ids))
+                   if case_ids is not None else None)
+        if sel_ids is not None and not sel_ids:
+            return {"total_checked": 0, "flags_found": 0}
+        if sel_ids is not None:
+            total = len(sel_ids)
+        else:
+            total = cursor.execute(
+                "SELECT COUNT(*) AS c FROM cases" + (" WHERE file_id = ?" if file_id else ""),
+                ([file_id] if file_id else [])).fetchone()["c"]
+        if sel_ids is not None:
+            for i in range(0, len(sel_ids), 500):
+                chunk = sel_ids[i:i + 500]
+                ph = ",".join(["?"] * len(chunk))
+                cursor.execute(f"DELETE FROM case_checks WHERE case_id IN ({ph})", chunk)
+        elif file_id:
             cursor.execute(
                 "DELETE FROM case_checks WHERE case_id IN "
                 "(SELECT case_id FROM cases WHERE file_id = ?)",
@@ -281,27 +315,38 @@ def run_autochecks(project_path: str, file_id: int = None,
             cursor.execute("DELETE FROM case_checks")
         conn.commit()
 
-        base = "SELECT case_id, primary_text, response_text FROM cases"
-        params: list = []
-        if file_id:
-            base += " WHERE file_id = ?"
-            params.append(file_id)
+        chunks: list = []
+        if sel_ids is not None:
+            for i in range(0, len(sel_ids), 500):
+                chunk = sel_ids[i:i + 500]
+                ph = ",".join(["?"] * len(chunk))
+                chunks.append((
+                    "SELECT case_id, primary_text, response_text FROM cases "
+                    f"WHERE case_id IN ({ph})", chunk))
+        else:
+            base = "SELECT case_id, primary_text, response_text FROM cases"
+            params: list = []
+            if file_id:
+                base += " WHERE file_id = ?"
+                params.append(file_id)
+            chunks.append((base, params))
 
         # Проход 1: глобальные счётчики хэшей для duplicate (вся выборка).
         global_counts: Counter = Counter()
         if settings.get("check_duplicate", True):
-            cursor.execute(base, params)
-            while True:
-                if cancel_event is not None and cancel_event.is_set():
-                    raise Cancelled(
-                        f"Прервано пользователем: проверено 0 из {total}")
-                rows = cursor.fetchmany(2000)
-                if not rows:
-                    break
-                for r in rows:
-                    h = compute_text_hash(
-                        f"{r['primary_text'] or ''} {r['response_text'] or ''}")
-                    global_counts[h] += 1
+            for query, qparams in chunks:
+                cursor.execute(query, qparams)
+                while True:
+                    if cancel_event is not None and cancel_event.is_set():
+                        raise Cancelled(
+                            f"Прервано пользователем: проверено 0 из {total}")
+                    rows = cursor.fetchmany(2000)
+                    if not rows:
+                        break
+                    for r in rows:
+                        h = compute_text_hash(
+                            f"{r['primary_text'] or ''} {r['response_text'] or ''}")
+                        global_counts[h] += 1
 
         now = utcnow()
         total_checked = 0
@@ -324,30 +369,34 @@ def run_autochecks(project_path: str, file_id: int = None,
                 except Exception:
                     pass
 
-        cursor.execute(base, params)
-        while True:
-            if cancel_event is not None and cancel_event.is_set():
-                conn.commit()
-                raise Cancelled(f"Прервано пользователем: проверено {total_checked} из {total}")
-            rows = cursor.fetchmany(2000)
-            if not rows:
-                break
-            for case in rows:
-                total_checked += 1
-                d = {"primary_text": case["primary_text"], "response_text": case["response_text"]}
-                flags = check_case(d, settings)
-                if settings.get("check_duplicate", True):
-                    h = compute_text_hash(
-                        f"{case['primary_text'] or ''} {case['response_text'] or ''}")
-                    if global_counts[h] > 1:
-                        flags.append(("duplicate", RULES["duplicate"]["name"],
-                                      f"Повторов в выборке: {global_counts[h]}"))
-                for code, name, details in flags:
-                    batch.append((case["case_id"], code, name, details, rule_severity(code), now))
-                    total_flags += 1
-                if len(batch) >= 2000:
-                    flush()
-            flush()
+        for query, qparams in chunks:
+            cursor.execute(query, qparams)
+            while True:
+                if cancel_event is not None and cancel_event.is_set():
+                    conn.commit()
+                    raise Cancelled(
+                        f"Прервано пользователем: проверено {total_checked} из {total}")
+                rows = cursor.fetchmany(2000)
+                if not rows:
+                    break
+                for case in rows:
+                    total_checked += 1
+                    d = {"primary_text": case["primary_text"],
+                         "response_text": case["response_text"]}
+                    flags = check_case(d, settings)
+                    if settings.get("check_duplicate", True):
+                        h = compute_text_hash(
+                            f"{case['primary_text'] or ''} {case['response_text'] or ''}")
+                        if global_counts[h] > 1:
+                            flags.append(("duplicate", RULES["duplicate"]["name"],
+                                          f"Повторов в выборке: {global_counts[h]}"))
+                    for code, name, details in flags:
+                        batch.append((case["case_id"], code, name, details,
+                                      rule_severity(code), now))
+                        total_flags += 1
+                    if len(batch) >= 2000:
+                        flush()
+                flush()
         if progress_callback and total:
             try:
                 progress_callback(total, total)
@@ -390,5 +439,93 @@ def get_case_checks(project_path: str, case_id: int) -> list:
         for r in cursor.fetchall():
             d = dict(r)
             d["severity"] = rule_severity(d.get("check_code", ""))
+            out.append(d)
+        return out
+
+
+VERDICTS = ("confirmed", "false_positive")
+
+
+def set_check_verdict(project_path: str, case_id: int, check_code: str,
+                      verdict: str | None) -> None:
+    """Вердикт человека по срабатыванию (ТЗ §75): confirmed / false_positive.
+
+    verdict=None — снять вердикт. Пишет историю CHECK (check_confirmed /
+    check_rejected) — по ней считается precision правил.
+    """
+    if verdict is not None and verdict not in VERDICTS:
+        raise ValueError(f"Плохой вердикт: {verdict!r}")
+    now = utcnow()
+    with db(project_path) as conn:
+        cur = conn.cursor()
+        old = cur.execute("SELECT verdict FROM case_check_verdicts "
+                          "WHERE case_id=? AND check_code=?",
+                          (case_id, check_code)).fetchone()
+        if verdict is None:
+            cur.execute("DELETE FROM case_check_verdicts WHERE case_id=? AND check_code=?",
+                        (case_id, check_code))
+        else:
+            cur.execute("""
+                INSERT INTO case_check_verdicts (case_id, check_code, verdict, updated_at)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(case_id, check_code) DO UPDATE SET
+                    verdict=?, updated_at=?
+            """, (case_id, check_code, verdict, now, verdict, now))
+        old_v = old["verdict"] if old else None
+        if old_v != verdict:
+            event = ("check_confirmed" if verdict == "confirmed"
+                     else "check_rejected" if verdict == "false_positive"
+                     else "check_verdict_cleared")
+            cur.execute("""
+                INSERT INTO history (case_id, event_type, field_name, old_value,
+                                     new_value, created_at)
+                VALUES (?, ?, 'check', ?, ?, ?)
+            """, (case_id, event, check_code, verdict or "", now))
+
+
+def get_check_verdicts(project_path: str, case_id: int) -> dict:
+    """check_code -> verdict для кейса."""
+    with db(project_path) as conn:
+        rows = conn.cursor().execute(
+            "SELECT check_code, verdict FROM case_check_verdicts WHERE case_id=?",
+            (case_id,)).fetchall()
+        return {r["check_code"]: r["verdict"] for r in rows}
+
+
+def get_checks_precision(project_path: str, file_id: int | None = None) -> list:
+    """Precision правил (ТЗ §75-76): confirmed / все с вердиктом.
+
+    Строки: check_code, check_name, triggered (кейсов), verdicts, confirmed,
+    false_positive, precision (None без вердиктов). Низкий precision =
+    правило бесполезно для датасета (feedback loop).
+    """
+    with db(project_path) as conn:
+        cur = conn.cursor()
+        if file_id is not None:
+            scope = "WHERE cc.case_id IN (SELECT case_id FROM cases WHERE file_id = ?)"
+            params: list = [file_id]
+        else:
+            scope, params = "", []
+        rows = cur.execute(f"""
+            SELECT cc.check_code AS check_code,
+                   MIN(cc.check_name) AS check_name,
+                   COUNT(DISTINCT cc.case_id) AS triggered,
+                   COUNT(DISTINCT v.case_id) AS verdicts,
+                   COUNT(DISTINCT CASE WHEN v.verdict='confirmed' THEN v.case_id END)
+                       AS confirmed,
+                   COUNT(DISTINCT CASE WHEN v.verdict='false_positive' THEN v.case_id END)
+                       AS false_positive
+            FROM case_checks cc
+            LEFT JOIN case_check_verdicts v
+              ON v.case_id = cc.case_id AND v.check_code = cc.check_code
+            {scope}
+            GROUP BY cc.check_code
+            ORDER BY triggered DESC
+        """, params).fetchall()
+        out = []
+        for r in rows:
+            d = dict(r)
+            d["precision"] = (d["confirmed"] / d["verdicts"]
+                              if d["verdicts"] else None)
             out.append(d)
         return out

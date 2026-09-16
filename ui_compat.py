@@ -218,6 +218,8 @@ def apply_theme(mode: str = "system") -> str:
 
     Fluent красит только свои виджеты, поэтому фон обычных QWidget/QTableWidget
     и цвет текста задаём сами — иначе окно остаётся светлым, а буквы не видно.
+    Палитру приложения синхронизируем с темой: всё, что рисуется через палитру
+    (фолбэки, части композитных виджетов), иначе остаётся белым при тёмной теме.
     Возвращает фактический режим.
     """
     if mode not in THEME_MODES:
@@ -231,10 +233,45 @@ def apply_theme(mode: str = "system") -> str:
         from PySide6.QtWidgets import QApplication
         from styles import FLUENT_BASE_DARK, FLUENT_BASE_LIGHT
         app = QApplication.instance()
+        dark = _resolve_effective(mode) == "dark"
         if app is not None:
-            app.setStyleSheet(
-                FLUENT_BASE_DARK if _resolve_effective(mode) == "dark" else FLUENT_BASE_LIGHT
-            )
+            # Порядок важен: сначала тема Fluent, затем палитра и QSS.
+            # Без принудительных unpolish/polish: на Fluent-окнах они валят
+            # приложение при переключении темы (проверено падением).
+            # setStyleSheet сам перечитывает стили и перекрашивает окна.
+            app.setStyleSheet(FLUENT_BASE_DARK if dark else FLUENT_BASE_LIGHT)
+            _apply_palette(app, dark)
     except Exception as e:
         logger.warning("apply_theme failed: %s", e)
     return mode
+
+
+def _apply_palette(app, dark: bool) -> None:
+    """Тёмная/светлая палитра приложения под текущую тему."""
+    from PySide6.QtGui import QPalette, QColor
+    pal = QPalette()
+    if dark:
+        window, base, text = QColor("#202020"), QColor("#2b2b2b"), QColor("#ffffff")
+        dim, accent = QColor("#a0a0a0"), QColor("#4ade80")
+        highlight = QColor("#1d3a28")
+    else:
+        window, base, text = QColor("#f3f3f3"), QColor("#ffffff"), QColor("#1b1b1b")
+        dim, accent = QColor("#616161"), QColor("#0b7a34")
+        highlight = QColor("#d3e9dc")
+    pal.setColor(QPalette.ColorRole.Window, window)
+    pal.setColor(QPalette.ColorRole.WindowText, text)
+    pal.setColor(QPalette.ColorRole.Base, base)
+    pal.setColor(QPalette.ColorRole.AlternateBase, window)
+    pal.setColor(QPalette.ColorRole.Text, text)
+    pal.setColor(QPalette.ColorRole.Button, base)
+    pal.setColor(QPalette.ColorRole.ButtonText, text)
+    pal.setColor(QPalette.ColorRole.BrightText, accent)
+    pal.setColor(QPalette.ColorRole.Highlight, highlight)
+    pal.setColor(QPalette.ColorRole.HighlightedText, text)
+    pal.setColor(QPalette.ColorRole.ToolTipBase, base)
+    pal.setColor(QPalette.ColorRole.ToolTipText, text)
+    try:
+        pal.setColor(QPalette.ColorRole.PlaceholderText, dim)
+    except Exception:
+        pass
+    app.setPalette(pal)

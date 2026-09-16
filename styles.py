@@ -537,12 +537,19 @@ QPushButton:hover {{
 
 
 # === Базовые темы для Fluent-режима ===
-# Fluent-виджеты красятся сами через setTheme. Здесь — только обычные
-# Qt-виджеты, которые Fluent не трогает. Пер-виджетные QSS (у fluent-виджетов)
-# приоритетнее app-level, конфликтов нет.
+# Красим ЯВНО все используемые поверхности цветами текущей темы — и обычные
+# Qt-виджеты, и Fluent-классы (селекторы без Q-префикса: PushButton, ComboBox
+# и т.д.; Qt их просто не матчит, если класса нет — безопасно).
+# Причина: часть поверхностей Fluent рисует через палитру/по-своему, и без
+# явных цветов получается каша (белые кнопки с белым текстом на тёмной теме).
+# Пер-виджетные inline-QSS приоритетнее app-level и продолжают работать.
 def _fluent_base(bg, bg_card, bg_input, text, text_dim, border, accent, accent_soft, header_bg):
     return f"""
-QWidget {{
+QWidget[screen="true"] {{
+    background-color: {bg};
+    color: {text};
+}}
+QDialog {{
     background-color: {bg};
     color: {text};
 }}
@@ -550,19 +557,27 @@ QLabel {{
     color: {text};
     background: transparent;
 }}
-QPushButton {{
+QPushButton, PushButton, PrimaryPushButton {{
     background-color: {bg_card};
     color: {text};
     border: 1px solid {border};
     border-radius: 6px;
     padding: 6px 12px;
-    text-align: center;
 }}
-QPushButton:hover {{
+QPushButton:hover, PushButton:hover, PrimaryPushButton:hover {{
     border-color: {accent};
 }}
-QPushButton:disabled {{
+QPushButton:disabled, PushButton:disabled, PrimaryPushButton:disabled {{
     color: {text_dim};
+}}
+QPushButton:checked, PushButton:checked {{
+    background-color: {accent_soft};
+    border-color: {accent};
+}}
+QCheckBox, CheckBox {{
+    background: transparent;
+    color: {text};
+    spacing: 8px;
 }}
 QGroupBox {{
     background-color: {bg_card};
@@ -571,6 +586,7 @@ QGroupBox {{
     margin-top: 12px;
     padding: 16px 12px 12px 12px;
     font-weight: bold;
+    color: {text};
 }}
 QGroupBox::title {{
     subcontrol-origin: margin;
@@ -578,7 +594,7 @@ QGroupBox::title {{
     padding: 0 4px;
     color: {text};
 }}
-QTableWidget {{
+QTableWidget, TableWidget {{
     background-color: {bg_card};
     alternate-background-color: {bg};
     color: {text};
@@ -588,8 +604,11 @@ QTableWidget {{
     border: 1px solid {border};
     border-radius: 6px;
 }}
-QTableWidget::item {{
+QTableWidget::item, TableWidget::item {{
     padding: 4px;
+}}
+QHeaderView {{
+    background-color: {header_bg};
 }}
 QHeaderView::section {{
     background-color: {header_bg};
@@ -600,28 +619,49 @@ QHeaderView::section {{
     padding: 6px;
     font-weight: bold;
 }}
-QListWidget {{
+/* Квадрат-заглушка в углу таблицы (между номерами строк и заголовками):
+   без этого в тёмной теме там белое пятно. */
+QTableCornerButton::section {{
+    background-color: {header_bg};
+    border: none;
+    border-right: 1px solid {border};
+    border-bottom: 1px solid {border};
+}}
+QListWidget, ListWidget {{
     background-color: {bg_card};
     color: {text};
     border: 1px solid {border};
     border-radius: 6px;
 }}
-QListWidget::item:selected {{
+QListWidget::item:selected, ListWidget::item:selected {{
     background-color: {accent_soft};
     color: {text};
 }}
-QLineEdit, QTextEdit, QPlainTextEdit, QSpinBox, QComboBox {{
+QLineEdit, QTextEdit, QPlainTextEdit, LineEdit, TextEdit {{
     background-color: {bg_input};
     color: {text};
     border: 1px solid {border};
     border-radius: 6px;
     padding: 4px 8px;
     selection-background-color: {accent_soft};
+    selection-color: {text};
 }}
-QComboBox QAbstractItemView {{
+QSpinBox, SpinBox, QComboBox, ComboBox {{
+    background-color: {bg_input};
+    color: {text};
+    border: 1px solid {border};
+    border-radius: 6px;
+    padding: 4px 8px;
+    selection-background-color: {accent_soft};
+    selection-color: {text};
+}}
+QComboBox QAbstractItemView, ComboBox QAbstractItemView {{
     background-color: {bg_card};
     color: {text};
     selection-background-color: {accent_soft};
+}}
+QScrollArea {{
+    background: transparent;
 }}
 QTabWidget::pane {{
     border: 1px solid {border};
@@ -660,6 +700,7 @@ QProgressBar {{
     border: 1px solid {border};
     border-radius: 4px;
     text-align: center;
+    color: {text};
 }}
 QProgressBar::chunk {{
     background-color: {accent};

@@ -6,6 +6,7 @@ from pathlib import Path
 
 from constants import ALLOWED_ROLES
 from database import db, utcnow
+from workers import Cancelled
 
 logger = logging.getLogger(__name__)
 BATCH = 2000
@@ -34,10 +35,6 @@ def _validate_mapping(mapping: dict) -> None:
             _custom_name(role)
             continue
         raise ValueError(f"Неизвестная роль {role!r} для колонки {col!r}")
-
-
-class Cancelled(Exception):
-    """Отмена длительной операции пользователем."""
 
 
 def import_file(

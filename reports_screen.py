@@ -319,14 +319,23 @@ class ReportsScreen(BaseScreen):
     def load_checks_report(self):
         checks = get_checks_report(self.project_path)
         self.checks_table.clear()
-        self.checks_table.setColumnCount(2)
+        self.checks_table.setColumnCount(4)
         self.checks_table.setRowCount(len(checks))
         self.checks_table.setHorizontalHeaderLabels([
-            "Автопроверка", "Количество срабатываний"
+            "Автопроверка", "Срабатываний", "Подтв. / Ложные", "Precision"
         ])
         for row, check in enumerate(checks):
             self.checks_table.setItem(row, 0, QTableWidgetItem(check['check_name']))
             self.checks_table.setItem(row, 1, QTableWidgetItem(str(check['count'])))
+            self.checks_table.setItem(
+                row, 2, QTableWidgetItem(
+                    f"{check.get('confirmed') or 0} / {check.get('false_positive') or 0}"))
+            prec = check.get('precision')
+            cell = (f"{prec:.0%}" if prec is not None else "— нет вердиктов")
+            if prec is not None and prec < 0.3 and (check.get('confirmed') or 0) + (
+                    check.get('false_positive') or 0) >= 3:
+                cell += " ⚠ правило бесполезно?"
+            self.checks_table.setItem(row, 3, QTableWidgetItem(cell))
         self.checks_table.resizeColumnsToContents()
 
     def refresh_charts(self):

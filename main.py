@@ -114,6 +114,7 @@ class ProjectWindow(QWidget):
         # Создаём все экраны
         from project_screen import ProjectScreen
         from review_screen import ReviewScreen
+        from runs_screen import ModelRunsScreen
         from reports_screen import ReportsScreen
         from history_screen import HistoryScreen
         from backup_screen import BackupScreen
@@ -121,6 +122,7 @@ class ProjectWindow(QWidget):
 
         self.screens['project'] = ProjectScreen(self.project_path, self)
         self.screens['review'] = ReviewScreen(self.project_path, self, filters=None)
+        self.screens['runs'] = ModelRunsScreen(self.project_path, self)
         self.screens['reports'] = ReportsScreen(self.project_path, self)
         self.screens['history'] = HistoryScreen(self.project_path, self)
         self.screens['backup'] = BackupScreen(self.project_path, self)
@@ -196,6 +198,7 @@ class MainWindow(_BaseWindow):
     NAV_ITEMS = [
         ("project", "FOLDER", "Проект"),
         ("review", "SEARCH", "Ревью"),
+        ("runs", "SYNC", "Прогоны"),
         ("reports", "DOCUMENT", "Отчёты"),
         ("history", "HISTORY", "История"),
         ("backup", "SAVE", "Бэкапы"),

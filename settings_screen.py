@@ -1,6 +1,6 @@
 from PySide6.QtWidgets import (
-    QVBoxLayout, QHBoxLayout, QLabel,
-    QGroupBox, QFormLayout
+    QVBoxLayout, QHBoxLayout, QLabel, QWidget,
+    QGroupBox, QFormLayout, QScrollArea
 )
 from PySide6.QtCore import Qt, Signal
 from database import db
@@ -26,6 +26,15 @@ class SettingsScreen(BaseScreen):
         self.load_settings()
 
     def init_ui(self):
+        outer = QVBoxLayout()
+        outer.setContentsMargins(0, 0, 0, 0)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        try:
+            scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        except Exception:
+            pass
+        content = QWidget()
         layout = QVBoxLayout()
         layout.setSpacing(12)
         layout.setContentsMargins(24, 12, 24, 12)
@@ -44,6 +53,18 @@ class SettingsScreen(BaseScreen):
             "Автоматически переходить к следующему кейсу после выбора статуса")
         self.auto_next_checkbox.setChecked(True)
         review_layout.addRow(self.auto_next_checkbox)
+
+        self.skip_reviewed_checkbox = FCheckBox("Пропускать уже просмотренные при переходе")
+        self.skip_reviewed_checkbox.setChecked(False)
+        review_layout.addRow(self.skip_reviewed_checkbox)
+
+        self.checks_first_checkbox = FCheckBox("Сначала кейсы с автопроверками при переходе")
+        self.checks_first_checkbox.setChecked(False)
+        review_layout.addRow(self.checks_first_checkbox)
+
+        self.no_return_good_checkbox = FCheckBox("Не возвращаться к «Хорошо» при переходе")
+        self.no_return_good_checkbox.setChecked(False)
+        review_layout.addRow(self.no_return_good_checkbox)
 
         self.comment_for_bad_combo = FComboBox()
         self.comment_for_bad_combo.addItem("Не обязателен", "none")
@@ -69,6 +90,28 @@ class SettingsScreen(BaseScreen):
 
         review_group.setLayout(review_layout)
         layout.addWidget(review_group)
+
+        # Веса умной очереди (ТЗ §9): без ML, просто баллы
+        prio_group = QGroupBox("Веса очереди")
+        prio_layout = QFormLayout()
+        self.prio_spins: dict = {}
+        for key, label, default in (
+            ("w_crit", "Критическая автопроверка:", 100),
+            ("w_multi", "Несколько автопроверок:", 50),
+            ("w_single", "Одна автопроверка:", 30),
+            ("w_discuss", "Тег «нужно обсудить»:", 30),
+            ("w_unrev", "Непроверенный кейс:", 10),
+            ("w_rev", "Штраф за проверенный:", -20),
+        ):
+            spin = FSpinBox()
+            spin.setMinimum(-500)
+            spin.setMaximum(500)
+            spin.setValue(default)
+            spin.setMaximumWidth(180)
+            self.prio_spins[key] = spin
+            prio_layout.addRow(label, spin)
+        prio_group.setLayout(prio_layout)
+        layout.addWidget(prio_group)
 
         # Оформление (Fluent: светлая/тёмная/системная)
         ui_group = QGroupBox("Оформление")
@@ -196,7 +239,15 @@ class SettingsScreen(BaseScreen):
         buttons_layout.addWidget(btn_back)
         layout.addLayout(buttons_layout)
 
-        self.setLayout(layout)
+        content.setLayout(layout)
+        scroll.setWidget(content)
+        outer.addWidget(scroll)
+        try:
+            from ui_compat import clear_in_fluent
+            clear_in_fluent(scroll, content)
+        except Exception:
+            pass
+        self.setLayout(outer)
 
     @staticmethod
     def _apply_check(checkbox, value) -> None:
@@ -225,6 +276,17 @@ class SettingsScreen(BaseScreen):
 
             # Применяем настройки
             self.auto_next_checkbox.setChecked(settings.get('auto_next_case', 'true') == 'true')
+            self.skip_reviewed_checkbox.setChecked(
+                settings.get('skip_reviewed', 'false') == 'true')
+            self.checks_first_checkbox.setChecked(
+                settings.get('checks_first', 'false') == 'true')
+            self.no_return_good_checkbox.setChecked(
+                settings.get('no_return_good', 'false') == 'true')
+            for key, spin in self.prio_spins.items():
+                try:
+                    spin.setValue(int(settings.get(f'prio_{key}', spin.value())))
+                except (TypeError, ValueError):
+                    pass
 
             comment_mode = settings.get('require_comment_for_bad', 'warn')
             for i in range(self.comment_for_bad_combo.count()):
@@ -320,8 +382,11 @@ class SettingsScreen(BaseScreen):
 
     def _collect_settings(self) -> list:
         # 1-в-1 с autocheck_service.DEFAULTS: каждый ключ — свой чекбокс.
-        return [
+        out = [
             ('auto_next_case', str(self.auto_next_checkbox.isChecked()).lower()),
+            ('skip_reviewed', str(self.skip_reviewed_checkbox.isChecked()).lower()),
+            ('checks_first', str(self.checks_first_checkbox.isChecked()).lower()),
+            ('no_return_good', str(self.no_return_good_checkbox.isChecked()).lower()),
             ('require_comment_for_bad', self.comment_for_bad_combo.currentData()),
             ('checks_min_length', str(self.min_length_spin.value())),
             ('checks_max_length', str(self.max_length_spin.value())),
@@ -342,6 +407,9 @@ class SettingsScreen(BaseScreen):
             ('checks_encoding', str(self.check_encoding_checkbox.isChecked()).lower()),
             ('checks_suspicious', str(self.check_suspicious_checkbox.isChecked()).lower()),
         ]
+        for key, spin in self.prio_spins.items():
+            out.append((f'prio_{key}', str(spin.value())))
+        return out
 
     def _write_settings(self) -> None:
         now = datetime.now(UTC).isoformat()
@@ -374,7 +442,13 @@ class SettingsScreen(BaseScreen):
 
     def on_reset(self):
         """Сбрасывает настройки по умолчанию."""
+        from review_queue_service import DEFAULT_WEIGHTS
         self.auto_next_checkbox.setChecked(True)
+        self.skip_reviewed_checkbox.setChecked(False)
+        self.checks_first_checkbox.setChecked(False)
+        self.no_return_good_checkbox.setChecked(False)
+        for key, spin in self.prio_spins.items():
+            spin.setValue(DEFAULT_WEIGHTS.get(key, 0))
         self.comment_for_bad_combo.setCurrentIndex(1)
         self.min_length_spin.setValue(10)
         self.max_length_spin.setValue(10000)

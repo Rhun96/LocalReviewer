@@ -43,6 +43,8 @@ class HistoryScreen(BaseScreen):
         self.event_filter.addItem("Добавление тега", "tag_added")
         self.event_filter.addItem("Удаление тега", "tag_removed")
         self.event_filter.addItem("Причина ошибки", "category_changed")
+        self.event_filter.addItem("Вердикт проверки", "check_verdict")
+        self.event_filter.addItem("Просмотрено", "viewed_changed")
         self.event_filter.addItem("Массовая операция", "bulk_undone")
         self.event_filter.currentIndexChanged.connect(self.load_history)
         filter_layout.addWidget(self.event_filter)
@@ -114,7 +116,10 @@ class HistoryScreen(BaseScreen):
                 """
 
                 params = []
-                if event_type:
+                if event_type == "check_verdict":
+                    query += (" WHERE h.event_type IN "
+                              "('check_confirmed','check_rejected','check_verdict_cleared')")
+                elif event_type:
                     query += " WHERE h.event_type = ?"
                     params.append(event_type)
 
@@ -136,6 +141,10 @@ class HistoryScreen(BaseScreen):
                 'tag_added': 'Добавление тега',
                 'tag_removed': 'Удаление тега',
                 'category_changed': 'Причина ошибки',
+                'check_confirmed': 'Проверка подтверждена',
+                'check_rejected': 'Проверка отклонена',
+                'check_verdict_cleared': 'Вердикт снят',
+                'viewed_changed': 'Просмотрено',
                 'bulk_undone': 'Отмена bulk',
             }
 

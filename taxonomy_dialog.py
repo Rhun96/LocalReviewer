@@ -75,7 +75,9 @@ class ErrorCauseDialog(QDialog):
         for cat in self._categories:
             btn = FPushButton(cat["name"])
             btn.setCheckable(True)
+            btn.setChecked(False)
             btn.setMinimumHeight(36)
+            self._style_cat_btn(btn, False)
             btn.clicked.connect(lambda _c, cid=cat["category_id"]: self._select_cat(cid))
             self.cats_layout.addWidget(btn, row, col)
             self._cat_buttons[cat["category_id"]] = btn
@@ -86,11 +88,32 @@ class ErrorCauseDialog(QDialog):
         if self._categories:
             self._select_cat(self._categories[0]["category_id"])
 
+    @staticmethod
+    def _style_cat_btn(btn, selected: bool) -> None:
+        # Выбранная категория видна сразу, без ухода в подкатегории.
+        if selected:
+            btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #00FF41;
+                    color: #000000;
+                    border: 2px solid #00FF41;
+                    border-radius: 6px;
+                    font-weight: bold;
+                    padding: 6px;
+                }
+            """)
+        else:
+            btn.setStyleSheet("")
+
     def _select_cat(self, category_id: int):
         self._cat_id = category_id
         for cid, btn in self._cat_buttons.items():
-            btn.setChecked(cid == category_id)
+            selected = (cid == category_id)
+            if btn.isChecked() != selected:
+                btn.setChecked(selected)
+            self._style_cat_btn(btn, selected)
         cat = next((c for c in self._categories if c["category_id"] == category_id), None)
+        self.sub_title.setText(f"Шаг 2: подкатегория [категория: {(cat or {}).get('name', '')}]")
         self.sub_combo.clear()
         self.sub_combo.addItem("— без подкатегории —", None)
         for sub in (cat or {}).get("subs", []):

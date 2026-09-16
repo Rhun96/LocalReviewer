@@ -1,18 +1,21 @@
 """Профили ревью (ТЗ §31-36): схема статусов, хоткеи, обязательные поля.
 
-v1: статусы — подмножество 6 базовых кодов (отчёты/матрица завязаны на коды),
-переименование отображения, вкл/выкл, хоткеи, обязательность причины для «Плохо».
-Произвольные новые коды статусов — следующим этапом (тронут отчёты и экспорт).
+Статусы — произвольные коды (например Safety Dataset: safe/edge/target),
+каждый с base-семантикой из 6 базовых: отчёты, очередь и регрессия работают
+по base, отображение — по имени из профиля. Старые проекты — Default-профиль.
 """
 import copy
 import json
 import logging
+import re
 from database import db, utcnow
 
 logger = logging.getLogger(__name__)
 
 BASE_CODES = ("good", "bad", "uncertain", "duplicate", "skip")
+BASE_SET = ("unreviewed",) + BASE_CODES
 COMMENT_MODES = ("none", "warn", "required", None)
+_CODE_RE = re.compile(r"^[a-z][a-z0-9_]{0,31}$")
 
 
 def _default_config() -> dict:
@@ -33,12 +36,20 @@ def validate_config(config: dict) -> dict:
         name = (s.get("name") or "").strip()
         hotkey = (s.get("hotkey") or "").strip()
         enabled = bool(s.get("enabled", True))
-        if code not in BASE_CODES:
-            raise ValueError(f"Неизвестный код статуса: {code!r}")
+        base = (s.get("base") or "").strip() or None
+        if not _CODE_RE.match(code):
+            raise ValueError(f"Плохой код статуса: {code!r} (латиница, цифры, _)")
         if code in seen_codes:
             raise ValueError(f"Дубль статуса: {code!r}")
         if not name or len(name) > 32:
             raise ValueError(f"Плохое имя статуса {code!r}")
+        if base is None:
+            # Базовые коды маппятся сами на себя; свои требуют явный base.
+            if code not in BASE_SET:
+                raise ValueError(f"Статусу {code!r} нужен base из {list(BASE_SET)}")
+            base = code
+        elif base not in BASE_SET:
+            raise ValueError(f"Плохой base {base!r} для {code!r}")
         if hotkey:
             if len(hotkey) != 1:
                 raise ValueError(f"Хоткей — один символ: {hotkey!r}")
@@ -46,7 +57,8 @@ def validate_config(config: dict) -> dict:
                 raise ValueError(f"Дубль хоткея: {hotkey!r}")
             seen_hotkeys.add(hotkey)
         seen_codes.add(code)
-        out.append({"code": code, "name": name, "hotkey": hotkey, "enabled": enabled})
+        out.append({"code": code, "name": name, "hotkey": hotkey,
+                    "enabled": enabled, "base": base})
     if not any(s["enabled"] for s in out):
         raise ValueError("Хотя бы один статус должен быть включён")
     req_cat = bool(config.get("require_category_for_bad", False))
@@ -180,3 +192,78 @@ def delete_profile(project_path: str, profile_id: int) -> None:
 
 def enabled_statuses(config: dict) -> list:
     return [s for s in config.get("statuses", []) if s.get("enabled")]
+
+
+def code_to_base(project_path: str) -> dict:
+    """Код статуса -> base-семантика по активному профилю.
+
+    Базовые коды и 'unreviewed' маппятся сами; неизвестные коды (старая
+    разметка, удалённый профиль) считаются 'unreviewed' только если это
+    буквально 'unreviewed', иначе — как есть для отображения, а для
+    reviewed/base-агрегации используется сам код при отсутствии в маппинге.
+    Возвращает dict; отсутствующий код означает «не базовый, смотри как есть».
+    """
+    mapping = {c: c for c in BASE_SET}
+    try:
+        prof = get_active_profile(project_path)
+        for s in prof.get("config", {}).get("statuses", []):
+            base = s.get("base") or s.get("code")
+            if base in BASE_SET:
+                mapping[s["code"]] = base
+            elif s.get("code") in BASE_SET:
+                mapping[s["code"]] = s["code"]
+    except Exception as e:
+        logger.warning("code_to_base fallback: %s", e)
+    return mapping
+
+
+def status_base(project_path: str, code: str) -> str:
+    """Base-семантика кода (для очереди/отчётов/строгости «Плохо»)."""
+    if not code:
+        return "unreviewed"
+    return code_to_base(project_path).get(code, code)
+
+
+def status_display_name(project_path: str, code: str) -> str:
+    """Имя статуса для показа: профиль -> константы -> сам код."""
+    try:
+        prof = get_active_profile(project_path)
+        for s in prof.get("config", {}).get("statuses", []):
+            if s.get("code") == code:
+                return s.get("name") or code
+    except Exception:
+        pass
+    try:
+        from constants import STATUS_NAMES
+        return STATUS_NAMES.get(code, code)
+    except Exception:
+        return code
+
+
+def status_options(project_path: str) -> list:
+    """[(code, name)] для фильтров: включённые профиля + legacy-коды из БД."""
+    opts: list = []
+    seen: set = set()
+    try:
+        prof = get_active_profile(project_path)
+        for s in enabled_statuses(prof.get("config", {})):
+            opts.append((s["code"], s.get("name") or s["code"]))
+            seen.add(s["code"])
+    except Exception:
+        pass
+    if "unreviewed" not in seen:
+        opts.insert(0, ("unreviewed", "Не проверено"))
+        seen.add("unreviewed")
+    try:
+        with db(project_path) as conn:
+            rows = conn.cursor().execute(
+                "SELECT DISTINCT status FROM annotations WHERE status IS NOT NULL"
+            ).fetchall()
+        for r in rows:
+            code = r["status"]
+            if code and code not in seen:
+                opts.append((code, f"{code} (в разметке)"))
+                seen.add(code)
+    except Exception:
+        pass
+    return opts

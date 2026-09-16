@@ -4,7 +4,7 @@ from PySide6.QtWidgets import (
     QScrollArea, QWidget, QInputDialog
 )
 from PySide6.QtCore import Qt
-from constants import CHECK_OPTIONS, CHECK_SEVERITIES, STATUS_OPTIONS
+from constants import CHECK_OPTIONS, CHECK_SEVERITIES
 from database import db
 from ui_compat import (
     FCheckBox, FComboBox, FLineEdit, FPrimaryButton, FPushButton,
@@ -40,6 +40,9 @@ class FilterDialog(QDialog):
         self.check_checkboxes = {}
         self.sev_checkboxes = {}
         self.err_sev_checkboxes = {}
+        # Вид таблицы, связанный с фильтром (ТЗ §29): колонки/сортировка/очередь.
+        # Хранится рядом с условиями, применяется экраном ревью.
+        self.view = None
 
         self.init_ui()
 
@@ -89,11 +92,19 @@ class FilterDialog(QDialog):
         layout.addWidget(saved_group)
         self.reload_saved_filters()
 
-        # Статусы
+        # Статусы — из активного профиля (свои коды поддерживаются)
         status_group = QGroupBox("Статус")
         status_layout = QGridLayout()
 
-        for i, (code, name) in enumerate(STATUS_OPTIONS):
+        try:
+            from review_profile_service import status_options
+            status_opts = status_options(self.project_path)
+        except Exception:
+            status_opts = []
+        if not status_opts:
+            from constants import STATUS_OPTIONS as _FALLBACK
+            status_opts = list(_FALLBACK)
+        for i, (code, name) in enumerate(status_opts):
             cb = FCheckBox(name)
             self.status_checkboxes[code] = cb
             status_layout.addWidget(cb, i // 3, i % 3)
@@ -314,6 +325,14 @@ class FilterDialog(QDialog):
         import copy
         return copy.deepcopy(self.filters)
 
+    def set_view(self, view: dict | None) -> None:
+        """Текущий вид таблицы (колонки/сортировка/очередь) для сохранения рядом."""
+        self.view = dict(view) if view else None
+
+    def get_view(self) -> dict | None:
+        import copy
+        return copy.deepcopy(self.view) if self.view else None
+
     def reload_saved_filters(self):
         try:
             from saved_filter_service import list_saved_filters
@@ -353,8 +372,14 @@ class FilterDialog(QDialog):
         name, ok = QInputDialog.getText(self, "Сохранить фильтр", "Название:")
         if ok and (name or "").strip():
             try:
-                save_filter(self.project_path, name.strip(), current)
+                payload: dict = {"filters": current}
+                if self.view:
+                    for k in ("columns", "queue_mode", "sort"):
+                        if self.view.get(k) is not None:
+                            payload[k] = self.view[k]
+                save_filter(self.project_path, name.strip(), payload)
                 self.reload_saved_filters()
+                notify(self, "success", "Фильтр", "Фильтр сохранён (условия + вид таблицы)")
             except Exception as e:
                 notify(self, "warning", "Ошибка", str(e))
 
@@ -372,7 +397,17 @@ class FilterDialog(QDialog):
         except Exception as e:
             notify(self, "warning", "Ошибка", str(e))
 
-    def set_filters(self, filters):
+    def set_filters(self, payload):
+        # Совместимость: старые сохранения — плоский dict условий;
+        # новые — {"filters": {...}, "columns": [...], "queue_mode": ..., "sort": ...}.
+        if isinstance(payload, dict) and "filters" in payload and isinstance(
+                payload["filters"], dict):
+            filters = payload["filters"]
+            self.view = {k: payload[k] for k in ("columns", "queue_mode", "sort")
+                         if k in payload}
+        else:
+            filters = payload or {}
+            self.view = None
         if not filters:
             self.on_reset()
             return

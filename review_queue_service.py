@@ -9,25 +9,51 @@ QUEUE_MODES = ("normal", "unreviewed", "problematic")
 
 SEV_WEIGHT = {"critical": 100, "error": 60, "warning": 20, "info": 5}
 
+DEFAULT_WEIGHTS = {"w_crit": 100, "w_multi": 50, "w_single": 30,
+                   "w_discuss": 30, "w_unrev": 10, "w_rev": -20}
+
+
+def get_priority_weights(project_path: str) -> dict:
+    """Настраиваемые веса приоритета (ТЗ §9). Хранятся в settings."""
+    out = dict(DEFAULT_WEIGHTS)
+    try:
+        with db(project_path) as conn:
+            rows = conn.cursor().execute(
+                "SELECT key, value FROM settings WHERE key LIKE 'prio_w_%'").fetchall()
+        for r in rows:
+            short = r["key"][len("prio_"):]
+            if short in out:
+                try:
+                    out[short] = int(r["value"])
+                except (TypeError, ValueError):
+                    pass
+    except Exception as e:
+        logger.warning("priority weights fallback: %s", e)
+    return out
+
 
 def compute_priority(has_checks: bool, max_sev: str, checks_count: int,
-                     status: str, needs_discussion: bool = False) -> tuple:
+                     status: str, needs_discussion: bool = False,
+                     weights: dict | None = None) -> tuple:
     """Возвращает (score, reasons). Формула из ТЗ §9, без ML."""
+    w = dict(DEFAULT_WEIGHTS)
+    if weights:
+        w.update({k: v for k, v in weights.items() if k in w})
     score, reasons = 0, []
     if max_sev in ("critical", "error"):
-        score += 100
+        score += w["w_crit"]
         reasons.append("критическая автопроверка")
     elif has_checks:
-        score += 50 if checks_count > 1 else 30
+        score += w["w_multi"] if checks_count > 1 else w["w_single"]
         reasons.append(f"автопроверок: {checks_count}")
     if needs_discussion:
-        score += 30
+        score += w["w_discuss"]
         reasons.append("требует обсуждения")
     if status == "unreviewed":
-        score += 10
+        score += w["w_unrev"]
         reasons.append("статус не установлен")
     else:
-        score -= 20
+        score += w["w_rev"]
     return score, reasons
 
 
@@ -37,8 +63,11 @@ def build_queue(project_path: str, mode: str = "normal", filters: dict = None) -
         mode = "normal"
     base_filters = dict(filters or {})
     if mode == "unreviewed":
+        from review_profile_service import code_to_base as _ctb2
+        _m = _ctb2(project_path)
         base_filters = dict(base_filters)
-        base_filters["statuses"] = ["unreviewed"]
+        base_filters["statuses"] = ["unreviewed"] + [
+            c for c, b in _m.items() if b == "unreviewed" and c != "unreviewed"]
 
     if base_filters:
         query, params = build_filter_query(base_filters)
@@ -53,6 +82,10 @@ def build_queue(project_path: str, mode: str = "normal", filters: dict = None) -
         ids = [r["case_id"] for r in cur.fetchall()]
         if not ids or mode == "normal":
             return ids, {}
+        weights = get_priority_weights(project_path)
+        # Свои коды профилей: проверяемость — по base-семантике.
+        from review_profile_service import code_to_base as _ctb
+        _mapping = _ctb(project_path)
         # Проблемные первыми: подтягиваем checks + статусы одним проходом.
         # severity берём как MAX по весу (не произвольный GROUP BY).
         scored = []
@@ -72,6 +105,11 @@ def build_queue(project_path: str, mode: str = "normal", filters: dict = None) -
                 WHERE c.case_id IN ({ph})
                 GROUP BY c.case_id
             """, chunk).fetchall()
+            discuss = {r["case_id"] for r in cur.execute(f"""
+                SELECT ct.case_id FROM case_tags ct
+                JOIN tags t ON t.tag_id = ct.tag_id
+                WHERE t.tag_code = 'needs_discussion' AND ct.case_id IN ({ph})
+            """, chunk).fetchall()}
             for r in rows:
                 n = r["n"] or 0
                 max_w = r["max_w"] or 0
@@ -83,7 +121,11 @@ def build_queue(project_path: str, mode: str = "normal", filters: dict = None) -
                     max_sev = "info"
                 else:
                     max_sev = "info"
-                score, reasons = compute_priority(bool(n), max_sev, n, r["status"])
+                score, reasons = compute_priority(
+                    bool(n), max_sev, n,
+                    "unreviewed" if _mapping.get(r["status"], r["status"])
+                    == "unreviewed" else "good",
+                    r["case_id"] in discuss, weights)
                 scored.append((r["case_id"], score, reasons))
         # исходный порядок как tiebreak
         order = {cid: i for i, cid in enumerate(ids)}
@@ -96,7 +138,13 @@ def queue_stats(project_path: str, file_id=None) -> dict:
 
     file_id задан → статистика только по файлу (режим ревью одного файла),
     иначе — по всему проекту (режим «все файлы»).
+    Обработан = base(status) != 'unreviewed' (свои коды профилей учитываются).
     """
+    from review_profile_service import code_to_base
+    mapping = code_to_base(project_path)
+    unrev_codes = ["unreviewed"] + [c for c, b in mapping.items()
+                                    if b == "unreviewed" and c != "unreviewed"]
+    ph = ",".join(["?"] * len(unrev_codes))
     with db(project_path) as conn:
         cur = conn.cursor()
         fcond_cases = "WHERE c.file_id = ?" if file_id else ""
@@ -108,8 +156,8 @@ def queue_stats(project_path: str, file_id=None) -> dict:
         reviewed = cur.execute(f"""
             SELECT COUNT(*) AS c FROM annotations a
             JOIN cases c ON c.case_id = a.case_id
-            WHERE a.status != 'unreviewed' {fcond_ann}
-        """, p).fetchone()["c"]
+            WHERE COALESCE(a.status, 'unreviewed') NOT IN ({ph}) {fcond_ann}
+        """, (*unrev_codes, *p)).fetchone()["c"]
         problematic = cur.execute(f"""
             SELECT COUNT(DISTINCT cc.case_id) AS c FROM case_checks cc
             JOIN cases c ON c.case_id = cc.case_id

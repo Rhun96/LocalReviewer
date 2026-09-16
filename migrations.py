@@ -103,13 +103,18 @@ def _utcnow() -> str:
 
 DEFAULT_PROFILE_CONFIG = {
     "statuses": [
-        {"code": "good", "name": "Хорошо", "hotkey": "1", "enabled": True},
-        {"code": "bad", "name": "Плохо", "hotkey": "2", "enabled": True},
-        {"code": "uncertain", "name": "Сомневаюсь", "hotkey": "3", "enabled": True},
-        {"code": "duplicate", "name": "Дубль", "hotkey": "4", "enabled": True},
-        {"code": "skip", "name": "Пропустить", "hotkey": "5", "enabled": True},
+        {"code": "good", "name": "Хорошо", "hotkey": "1", "enabled": True,
+         "base": "good"},
+        {"code": "bad", "name": "Плохо", "hotkey": "2", "enabled": True,
+         "base": "bad"},
+        {"code": "uncertain", "name": "Сомневаюсь", "hotkey": "3",
+         "enabled": True, "base": "uncertain"},
+        {"code": "duplicate", "name": "Дубль", "hotkey": "4", "enabled": True,
+         "base": "duplicate"},
+        {"code": "skip", "name": "Пропустить", "hotkey": "5", "enabled": True,
+         "base": "skip"},
     ],
-    "require_category_for_bad": False,
+    "require_category_for_bad": True,
     "require_comment_for_bad": None,  # None = брать из настроек проекта
 }
 
@@ -255,6 +260,144 @@ def migrate_to_v9(cursor) -> None:
         "ON dataset_cases(version_id, stable_key)"
     )
     logger.info("migrated to v9 (dataset full snapshot)")
+
+
+def migrate_to_v10(cursor) -> None:
+    """Привязка шаблонов к причине (ТЗ §25): category_id/subcategory_id.
+
+    Только ADD COLUMN. Непривязанные шаблоны (NULL) показываются всегда.
+    """
+    cols = [r[1] for r in cursor.execute("PRAGMA table_info(comment_templates)").fetchall()]
+    if "category_id" not in cols:
+        cursor.execute("ALTER TABLE comment_templates ADD COLUMN category_id INTEGER")
+    if "subcategory_id" not in cols:
+        cursor.execute("ALTER TABLE comment_templates ADD COLUMN subcategory_id INTEGER")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_templates_cause "
+                   "ON comment_templates(category_id, subcategory_id)")
+    logger.info("migrated to v10 (template cause binding)")
+
+
+def migrate_to_v11(cursor) -> None:
+    """Произвольные статусы + «просмотрено» + вердикты проверок (ТЗ §31-36, §75-76).
+
+    annotations: пересборка без CHECK(status IN ...) — коды теперь из профиля,
+    плюс viewed (bulk «отметить просмотренным»). Данные копируются 1-в-1
+    (перед миграцией init_database делает autobackup).
+    case_check_verdicts: confirmed/false_positive по (case_id, check_code).
+    """
+    cols = [r[1] for r in cursor.execute("PRAGMA table_info(annotations)").fetchall()]
+    if "viewed" not in cols or _annotations_has_check(cursor):
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS annotations_new (
+                annotation_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                case_id INTEGER NOT NULL UNIQUE,
+                status TEXT DEFAULT 'unreviewed',
+                comment TEXT,
+                viewed INTEGER DEFAULT 0,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (case_id) REFERENCES cases(case_id) ON DELETE CASCADE
+            )
+        """)
+        if "viewed" in cols:
+            cursor.execute("""
+                INSERT OR IGNORE INTO annotations_new
+                    (annotation_id, case_id, status, comment, viewed, updated_at)
+                SELECT annotation_id, case_id, status, comment, viewed, updated_at
+                FROM annotations
+            """)
+        else:
+            cursor.execute("""
+                INSERT OR IGNORE INTO annotations_new
+                    (annotation_id, case_id, status, comment, viewed, updated_at)
+                SELECT annotation_id, case_id, status, comment, 0, updated_at
+                FROM annotations
+            """)
+        cursor.execute("DROP TABLE annotations")
+        cursor.execute("ALTER TABLE annotations_new RENAME TO annotations")
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS case_check_verdicts (
+            case_id INTEGER NOT NULL,
+            check_code TEXT NOT NULL,
+            verdict TEXT NOT NULL CHECK (verdict IN ('confirmed', 'false_positive')),
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (case_id, check_code),
+            FOREIGN KEY (case_id) REFERENCES cases(case_id) ON DELETE CASCADE
+        )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_verdicts_code "
+                   "ON case_check_verdicts(check_code, verdict)")
+    logger.info("migrated to v11 (custom statuses, viewed, verdicts)")
+
+
+def _annotations_has_check(cursor) -> bool:
+    try:
+        sql = cursor.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='annotations'"
+        ).fetchone()
+        return bool(sql and "CHECK" in (sql[0] or "").upper())
+    except Exception:
+        return False
+
+
+def migrate_to_v12(cursor) -> None:
+    """Прогоны модели и сравнение ответов (ТЗ §45-48, §51-53).
+
+    model_runs — запуск (модель/версии промптов/файл-источник).
+    run_answers — ответ прогона по stable_key + привязка к кейсу (case_id
+    NULL = кейс из прогона не сопоставлен с проектом: NEW).
+    run_preferences — pairwise-предпочтение A vs B отдельно от absolute
+    (absolute живёт в annotations.status; ТЗ §48 не смешивать).
+    """
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS model_runs (
+            run_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE,
+            model_name TEXT NOT NULL DEFAULT '',
+            model_version TEXT DEFAULT '',
+            prompt_version TEXT DEFAULT '',
+            system_prompt_version TEXT DEFAULT '',
+            source_file TEXT DEFAULT '',
+            file_id INTEGER,
+            description TEXT DEFAULT '',
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (file_id) REFERENCES files(file_id) ON DELETE SET NULL
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS run_answers (
+            run_id INTEGER NOT NULL,
+            stable_key TEXT NOT NULL,
+            case_id INTEGER,
+            answer_text TEXT,
+            created_at TEXT NOT NULL,
+            PRIMARY KEY (run_id, stable_key),
+            FOREIGN KEY (run_id) REFERENCES model_runs(run_id) ON DELETE CASCADE,
+            FOREIGN KEY (case_id) REFERENCES cases(case_id) ON DELETE SET NULL
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS run_preferences (
+            run_a_id INTEGER NOT NULL,
+            run_b_id INTEGER NOT NULL,
+            stable_key TEXT NOT NULL,
+            case_id INTEGER,
+            verdict TEXT NOT NULL DEFAULT 'unknown'
+                CHECK (verdict IN ('a_better','b_better','tie','unknown')),
+            rank_a INTEGER,
+            rank_b INTEGER,
+            comment TEXT,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (run_a_id, run_b_id, stable_key),
+            FOREIGN KEY (run_a_id) REFERENCES model_runs(run_id) ON DELETE CASCADE,
+            FOREIGN KEY (run_b_id) REFERENCES model_runs(run_id) ON DELETE CASCADE,
+            FOREIGN KEY (case_id) REFERENCES cases(case_id) ON DELETE SET NULL
+        )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_answers_case "
+                   "ON run_answers(case_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_answers_key "
+                   "ON run_answers(stable_key)")
+    logger.info("migrated to v12 (model runs)")
 
 
 def migrate_to_v5(cursor) -> None:
@@ -405,3 +548,68 @@ def ensure_uq_cases_hash(cursor) -> int:
         "CREATE UNIQUE INDEX IF NOT EXISTS uq_cases_file_hash ON cases(file_id, content_hash)"
     )
     return removed
+
+
+def migrate_to_v13(cursor) -> None:
+    """Регрессионное тестирование (ТЗ §49-60, §83).
+
+    output_reviews — absolute-разметка ответов прогона (своя на каждый run:
+    один кейс в разных прогонах может иметь разное качество).
+    regression_runs — запуск сравнения (baseline + candidate + gate-пороги).
+    regression_results — построчный итог (UNCHANGED/IMPROVED/REGRESSION/
+    NEW/REMOVED/UNRESOLVED + severity).
+    """
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS output_reviews (
+            run_id INTEGER NOT NULL,
+            stable_key TEXT NOT NULL,
+            case_id INTEGER,
+            status TEXT NOT NULL DEFAULT 'unreviewed',
+            comment TEXT,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (run_id, stable_key),
+            FOREIGN KEY (run_id) REFERENCES model_runs(run_id) ON DELETE CASCADE,
+            FOREIGN KEY (case_id) REFERENCES cases(case_id) ON DELETE SET NULL
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS regression_runs (
+            regression_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            baseline_type TEXT NOT NULL
+                CHECK (baseline_type IN ('dataset_version', 'run')),
+            baseline_id INTEGER NOT NULL,
+            candidate_run_id INTEGER NOT NULL,
+            gate_max_critical INTEGER NOT NULL DEFAULT 0,
+            gate_max_rate REAL NOT NULL DEFAULT 0.02,
+            gate_result TEXT DEFAULT '',
+            total INTEGER DEFAULT 0,
+            regressions INTEGER DEFAULT 0,
+            improvements INTEGER DEFAULT 0,
+            unchanged INTEGER DEFAULT 0,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (candidate_run_id) REFERENCES model_runs(run_id)
+                ON DELETE CASCADE
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS regression_results (
+            regression_id INTEGER NOT NULL,
+            stable_key TEXT NOT NULL,
+            case_id INTEGER,
+            baseline_status TEXT,
+            candidate_status TEXT,
+            result TEXT NOT NULL
+                CHECK (result IN ('UNCHANGED','IMPROVED','REGRESSION',
+                                  'NEW','REMOVED','UNRESOLVED')),
+            severity TEXT NOT NULL DEFAULT 'info'
+                CHECK (severity IN ('critical','warning','info')),
+            PRIMARY KEY (regression_id, stable_key),
+            FOREIGN KEY (regression_id) REFERENCES regression_runs(regression_id)
+                ON DELETE CASCADE,
+            FOREIGN KEY (case_id) REFERENCES cases(case_id) ON DELETE SET NULL
+        )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_regression_results_result "
+                   "ON regression_results(regression_id, result, severity)")
+    logger.info("migrated to v13 (regression)")

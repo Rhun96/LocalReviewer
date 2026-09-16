@@ -132,9 +132,15 @@ class ProjectScreen(BaseScreen):
         btn_datasets.setMinimumHeight(45)
         btn_datasets.clicked.connect(self.on_datasets)
 
+        btn_runs = FPushButton("🏃 Прогоны")
+        btn_runs.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        btn_runs.setMinimumHeight(45)
+        btn_runs.clicked.connect(self.on_runs)
+
         buttons_grid.addWidget(btn_settings, 1, 0)
         buttons_grid.addWidget(btn_datasets, 1, 1)
-        buttons_grid.addWidget(btn_back, 1, 2, 1, 2)
+        buttons_grid.addWidget(btn_runs, 1, 2)
+        buttons_grid.addWidget(btn_back, 1, 3)
         actions_group.setLayout(buttons_grid)
         apply_shadow(actions_group)
         layout.addWidget(actions_group)
@@ -258,6 +264,10 @@ class ProjectScreen(BaseScreen):
         from datasets_dialog import DatasetsDialog
         DatasetsDialog(self.project_path, self).exec()
         self.load_project_info()
+
+    def on_runs(self):
+        """Переход к прогонам модели."""
+        self.parent_window.main_window.show_screen("runs")
 
     def on_back(self):
         """Возврат на стартовый экран."""

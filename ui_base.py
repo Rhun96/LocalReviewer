@@ -7,6 +7,13 @@ logger = logging.getLogger(__name__)
 
 
 class BaseScreen(QWidget):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Фон точечно по dynamic property: objectName затирает Fluent
+        # (addSubInterface ставит routeKey), а blanket-правило QWidget ломало
+        # внутренности Fluent-виджетов. См. styles._fluent_base.
+        self.setProperty("screen", True)
+
     def refresh(self) -> None:
         pass
 

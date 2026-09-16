@@ -42,17 +42,26 @@ class ProfileDialog(QDialog):
         self.name_edit = FLineEdit()
         name_row.addWidget(self.name_edit)
         right.addLayout(name_row)
-        right.addWidget(QLabel("Статусы (вкл, имя, хоткей):"))
+        right.addWidget(QLabel("Статусы (вкл, код, имя, смысл, клавиша):"))
         self.status_table = QTableWidget()
-        self.status_table.setColumnCount(3)
-        self.status_table.setHorizontalHeaderLabels(["Вкл", "Название", "Клавиша"])
-        self.status_table.setColumnWidth(0, 60)
-        self.status_table.setColumnWidth(2, 90)
+        self.status_table.setColumnCount(5)
+        self.status_table.setHorizontalHeaderLabels(
+            ["Вкл", "Код", "Название", "Смысл", "Клавиша"])
+        self.status_table.setColumnWidth(0, 50)
+        self.status_table.setColumnWidth(4, 80)
         self.status_table.horizontalHeader().setSectionResizeMode(
-            1, QHeaderView.ResizeMode.Stretch)
+            2, QHeaderView.ResizeMode.Stretch)
         # Строки выше редакторов: текст не вылезает и не съезжает
         self.status_table.verticalHeader().setDefaultSectionSize(40)
         right.addWidget(self.status_table)
+
+        status_btns = QHBoxLayout()
+        btn_add_status = FPushButton("＋ Статус")
+        btn_add_status.setToolTip("Свой код (латиница): смысл нужен отчётам и очереди")
+        btn_add_status.clicked.connect(self._add_status_row)
+        status_btns.addWidget(btn_add_status)
+        status_btns.addStretch()
+        right.addLayout(status_btns)
 
         self.req_cat = FCheckBox("Причина обязательна для «Плохо»")
         right.addWidget(self.req_cat)
@@ -100,6 +109,46 @@ class ProfileDialog(QDialog):
         if self.profiles_list.count():
             self.profiles_list.setCurrentRow(0)
 
+    BASE_NAMES = {"unreviewed": "Не проверено", "good": "Хорошо", "bad": "Плохо",
+                  "uncertain": "Сомневаюсь", "duplicate": "Дубль", "skip": "Пропустить"}
+
+    def _base_combo(self, current: str | None = None):
+        combo = FComboBox()
+        for code in ("unreviewed", "good", "bad", "uncertain", "duplicate", "skip"):
+            combo.addItem(self.BASE_NAMES[code], code)
+        if current:
+            for i in range(combo.count()):
+                if combo.itemData(i) == current:
+                    combo.setCurrentIndex(i)
+                    break
+        return combo
+
+    def _add_status_row(self, spec: dict | None = None):
+        """Строка редактора статуса (для ＋ Статус — пустая)."""
+        spec = spec or {}
+        row = self.status_table.rowCount()
+        self.status_table.insertRow(row)
+        check = FCheckBox()
+        check.setChecked(bool(spec.get("enabled", True)))
+        self.status_table.setCellWidget(row, 0, self._centered(check))
+        code_edit = FLineEdit()
+        code_edit.setText(spec.get("code", ""))
+        code_edit.setPlaceholderText("код_латиницей")
+        code_edit.setMaxLength(32)
+        self.status_table.setCellWidget(row, 1, code_edit)
+        name_edit = FLineEdit()
+        name_edit.setText(spec.get("name", ""))
+        self.status_table.setCellWidget(row, 2, name_edit)
+        base_combo = self._base_combo(spec.get("base") or spec.get("code"))
+        self.status_table.setCellWidget(row, 3, base_combo)
+        hot_edit = FLineEdit()
+        hot_edit.setText(spec.get("hotkey", ""))
+        hot_edit.setMaxLength(1)
+        self.status_table.setCellWidget(row, 4, hot_edit)
+        self._status_rows.append({"check": check, "code": code_edit,
+                                  "name": name_edit, "base": base_combo,
+                                  "hot": hot_edit})
+
     def _on_profile_selected(self):
         item = self.profiles_list.currentItem()
         if not item:
@@ -115,20 +164,9 @@ class ProfileDialog(QDialog):
         self.name_edit.setText(prof["name"])
         cfg = prof["config"]
         self._status_rows = []
-        self.status_table.setRowCount(len(cfg.get("statuses", [])))
-        for row, s in enumerate(cfg.get("statuses", [])):
-            check = FCheckBox()
-            check.setChecked(bool(s.get("enabled", True)))
-            self.status_table.setCellWidget(row, 0, self._centered(check))
-            name_edit = FLineEdit()
-            name_edit.setText(s.get("name", ""))
-            self.status_table.setCellWidget(row, 1, name_edit)
-            hot_edit = FLineEdit()
-            hot_edit.setText(s.get("hotkey", ""))
-            hot_edit.setMaxLength(1)
-            self.status_table.setCellWidget(row, 2, hot_edit)
-            self._status_rows.append({"code": s["code"], "check": check,
-                                      "name": name_edit, "hot": hot_edit})
+        self.status_table.setRowCount(0)
+        for s in cfg.get("statuses", []):
+            self._add_status_row(s)
         self.req_cat.setChecked(bool(cfg.get("require_category_for_bad", False)))
         mode = cfg.get("require_comment_for_bad", None)
         for i in range(self.req_comment.count()):
@@ -149,9 +187,10 @@ class ProfileDialog(QDialog):
     def _collect_config(self) -> dict:
         statuses = []
         for r in self._status_rows:
-            statuses.append({"code": r["code"], "name": r["name"].text(),
+            statuses.append({"code": r["code"].text(), "name": r["name"].text(),
                              "hotkey": r["hot"].text(),
-                             "enabled": r["check"].isChecked()})
+                             "enabled": r["check"].isChecked(),
+                             "base": r["base"].currentData()})
         return {"statuses": statuses,
                 "require_category_for_bad": self.req_cat.isChecked(),
                 "require_comment_for_bad": self.req_comment.currentData()}

@@ -1,6 +1,6 @@
 """Диалог массовой операции: подтверждает count + операцию, запускает в фоне."""
-from PySide6.QtWidgets import QDialog, QHBoxLayout, QLabel, QVBoxLayout
-from ui_compat import FComboBox, FPrimaryButton, FPushButton, FTextEdit
+from PySide6.QtWidgets import QDialog, QGridLayout, QHBoxLayout, QLabel, QVBoxLayout
+from ui_compat import FCheckBox, FComboBox, FPrimaryButton, FPushButton, FTextEdit
 
 
 class BulkDialog(QDialog):
@@ -37,6 +37,12 @@ class BulkDialog(QDialog):
         self.op_combo.addItem("Комментарий → добавить", ("comment_append", ""))
         self.op_combo.addItem("Комментарий → очистить", ("comment_clear", ""))
         self.op_combo.addItem("Тег → добавить", ("add_tag", ""))
+        self.op_combo.addItem("Тег → убрать", ("remove_tag", ""))
+        self.op_combo.addItem("Теги → заменить набором", ("replace_tags", ""))
+        self.op_combo.addItem("Метка → просмотрено", ("mark_viewed", ""))
+        self.op_combo.addItem("Метка → снять «просмотрено»", ("unmark_viewed", ""))
+        self.op_combo.addItem("Проверки → пересчитать", ("recheck", ""))
+        self.op_combo.addItem("Проверки → сбросить", ("reset_checks", ""))
         self.op_combo.currentIndexChanged.connect(self._on_op_changed)
         layout.addWidget(self.op_combo)
 
@@ -44,6 +50,18 @@ class BulkDialog(QDialog):
         self.tag_combo.setMinimumHeight(30)
         self._load_tags()
         layout.addWidget(self.tag_combo)
+
+        self.tags_box = QGridLayout()
+        self.tag_checkboxes: dict = {}
+        row, col = 0, 0
+        for t in self._tags:
+            cb = FCheckBox(t["tag_name"])
+            self.tag_checkboxes[t["tag_id"]] = cb
+            self.tags_box.addWidget(cb, row, col)
+            col += 1
+            if col >= 2:
+                col, row = 0, row + 1
+        layout.addLayout(self.tags_box)
 
         self.text_edit = FTextEdit()
         self.text_edit.setPlaceholderText("Текст комментария (для операций с комментарием)")
@@ -65,7 +83,12 @@ class BulkDialog(QDialog):
         op = self.op_combo.currentData()[0]
         self.text_edit.setEnabled(op.startswith("comment"))
         try:
-            self.tag_combo.setEnabled(op == "add_tag")
+            self.tag_combo.setEnabled(op in ("add_tag", "remove_tag"))
+            visible = (op == "replace_tags")
+            for i in range(self.tags_box.count()):
+                w = self.tags_box.itemAt(i).widget()
+                if w is not None:
+                    w.setVisible(visible)
         except Exception:
             pass
 
@@ -89,11 +112,14 @@ class BulkDialog(QDialog):
             if not self.text_edit.toPlainText().strip():
                 return
             self.result_op = (op, self.text_edit.toPlainText().strip())
-        elif op == "add_tag":
+        elif op in ("add_tag", "remove_tag"):
             tag_id = self.tag_combo.currentData()
             if tag_id is None:
                 return
             self.result_op = (op, tag_id)
+        elif op == "replace_tags":
+            picked = [tid for tid, cb in self.tag_checkboxes.items() if cb.isChecked()]
+            self.result_op = (op, picked)
         else:
             self.result_op = (op, val)
         self.accept()

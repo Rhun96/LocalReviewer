@@ -16,15 +16,46 @@ _VAR_RE = re.compile(r"\{(\w+)\}")
 def get_comment_templates(project_path: str) -> list:
     with db(project_path) as conn:
         cursor = conn.cursor()
-        cursor.execute("""
-            SELECT template_id, text, is_system
-            FROM comment_templates
-            ORDER BY is_system DESC, text
-        """)
-        return [dict(row) for row in cursor.fetchall()]
+        cols = {r[1] for r in cursor.execute(
+            "PRAGMA table_info(comment_templates)").fetchall()}
+        if {"category_id", "subcategory_id"} <= cols:
+            cursor.execute("""
+                SELECT template_id, text, is_system, category_id, subcategory_id
+                FROM comment_templates
+                ORDER BY is_system DESC, text
+            """)
+        else:
+            cursor.execute("""
+                SELECT template_id, text, is_system
+                FROM comment_templates
+                ORDER BY is_system DESC, text
+            """)
+        rows = []
+        for r in cursor.fetchall():
+            d = dict(r)
+            d.setdefault("category_id", None)
+            d.setdefault("subcategory_id", None)
+            rows.append(d)
+        return rows
 
 
-def add_comment_template(project_path: str, text: str) -> bool:
+def ordered_templates(project_path: str, category_id: int | None = None,
+                      subcategory_id: int | None = None) -> list:
+    """Шаблоны: сначала точное совпадение причины, затем категория, затем общие."""
+    all_t = get_comment_templates(project_path)
+    if not category_id:
+        return all_t
+    exact = [t for t in all_t if t.get("category_id") == category_id
+             and t.get("subcategory_id") == subcategory_id]
+    by_cat = [t for t in all_t if t.get("category_id") == category_id
+              and t not in exact]
+    rest = [t for t in all_t if t not in exact and t not in by_cat]
+    return exact + by_cat + rest
+
+
+def add_comment_template(project_path: str, text: str,
+                         category_id: int | None = None,
+                         subcategory_id: int | None = None) -> bool:
     if not text or not text.strip():
         raise ValueError("Пустой шаблон")
     text = text.strip()
@@ -32,10 +63,19 @@ def add_comment_template(project_path: str, text: str) -> bool:
         raise ValueError("Шаблон слишком длинный")
     with db(project_path) as conn:
         cursor = conn.cursor()
-        cursor.execute("""
-            INSERT OR IGNORE INTO comment_templates (text, is_system, created_at)
-            VALUES (?, 0, ?)
-        """, (text, utcnow()))
+        cols = {r[1] for r in cursor.execute(
+            "PRAGMA table_info(comment_templates)").fetchall()}
+        if {"category_id", "subcategory_id"} <= cols:
+            cursor.execute("""
+                INSERT OR IGNORE INTO comment_templates
+                    (text, is_system, created_at, category_id, subcategory_id)
+                VALUES (?, 0, ?, ?, ?)
+            """, (text, utcnow(), category_id, subcategory_id))
+        else:
+            cursor.execute("""
+                INSERT OR IGNORE INTO comment_templates (text, is_system, created_at)
+                VALUES (?, 0, ?)
+            """, (text, utcnow()))
         return cursor.rowcount > 0
 
 

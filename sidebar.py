@@ -49,6 +49,7 @@ class Sidebar(QWidget):
         nav_items = [
             ("project",   "📁 Проект"),
             ("review",    "🔍 Ревью"),
+            ("runs",      "🏃 Прогоны"),
             ("reports",   "📈 Отчёты"),
             ("history",   "🕐 История"),
             ("backup",    "💾 Бэкапы"),
@@ -170,16 +171,25 @@ class Sidebar(QWidget):
                 btn.setStyleSheet(self._nav_style(k == key))
 
     def update_progress(self):
-        """Обновляет прогресс-бар проекта."""
+        """Обновляет прогресс-бар проекта (проверено = base != unreviewed)."""
         try:
+            try:
+                from review_profile_service import code_to_base
+                mapping = code_to_base(self.project_path)
+                unrev = ["unreviewed"] + [
+                    c for c, b in mapping.items()
+                    if b == "unreviewed" and c != "unreviewed"]
+            except Exception:
+                unrev = ["unreviewed"]
+            ph = ",".join(["?"] * len(unrev))
             with db(self.project_path) as conn:
                 cursor = conn.cursor()
                 cursor.execute("SELECT COUNT(*) as total FROM cases")
                 total = cursor.fetchone()['total']
-                cursor.execute("""
+                cursor.execute(f"""
                     SELECT COUNT(*) as reviewed FROM annotations
-                    WHERE status != 'unreviewed'
-                """)
+                    WHERE COALESCE(status, 'unreviewed') NOT IN ({ph})
+                """, unrev)
                 reviewed = cursor.fetchone()['reviewed']
             pct = int(reviewed / total * 100) if total > 0 else 0
             self.progress_bar.setValue(pct)

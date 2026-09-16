@@ -7,7 +7,7 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 13
 DB_TIMEOUT = 10.0
 
 
@@ -87,9 +87,9 @@ def _create_schema_v1(cursor: sqlite3.Cursor) -> None:
         CREATE TABLE IF NOT EXISTS annotations (
             annotation_id INTEGER PRIMARY KEY AUTOINCREMENT,
             case_id INTEGER NOT NULL UNIQUE,
-            status TEXT DEFAULT 'unreviewed'
-                CHECK (status IN ('unreviewed','good','bad','uncertain','duplicate','skip')),
+            status TEXT DEFAULT 'unreviewed',
             comment TEXT,
+            viewed INTEGER DEFAULT 0,
             updated_at TEXT NOT NULL,
             FOREIGN KEY (case_id) REFERENCES cases(case_id) ON DELETE CASCADE
         )
@@ -142,6 +142,16 @@ def _create_schema_v1(cursor: sqlite3.Cursor) -> None:
             key TEXT PRIMARY KEY,
             value TEXT,
             updated_at TEXT NOT NULL
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS case_check_verdicts (
+            case_id INTEGER NOT NULL,
+            check_code TEXT NOT NULL,
+            verdict TEXT NOT NULL CHECK (verdict IN ('confirmed', 'false_positive')),
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (case_id, check_code),
+            FOREIGN KEY (case_id) REFERENCES cases(case_id) ON DELETE CASCADE
         )
     """)
 
@@ -299,6 +309,26 @@ def init_database(project_path: str):
             from migrations import migrate_to_v9
             migrate_to_v9(cursor)
             cursor.execute("PRAGMA user_version=9")
+            version = 9
+        if version < 10:
+            from migrations import migrate_to_v10
+            migrate_to_v10(cursor)
+            cursor.execute("PRAGMA user_version=10")
+            version = 10
+        if version < 11:
+            from migrations import migrate_to_v11
+            migrate_to_v11(cursor)
+            cursor.execute("PRAGMA user_version=11")
+            version = 11
+        if version < 12:
+            from migrations import migrate_to_v12
+            migrate_to_v12(cursor)
+            cursor.execute("PRAGMA user_version=12")
+            version = 12
+        if version < 13:
+            from migrations import migrate_to_v13
+            migrate_to_v13(cursor)
+            cursor.execute("PRAGMA user_version=13")
         conn.commit()
     except Exception:
         try:

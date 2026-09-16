@@ -15,6 +15,43 @@ from ui_compat import (
 from constants import MAPPING_ROLES
 
 
+def precheck_stats(mapping: dict, data: list) -> dict:
+    """Предимпортная проверка (ТЗ §80-81): покрытие ID/запроса и дубли ID."""
+    sid_cols = [c for c, r in mapping.items() if r == "source_id"]
+    pri_cols = [c for c, r in mapping.items() if r == "primary_text"]
+    total = sum(1 for row in data if isinstance(row, dict))
+    filled, empty, dups = 0, 0, 0
+    seen: set = set()
+    dup_examples: list = []
+    pri_empty = 0
+    if sid_cols:
+        scol = sid_cols[0]
+        for row in data:
+            if not isinstance(row, dict):
+                continue
+            v = str(row.get(scol, "") or "").strip()
+            if not v:
+                empty += 1
+                continue
+            filled += 1
+            if v in seen:
+                dups += 1
+                if len(dup_examples) < 5:
+                    dup_examples.append(v)
+            else:
+                seen.add(v)
+    if pri_cols:
+        for row in data:
+            if not isinstance(row, dict):
+                continue
+            if not any(str(row.get(c, "") or "").strip() for c in pri_cols):
+                pri_empty += 1
+    return {"total": total, "sid_mapped": bool(sid_cols),
+            "sid_filled": filled, "sid_empty": empty,
+            "sid_dups": dups, "dup_examples": dup_examples,
+            "primary_empty": pri_empty}
+
+
 class ImportWizard(QWidget):
     import_finished = Signal()
     import_cancelled = Signal()
@@ -114,6 +151,21 @@ class ImportWizard(QWidget):
 
         self.preview_table = FTable()
         self.preview_table.setMinimumHeight(150)
+        try:
+            from PySide6.QtWidgets import QSizePolicy
+            self.preview_table.setSizePolicy(
+                QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        except Exception:
+            pass
+        # Плейсхолдер: пустая тёмная панель на весь экран выглядит как баг.
+        self.preview_table.setColumnCount(1)
+        self.preview_table.setRowCount(1)
+        self.preview_table.setHorizontalHeaderLabels(["Превью"])
+        try:
+            from PySide6.QtWidgets import QTableWidgetItem as _TI
+            self.preview_table.setItem(0, 0, _TI("📂 Выбери файл — здесь появится превью"))
+        except Exception:
+            pass
         self.preview_table.setStyleSheet("""
             QTableWidget {
                 background-color: #0D150D;
@@ -226,7 +278,8 @@ class ImportWizard(QWidget):
     def on_select_file(self):
         file_path, _ = QFileDialog.getOpenFileName(
             self, "Выберите файл для импорта", "",
-            "Таблицы (*.xlsx *.xls *.csv);;Excel (*.xlsx *.xls);;CSV (*.csv);;"
+            "Таблицы (*.xlsx *.xls *.csv *.ods);;Excel (*.xlsx *.xls);;"
+            "Calc (*.ods);;CSV (*.csv);;"
             "JSON (*.json *.jsonl);;Все файлы (*.*)"
         )
         if not file_path:
@@ -239,9 +292,12 @@ class ImportWizard(QWidget):
             notify(self, "warning", "Неподдерживаемый формат", str(e))
             return
 
-        if self.file_type == 'excel':
+        if self.file_type in ('excel', 'ods'):
             try:
-                sheets = self.file_reader.read_excel_sheets(file_path)
+                if self.file_type == 'excel':
+                    sheets = self.file_reader.read_excel_sheets(file_path)
+                else:
+                    sheets = self.file_reader.read_ods_sheets(file_path)
                 self.sheet_combo.clear()
                 self.sheet_combo.addItems(sheets)
                 self.sheet_group.setVisible(True)
@@ -257,7 +313,7 @@ class ImportWizard(QWidget):
             self.load_preview()
         else:
             notify(self, "warning", "Неподдерживаемый формат",
-                   "Пока поддерживаются: .xlsx, .csv, .json, .jsonl")
+                   "Пока поддерживаются: .xlsx, .ods, .csv, .json, .jsonl")
 
     def on_sheet_changed(self):
         self.sheet_name = self.sheet_combo.currentText()
@@ -275,6 +331,9 @@ class ImportWizard(QWidget):
         try:
             if self.file_type == 'excel':
                 self.preview_data = self.file_reader.read_excel_preview(
+                    self.file_path, self.sheet_name, max_rows=100)
+            elif self.file_type == 'ods':
+                self.preview_data = self.file_reader.read_ods_preview(
                     self.file_path, self.sheet_name, max_rows=100)
             elif self.file_type == 'csv':
                 enc, delim = self._csv_options()
@@ -330,15 +389,32 @@ class ImportWizard(QWidget):
         self.mapping_combos.clear()
 
         headers = self.preview_data['headers']
+        rows = self.preview_data.get('rows', []) or []
         roles = list(MAPPING_ROLES) + getattr(self, "extra_roles", [])
-        for header in headers:
+        for idx, header in enumerate(headers):
+            # Примеры значений из превью: видно, что за данные в колонке,
+            # и сразу заметно, где идентификаторы, а где пусто.
+            samples = []
+            for r in rows:
+                try:
+                    v = str(r[idx] if idx < len(r) else "").strip()
+                except Exception:
+                    v = ""
+                if v and v not in samples:
+                    samples.append(v)
+                if len(samples) >= 2:
+                    break
+            left = QLabel(str(header))
+            if samples:
+                shown = " | ".join(s[:40] for s in samples)
+                left.setText(f"{header}\n↳ {shown}")
             combo = FComboBox()
             combo.setMinimumHeight(30)
             for role_code, role_name in roles:
                 combo.addItem(role_name, role_code)
             if header == headers[0]:
                 combo.setCurrentIndex(1)  # primary_text
-            self.mapping_layout.addRow(QLabel(str(header)), combo)
+            self.mapping_layout.addRow(left, combo)
             self.mapping_combos[header] = combo
 
     def on_add_custom_role(self):
@@ -404,6 +480,10 @@ class ImportWizard(QWidget):
                 data = self.file_reader.read_excel_data(
                     self.file_path, self.sheet_name,
                     header_row=self.header_spin.value())
+            elif self.file_type == 'ods':
+                data = self.file_reader.read_ods_data(
+                    self.file_path, self.sheet_name,
+                    header_row=self.header_spin.value())
             elif self.file_type == 'csv':
                 enc, delim = self._csv_options()
                 data = self.file_reader.read_csv_data(
@@ -421,37 +501,47 @@ class ImportWizard(QWidget):
                 notify(self, "warning", "Внимание", "Файл не содержит данных")
                 return
 
-            # Предупреждение о дублях ID до импорта (ТЗ §81).
-            self._warn_duplicate_ids(mapping, data)
+            # Предимпортная проверка (ТЗ §80-81): строки, покрытие ID,
+            # дубли ID, пустые запросы. При проблемах — подтверждение.
+            if not self._precheck_and_confirm(mapping, data):
+                return
             self._run_import_in_background(mapping, data, errors)
         except Exception as e:
             notify(self, "error", "Ошибка импорта", str(e))
 
-    def _warn_duplicate_ids(self, mapping: dict, data: list) -> None:
-        """Подсчёт дублей source_id в файле до импорта — только предупреждение."""
+    def _precheck_stats(self, mapping: dict, data: list) -> dict:
+        """Считает покрытие ID/запроса и дубли ID по данным и маппингу."""
+        return precheck_stats(mapping, data)
+
+    def _precheck_and_confirm(self, mapping: dict, data: list) -> bool:
+        """Возвращает False, если пользователь остановил импорт."""
+        from ui_compat import confirm
         try:
-            sid_cols = [c for c, r in mapping.items() if r == "source_id"]
-            if not sid_cols:
-                return
-            seen: set = set()
-            dups = 0
-            for row in data:
-                if not isinstance(row, dict):
-                    continue
-                v = str(row.get(sid_cols[0], "") or "").strip()
-                if not v:
-                    continue
-                if v in seen:
-                    dups += 1
-                else:
-                    seen.add(v)
-            if dups:
-                notify(self, "warning", "Дубли ID",
-                       f"В файле {dups} повторяющихся ID. "
-                       "Импорт продолжится; в датасетах они попадут в «конфликты», "
-                       "сопоставление по ним ненадёжно (ТЗ §53).")
+            st = self._precheck_stats(mapping, data)
         except Exception:
-            pass
+            return True
+        lines = [f"Строк: {st['total']}."]
+        if st["sid_mapped"]:
+            lines.append(f"ID заполнен: {st['sid_filled']} из {st['total']} "
+                         f"(пустых: {st['sid_empty']}).")
+        else:
+            lines.append("⚠ Колонка «Идентификатор» не назначена: сопоставление "
+                         "версий пойдёт по хэшу текста (ТЗ §53).")
+        if st["sid_dups"]:
+            lines.append(f"⚠ Повторяющихся ID: {st['sid_dups']} "
+                         f"(например: {', '.join(st['dup_examples'])}). "
+                         "В датасетах они попадут в «конфликты».")
+        if st["primary_empty"]:
+            lines.append(f"⚠ Пустых запросов: {st['primary_empty']}.")
+        has_problem = (st["sid_dups"] > 0 or not st["sid_mapped"]
+                       or st["primary_empty"] > 0
+                       or (st["sid_mapped"] and st["sid_filled"] == 0))
+        if not has_problem:
+            return True
+        return confirm(
+            self, "Проверка перед импортом",
+            "\n".join(lines) + "\n\nПродолжить импорт?",
+            ok_text="Продолжить", cancel_text="Остановить")
 
     def _run_import_in_background(self, mapping: dict, data: list, errors: list):
         """Импорт в фоне с прогрессом, чтобы UI не вис на больших файлах."""
