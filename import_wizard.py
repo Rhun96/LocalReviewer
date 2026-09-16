@@ -67,6 +67,8 @@ class ImportWizard(QWidget):
         self.preview_data = None
         self.mapping_combos = {}
         self.extra_roles = []
+        # Одобрение дубля: digest файла, по которому уже ответили «Импортировать».
+        self._dup_approved = None
         self.init_ui()
 
     def init_ui(self):
@@ -290,10 +292,17 @@ class ImportWizard(QWidget):
         """Пресет файла (drag-n-drop): та же настройка, что из диалога."""
         self.file_path = file_path
         self.file_label.setText(Path(file_path).name)
+        self._dup_approved = None
         try:
             self.file_type = self.file_reader.detect_file_type(file_path)
         except ValueError as e:
             notify(self, "warning", "Неподдерживаемый формат", str(e))
+            return
+        # Дубль опознаём сразу при выборе файла (до маппинга): не тратить
+        # время на маппинг повтора. Ответ запоминаем, при импорте не переспрашиваем.
+        if not self._confirm_file_dup(early=True):
+            self.file_path = None
+            self.file_label.setText("Файл не выбран")
             return
 
         if self.file_type in ('excel', 'ods'):
@@ -516,27 +525,42 @@ class ImportWizard(QWidget):
         except Exception as e:
             notify(self, "error", "Ошибка импорта", str(e))
 
-    def _confirm_file_dup(self) -> bool:
-        """Дубль файла проверяется при попытке импорта (не в маппинге).
+    def _confirm_file_dup(self, early: bool = False) -> bool:
+        """Вопрос о дубле файла.
 
-        Проверки независимы: падение хэша не отменяет проверку по имени.
+        early=True — при выборе файла (до маппинга): ответ запоминается,
+        при импорте не переспрашиваем. early=False — при попытке импорта
+        (для файлов, выбранных до этого обновления, и на всякий случай).
         """
         from ui_compat import confirm
         from pathlib import Path as _Path
         import logging as _logging
         log = _logging.getLogger(__name__)
         try:
-            from importer import file_sha256, find_file_by_hash
-            dup = find_file_by_hash(self.project_path, file_sha256(self.file_path))
+            from importer import file_sha256
+            digest = file_sha256(self.file_path)
         except Exception as e:
             log.warning("file dup check by hash failed: %s", e)
-            dup = None
-        if dup:
-            return confirm(
-                self, "Файл уже импортирован",
-                f"«{dup['file_name']}» ({dup['row_count']} строк) уже есть в проекте. "
-                "Повторный импорт создаст дубли кейсов.\n\nПродолжить попытку импорта?",
-                ok_text="Импортировать", cancel_text="Остановить")
+            digest = None
+        fname = _Path(self.file_path).name
+        if self._dup_approved and (digest, fname) == tuple(self._dup_approved):
+            return True
+        if digest:
+            try:
+                from importer import find_file_by_hash as _find
+                dup = _find(self.project_path, digest)
+            except Exception as e:
+                log.warning("file dup lookup failed: %s", e)
+                dup = None
+            if dup:
+                ok = confirm(
+                    self, "Файл уже импортирован",
+                    f"«{dup['file_name']}» ({dup['row_count']} строк) уже есть в проекте. "
+                    "Повторный импорт создаст дубли кейсов.\n\nПродолжить?",
+                    ok_text="Продолжить", cancel_text="Остановить")
+                if ok:
+                    self._dup_approved = (digest, fname)
+                return ok
         try:
             from importer import find_file_by_name
             same = find_file_by_name(self.project_path, _Path(self.file_path).name)
@@ -544,12 +568,17 @@ class ImportWizard(QWidget):
             log.warning("file dup check by name failed: %s", e)
             same = None
         if same:
-            return confirm(
+            ok = confirm(
                 self, "Похоже на повтор",
                 f"Файл с именем «{same['file_name']}» уже импортирован "
                 f"({same['row_count']} строк; хэш старого импорта неизвестен). "
-                "Повтор создаст дубли кейсов.\n\nПродолжить попытку импорта?",
-                ok_text="Импортировать", cancel_text="Остановить")
+                "Повтор создаст дубли кейсов.\n\nПродолжить?",
+                ok_text="Продолжить", cancel_text="Остановить")
+            if ok:
+                self._dup_approved = (digest, fname)
+            return ok
+        if early:
+            self._dup_approved = (digest, fname)
         return True
 
     def _precheck_stats(self, mapping: dict, data: list) -> dict:
