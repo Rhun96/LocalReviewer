@@ -3,6 +3,8 @@ on:
   push:
     tags:
       - "v*"
+permissions:
+  contents: write
 jobs:
   build-windows:
     runs-on: windows-latest
@@ -16,6 +18,11 @@ jobs:
       - name: Pack
         run: Compress-Archive -Path dist/LocalReviewer -DestinationPath LocalReviewer-win64.zip
         shell: pwsh
+      - name: Upload artifact (запасной путь к zip, если релиз не создастся)
+        uses: actions/upload-artifact@v4
+        with:
+          name: LocalReviewer-win64
+          path: LocalReviewer-win64.zip
       - uses: softprops/action-gh-release@v2
         with:
           files: LocalReviewer-win64.zip
