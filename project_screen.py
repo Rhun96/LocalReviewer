@@ -18,6 +18,7 @@ class ProjectScreen(BaseScreen):
         self.project_path = project_path
         self.parent_window = parent
         self._transient = []  # виджеты, добавленные в стек (wizard/review/...), чтобы удалять их
+        self.setAcceptDrops(True)
         self.init_ui()
         self.load_project_info()
 
@@ -41,10 +42,11 @@ class ProjectScreen(BaseScreen):
         layout.addSpacing(5)
 
         # Карточка со списком файлов
-        files_group = QGroupBox("📄 Файлы в проекте")
+        files_group = QGroupBox("📄 Файлы в проекте (можно перетащить файл сюда)")
         files_layout = QVBoxLayout()
         self.files_list = QListWidget()
         self.files_list.setMinimumHeight(120)
+        self.files_list.setAcceptDrops(True)
         files_layout.addWidget(self.files_list)
 
         # Кнопки управления файлами
@@ -190,11 +192,43 @@ class ProjectScreen(BaseScreen):
 
     def on_add_file(self):
         """Добавление нового файла (мастер — поверх, пункта меню у него нет)."""
+        self.open_wizard()
+
+    def open_wizard(self, file_path: str | None = None):
+        """Мастер импорта; file_path — пресет (drag-n-drop)."""
         from import_wizard import ImportWizard
         wizard = ImportWizard(self.project_path, self.parent_window)
         wizard.import_finished.connect(lambda: self._close_wizard(wizard))
         wizard.import_cancelled.connect(lambda: self._close_wizard(wizard))
         self._show_transient(wizard)
+        if file_path:
+            wizard.load_path(file_path)
+
+    def dragEnterEvent(self, event):
+        try:
+            if event.mimeData().hasUrls():
+                event.acceptProposedAction()
+                return
+        except Exception:
+            pass
+        super().dragEnterEvent(event)
+
+    def dropEvent(self, event):
+        try:
+            urls = event.mimeData().urls()
+            paths = [u.toLocalFile() for u in urls or []]
+            paths = [p for p in paths if p]
+            if paths:
+                event.acceptProposedAction()
+                self.open_wizard(paths[0])
+                if len(paths) > 1:
+                    notify(self, "warning", "Импорт",
+                           "Перетащено несколько файлов — открыт первый. "
+                           "Остальные добавь по одному.")
+                return
+        except Exception as e:
+            notify(self, "error", "Ошибка", str(e))
+        super().dropEvent(event)
 
     def _close_wizard(self, wizard):
         stack = self.parent_window.stack

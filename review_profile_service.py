@@ -69,15 +69,31 @@ def validate_config(config: dict) -> dict:
             "require_comment_for_bad": req_comment}
 
 
+def _parse_config(raw: str) -> dict | None:
+    """Битый config_json → None (fallback на Default, данные живут)."""
+    try:
+        cfg = json.loads(raw or "")
+        return validate_config(cfg)
+    except Exception as e:
+        logger.warning("corrupt profile config, fallback to Default: %s", e)
+        return None
+
+
 def list_profiles(project_path: str) -> list:
     with db(project_path) as conn:
         rows = conn.cursor().execute(
             "SELECT profile_id, name, description, config_json, is_default "
             "FROM review_profiles ORDER BY is_default DESC, name").fetchall()
-        return [{"profile_id": r["profile_id"], "name": r["name"],
-                 "description": r["description"] or "",
-                 "config": json.loads(r["config_json"]),
-                 "is_default": bool(r["is_default"])} for r in rows]
+        out = []
+        for r in rows:
+            cfg = _parse_config(r["config_json"])
+            if cfg is None:
+                continue
+            out.append({"profile_id": r["profile_id"], "name": r["name"],
+                        "description": r["description"] or "",
+                        "config": cfg,
+                        "is_default": bool(r["is_default"])})
+        return out
 
 
 def get_profile(project_path: str, profile_id: int) -> dict | None:
@@ -87,9 +103,12 @@ def get_profile(project_path: str, profile_id: int) -> dict | None:
             "FROM review_profiles WHERE profile_id=?", (profile_id,)).fetchone()
         if not r:
             return None
+        cfg = _parse_config(r["config_json"])
+        if cfg is None:
+            return None
         return {"profile_id": r["profile_id"], "name": r["name"],
                 "description": r["description"] or "",
-                "config": json.loads(r["config_json"]),
+                "config": cfg,
                 "is_default": bool(r["is_default"])}
 
 
@@ -113,10 +132,12 @@ def get_active_profile(project_path: str) -> dict:
             "SELECT profile_id, name, description, config_json, is_default "
             "FROM review_profiles WHERE is_default=1 LIMIT 1").fetchone()
         if r:
-            return {"profile_id": r["profile_id"], "name": r["name"],
-                    "description": r["description"] or "",
-                    "config": json.loads(r["config_json"]),
-                    "is_default": True}
+            cfg = _parse_config(r["config_json"])
+            if cfg is not None:
+                return {"profile_id": r["profile_id"], "name": r["name"],
+                        "description": r["description"] or "",
+                        "config": cfg,
+                        "is_default": True}
     return {"profile_id": 0, "name": "Default", "description": "",
             "config": _default_config(), "is_default": True}
 

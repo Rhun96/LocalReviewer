@@ -14,6 +14,35 @@ import model_run_service as runs
 from model_run_service import VERDICT_NAMES
 
 
+def _diff_html(answer_a: str | None, answer_b: str | None) -> tuple:
+    """Пословный diff: в A красным удалённое, в B зелёным добавленное.
+
+    Одинаковые ответы — без подсветки. Нет ответа — пометка.
+    """
+    import difflib
+    import html as _html
+    if not answer_a and not answer_b:
+        return "(нет ответа)", "(нет ответа)"
+    wa = (answer_a or "").split()
+    wb = (answer_b or "").split()
+    sm = difflib.SequenceMatcher(a=wa, b=wb, autojunk=False)
+    out_a, out_b = [], []
+    for tag, i1, i2, j1, j2 in sm.get_opcodes():
+        if tag == "equal":
+            out_a.append(_html.escape(" ".join(wa[i1:i2])))
+            out_b.append(_html.escape(" ".join(wb[j1:j2])))
+        else:
+            if i1 != i2:
+                out_a.append('<span style="background-color:#5a1a1a; color:#ffb3b3;">'
+                             + _html.escape(" ".join(wa[i1:i2])) + "</span>")
+            if j1 != j2:
+                out_b.append('<span style="background-color:#1a4a22; color:#b3ffbf;">'
+                             + _html.escape(" ".join(wb[j1:j2])) + "</span>")
+    html_a = " ".join(out_a) if answer_a else "(нет ответа)"
+    html_b = " ".join(out_b) if answer_b else "(нет ответа)"
+    return html_a, html_b
+
+
 class CompareDialog(QDialog):
     def __init__(self, project_path: str, run_a: int, run_b: int, parent=None):
         super().__init__(parent)
@@ -169,8 +198,9 @@ class CompareDialog(QDialog):
         self.prompt_label.setText(
             f"📌 {prompt[:400]}{'…' if len(prompt) > 400 else ''}"
             f"\n🆔 {row.get('source_id') or row['stable_key']}")
-        self.pane_a.setPlainText(f"[{name_a}]\n\n{row['answer_a'] or '(нет ответа)'}")
-        self.pane_b.setPlainText(f"[{name_b}]\n\n{row['answer_b'] or '(нет ответа)'}")
+        html_a, html_b = _diff_html(row["answer_a"], row["answer_b"])
+        self.pane_a.setHtml(f"<b>[{name_a}]</b><br><br>{html_a}")
+        self.pane_b.setHtml(f"<b>[{name_b}]</b><br><br>{html_b}")
         st = row.get("case_status") or "unreviewed"
         try:
             from review_profile_service import status_display_name

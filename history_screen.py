@@ -48,6 +48,16 @@ class HistoryScreen(BaseScreen):
         self.event_filter.addItem("Массовая операция", "bulk_undone")
         self.event_filter.currentIndexChanged.connect(self.load_history)
         filter_layout.addWidget(self.event_filter)
+        filter_layout.addWidget(QLabel("Кейс (ID/№):"))
+        from ui_compat import FLineEdit
+        self.case_filter = FLineEdit()
+        self.case_filter.setPlaceholderText("ID из маппинга или №")
+        self.case_filter.setMaximumWidth(160)
+        self.case_filter.returnPressed.connect(self.load_history)
+        filter_layout.addWidget(self.case_filter)
+        btn_apply_case = FPushButton("Найти")
+        btn_apply_case.clicked.connect(self.load_history)
+        filter_layout.addWidget(btn_apply_case)
         filter_layout.addStretch()
         layout.addLayout(filter_layout)
 
@@ -95,6 +105,29 @@ class HistoryScreen(BaseScreen):
     def load_history(self):
         """Загружает историю изменений."""
         event_type = self.event_filter.currentData()
+        case_text = ""
+        try:
+            case_text = self.case_filter.text().strip()
+        except Exception:
+            pass
+        case_ids: list | None = None
+        if case_text:
+            # ID = идентификатор из маппинга (source_id, любой текст)
+            # или внутренний номер кейса.
+            try:
+                with db(self.project_path) as conn:
+                    rows = conn.cursor().execute(
+                        "SELECT case_id FROM cases WHERE source_id = ? "
+                        "OR CAST(case_id AS TEXT) = ?",
+                        (case_text, case_text)).fetchall()
+                case_ids = [r["case_id"] for r in rows]
+            except Exception as e:
+                notify(self, "error", "Ошибка", str(e))
+                return
+            if not case_ids:
+                notify(self, "warning", "Фильтр",
+                       f"Кейс «{case_text}» не найден")
+                return
 
         try:
             with db(self.project_path) as conn:
@@ -122,6 +155,10 @@ class HistoryScreen(BaseScreen):
                 elif event_type:
                     query += " WHERE h.event_type = ?"
                     params.append(event_type)
+                if case_ids is not None:
+                    query += (" AND" if "WHERE" in query else " WHERE")
+                    query += (f" h.case_id IN ({','.join(['?'] * len(case_ids))})")
+                    params.extend(case_ids)
 
                 query += " ORDER BY h.created_at DESC LIMIT 500"
 

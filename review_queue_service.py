@@ -144,7 +144,9 @@ def queue_stats(project_path: str, file_id=None) -> dict:
     mapping = code_to_base(project_path)
     unrev_codes = ["unreviewed"] + [c for c, b in mapping.items()
                                     if b == "unreviewed" and c != "unreviewed"]
+    bad_codes = [c for c, b in mapping.items() if b == "bad"] or ["bad"]
     ph = ",".join(["?"] * len(unrev_codes))
+    bad_ph = ",".join(["?"] * len(bad_codes))
     with db(project_path) as conn:
         cur = conn.cursor()
         fcond_cases = "WHERE c.file_id = ?" if file_id else ""
@@ -158,10 +160,15 @@ def queue_stats(project_path: str, file_id=None) -> dict:
             JOIN cases c ON c.case_id = a.case_id
             WHERE COALESCE(a.status, 'unreviewed') NOT IN ({ph}) {fcond_ann}
         """, (*unrev_codes, *p)).fetchone()["c"]
+        bad = cur.execute(f"""
+            SELECT COUNT(*) AS c FROM annotations a
+            JOIN cases c ON c.case_id = a.case_id
+            WHERE COALESCE(a.status, 'unreviewed') IN ({bad_ph}) {fcond_ann}
+        """, (*bad_codes, *p)).fetchone()["c"]
         problematic = cur.execute(f"""
             SELECT COUNT(DISTINCT cc.case_id) AS c FROM case_checks cc
             JOIN cases c ON c.case_id = cc.case_id
             WHERE 1=1 {fcond_cc}
         """, p).fetchone()["c"]
     return {"total": total, "reviewed": reviewed, "problematic": problematic,
-            "remaining": max(0, total - reviewed), "file_id": file_id}
+            "bad": bad, "remaining": max(0, total - reviewed), "file_id": file_id}

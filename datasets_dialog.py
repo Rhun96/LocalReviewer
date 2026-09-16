@@ -5,8 +5,8 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt
 from dataset_service import (
-    compare_versions, create_dataset, create_version, freeze_version,
-    list_datasets, list_versions,
+    compare_versions, create_dataset, create_version, delete_version,
+    freeze_version, list_datasets, list_versions,
 )
 from ui_compat import FComboBox, FPrimaryButton, FPushButton, clear_in_fluent, notify
 
@@ -61,9 +61,14 @@ class DatasetsDialog(QDialog):
         btn_new_ver.clicked.connect(self._new_version)
         btn_freeze = FPushButton("❄ Freeze")
         btn_freeze.clicked.connect(self._freeze)
+        btn_del_ver = FPushButton("🗑")
+        btn_del_ver.setMaximumWidth(44)
+        btn_del_ver.setToolTip("Удалить выбранную версию (снимок)")
+        btn_del_ver.clicked.connect(self._delete_version)
         row_ver.addWidget(self.file_combo)
         row_ver.addWidget(btn_new_ver)
         row_ver.addWidget(btn_freeze)
+        row_ver.addWidget(btn_del_ver)
         right.addLayout(row_ver)
 
         cmp_row = QHBoxLayout()
@@ -215,9 +220,34 @@ class DatasetsDialog(QDialog):
         if not item:
             notify(self, "warning", "Внимание", "Выбери версию")
             return
+        from ui_compat import confirm
+        if not confirm(self, "Freeze",
+                       "Заморозить версию? Это необратимо: правки пойдут "
+                       "только в новую версию.\nСтраховой бэкап проекта "
+                       "создастся автоматически.",
+                       ok_text="Заморозить", cancel_text="Отмена"):
+            return
         try:
             freeze_version(self.project_path, item.data(Qt.ItemDataRole.UserRole))
             notify(self, "success", "Freeze", "Версия заморожена (неизменяема)")
+            self._on_dataset_selected()
+        except Exception as e:
+            notify(self, "error", "Ошибка", str(e))
+
+    def _delete_version(self):
+        item = self.ver_list.currentItem()
+        if not item:
+            notify(self, "warning", "Внимание", "Выбери версию")
+            return
+        from ui_compat import confirm
+        if not confirm(self, "Удалить версию",
+                       "Удалить снимок версии? Датасет останется, разметка "
+                       "кейсов не пострадает (удаляется только снимок).",
+                       ok_text="Удалить", cancel_text="Отмена"):
+            return
+        try:
+            delete_version(self.project_path, item.data(Qt.ItemDataRole.UserRole))
+            notify(self, "success", "Версия", "Снимок удалён")
             self._on_dataset_selected()
         except Exception as e:
             notify(self, "error", "Ошибка", str(e))

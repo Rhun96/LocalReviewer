@@ -264,8 +264,27 @@ def set_version_status(project_path: str, version_id: int, status: str) -> None:
 
 
 def freeze_version(project_path: str, version_id: int) -> None:
-    """Freeze: версия становится неизменяемой (снимок и так immutable)."""
+    """Freeze: версия становится неизменяемой (снимок и так immutable).
+
+    Freeze необратим — перед ним делаем страховой бэкап проекта.
+    """
+    try:
+        from backup_service import create_backup
+        create_backup(project_path)
+    except Exception as e:
+        logger.warning("backup before freeze failed: %s", e)
     set_version_status(project_path, version_id, "frozen")
+
+
+def delete_version(project_path: str, version_id: int) -> None:
+    """Удалить версию (снимок). Датасет остаётся; frozen — тоже можно, явно."""
+    with db(project_path) as conn:
+        cur = conn.cursor()
+        row = cur.execute("SELECT status FROM dataset_versions WHERE version_id=?",
+                          (version_id,)).fetchone()
+        if not row:
+            raise ValueError("Версия не найдена")
+        cur.execute("DELETE FROM dataset_versions WHERE version_id=?", (version_id,))
 
 
 def _version_map(cursor, version_id: int) -> dict:

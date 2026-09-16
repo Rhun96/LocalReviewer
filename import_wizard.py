@@ -284,6 +284,10 @@ class ImportWizard(QWidget):
         )
         if not file_path:
             return
+        self.load_path(file_path)
+
+    def load_path(self, file_path: str) -> None:
+        """Пресет файла (drag-n-drop): та же настройка, что из диалога."""
         self.file_path = file_path
         self.file_label.setText(Path(file_path).name)
         try:
@@ -505,9 +509,38 @@ class ImportWizard(QWidget):
             # дубли ID, пустые запросы. При проблемах — подтверждение.
             if not self._precheck_and_confirm(mapping, data):
                 return
+            # Вопрос о дубле файла — на этапе попытки импорта, отдельно.
+            if not self._confirm_file_dup():
+                return
             self._run_import_in_background(mapping, data, errors)
         except Exception as e:
             notify(self, "error", "Ошибка импорта", str(e))
+
+    def _confirm_file_dup(self) -> bool:
+        """Дубль файла проверяется при попытке импорта (не в маппинге)."""
+        from ui_compat import confirm
+        from pathlib import Path as _Path
+        try:
+            from importer import file_sha256, find_file_by_hash, find_file_by_name
+            dup = find_file_by_hash(self.project_path, file_sha256(self.file_path))
+            if dup:
+                return confirm(
+                    self, "Файл уже импортирован",
+                    f"«{dup['file_name']}» ({dup['row_count']} строк) уже есть в проекте. "
+                    "Повторный импорт создаст дубли кейсов.\n\nПродолжить попытку импорта?",
+                    ok_text="Импортировать", cancel_text="Остановить")
+            same = find_file_by_name(self.project_path, _Path(self.file_path).name)
+            if same:
+                return confirm(
+                    self, "Похоже на повтор",
+                    f"Файл с именем «{same['file_name']}» уже импортирован "
+                    f"({same['row_count']} строк; хэш старого импорта неизвестен). "
+                    "Повтор создаст дубли кейсов.\n\nПродолжить попытку импорта?",
+                    ok_text="Импортировать", cancel_text="Остановить")
+        except Exception as e:
+            import logging as _logging
+            _logging.getLogger(__name__).warning("file dup check failed: %s", e)
+        return True
 
     def _precheck_stats(self, mapping: dict, data: list) -> dict:
         """Считает покрытие ID/запроса и дубли ID по данным и маппингу."""

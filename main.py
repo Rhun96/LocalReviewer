@@ -243,7 +243,20 @@ class MainWindow(_BaseWindow):
                 pass
             # Миграции должны выполняться и при ОТКРЫТИИ, а не только при создании:
             # иначе старые проекты не получат новые таблицы (bulk_operations, saved_filters...).
-            init_database(folder)
+            # Замер: 10k кейсов открываются за ~0с; курсор-часы — страховка
+            # на случай тяжёлой дедупликации очень грязных БД.
+            from PySide6.QtWidgets import QApplication as _QA
+            try:
+                _QA.setOverrideCursor(Qt.CursorShape.WaitCursor)
+            except Exception:
+                pass
+            try:
+                init_database(folder)
+            finally:
+                try:
+                    _QA.restoreOverrideCursor()
+                except Exception:
+                    pass
         except Exception as e:
             notify(self, "error", "Ошибка",
                    "Не удалось мигрировать базу проекта.\n\n"
@@ -352,6 +365,18 @@ class MainWindow(_BaseWindow):
                 refresh()
             except Exception:
                 pass
+
+    def closeEvent(self, event):
+        """При закрытии окна сохраняем черновик комментария (silent)."""
+        try:
+            pw = self.project_window
+            if pw is not None:
+                screen = pw.screens.get("review")
+                if screen is not None and getattr(screen, "current_case_id", None):
+                    screen.save_comment(silent=True)
+        except Exception:
+            pass
+        super().closeEvent(event)
 
     def _on_page_changed(self, _index: int):
         self._refresh_widget(self.stackedWidget.currentWidget())

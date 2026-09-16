@@ -373,13 +373,27 @@ class FilterDialog(QDialog):
         if ok and (name or "").strip():
             try:
                 payload: dict = {"filters": current}
+                view_bits = []
                 if self.view:
                     for k in ("columns", "queue_mode", "sort"):
                         if self.view.get(k) is not None:
                             payload[k] = self.view[k]
+                    if payload.get("columns"):
+                        view_bits.append(f"колонки: {len(payload['columns'])}")
+                    if payload.get("sort"):
+                        view_bits.append(f"сортировка: {payload['sort']}")
+                    if payload.get("queue_mode"):
+                        view_bits.append(f"очередь: {payload['queue_mode']}")
+                from ui_compat import confirm
+                detail = ("условия" + (f" + вид ({', '.join(view_bits)})"
+                                       if view_bits else " (без вида таблицы)"))
+                if not confirm(self, "Сохранить фильтр",
+                               f"«{name.strip()}»: {detail}.\nПродолжить?",
+                               ok_text="Сохранить", cancel_text="Отмена"):
+                    return
                 save_filter(self.project_path, name.strip(), payload)
                 self.reload_saved_filters()
-                notify(self, "success", "Фильтр", "Фильтр сохранён (условия + вид таблицы)")
+                notify(self, "success", "Фильтр", "Фильтр сохранён")
             except Exception as e:
                 notify(self, "warning", "Ошибка", str(e))
 

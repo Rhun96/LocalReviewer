@@ -68,6 +68,8 @@ class ReviewScreen(BaseScreen):
         self.tags_expanded = False
         # Массовые операции (ТЗ §5): выбранные кейсы
         self.bulk_selected: set = set()
+        # Последнее одиночное действие для Ctrl+Z
+        self._last_single = None
         # Умная очередь (ТЗ §8): normal | unreviewed | problematic
         self.queue_mode = "normal"
         self.load_case_ids()
@@ -304,6 +306,9 @@ class ReviewScreen(BaseScreen):
                 _add(hotkey, lambda s=code: self.set_status(s))
         _add("Right", self.next_case)
         _add("Left", self.prev_case)
+        # Ctrl+Z — отмена одиночного действия; в полях ввода работает
+        # нативный undo текста (guarded пропускает), вне полей — наш.
+        _add("Ctrl+Z", self.undo_single)
 
     def init_ui(self):
         main_layout = QVBoxLayout()
@@ -498,11 +503,16 @@ class ReviewScreen(BaseScreen):
         btn_del_template.clicked.connect(self.delete_template)
         btn_save_comment = FPushButton("💾 Сохранить")
         btn_save_comment.setMinimumHeight(28)
-        btn_save_comment.clicked.connect(self.save_comment)
+        btn_save_comment.clicked.connect(self.save_comment_manual)
+        btn_undo_single = FPushButton("↩")
+        btn_undo_single.setMaximumWidth(44)
+        btn_undo_single.setToolTip("Отменить последнее действие (Ctrl+Z)")
+        btn_undo_single.clicked.connect(self.undo_single)
         templates_layout.addWidget(btn_templates)
         templates_layout.addWidget(btn_add_template)
         templates_layout.addWidget(btn_del_template)
         templates_layout.addWidget(btn_save_comment)
+        templates_layout.addWidget(btn_undo_single)
         templates_layout.addStretch()
         comment_layout.addLayout(templates_layout)
         self.comment_edit = QTextEdit()
@@ -541,6 +551,11 @@ class ReviewScreen(BaseScreen):
         self.btn_new_tag.setToolTip("Создать свой тег")
         self.btn_new_tag.clicked.connect(self.on_create_tag)
         tags_row.addWidget(self.btn_new_tag)
+        self.btn_del_tag = FPushButton("－ Тег")
+        self.btn_del_tag.setMinimumHeight(30)
+        self.btn_del_tag.setToolTip("Удалить неиспользуемый тег")
+        self.btn_del_tag.clicked.connect(self.on_delete_tag)
+        tags_row.addWidget(self.btn_del_tag)
         self.btn_similar = FPushButton("🔍 Похожие")
         self.btn_similar.setMinimumHeight(30)
         self.btn_similar.setToolTip("Похожие кейсы (TF-IDF) — только контекст")
@@ -1089,8 +1104,9 @@ class ReviewScreen(BaseScreen):
             stats = queue_stats(self.project_path, file_id=fid)
             scope = "файл" if fid else "проект"
             base = getattr(self, "_filter_base", self.filter_indicator.text())
+            bad_part = f", ❌ {stats['bad']} плохих" if stats.get("bad") else ""
             self.filter_indicator.setText(
-                f"{base}  |  {scope}: 🔴 {stats['problematic']} проблемных, "
+                f"{base}  |  {scope}: 🔴 {stats['problematic']} проблемных{bad_part}, "
                 f"🟢 {stats['reviewed']}/{stats['total']} обработан")
         except Exception:
             pass
@@ -2059,14 +2075,90 @@ class ReviewScreen(BaseScreen):
             """)
 
     def toggle_tag(self, tag_id: int):
+        added = tag_id not in self.selected_tags
         if tag_id in self.selected_tags:
             self.selected_tags.remove(tag_id)
         else:
             self.selected_tags.add(tag_id)
         self.save_tags()
+        self._last_single = {"kind": "tag", "case_id": self.current_case_id,
+                             "tag_id": tag_id, "added": added}
         if tag_id in self.tag_buttons:
             self._style_tag_btn(self.tag_buttons[tag_id],
                                 tag_id in self.selected_tags)
+
+    def save_comment_manual(self):
+        """Явное «Сохранить» — запоминаем для одиночной отмены (Ctrl+Z)."""
+        if not self.current_case_id:
+            return
+        prev = (self.current_case or {}).get("comment") or ""
+        self.save_comment(silent=False)
+        new = self.comment_edit.toPlainText().strip()
+        if new != prev.strip():
+            self._last_single = {"kind": "comment", "case_id": self.current_case_id,
+                                 "old": prev, "new": new}
+
+    def undo_single(self):
+        """Отмена последнего одиночного действия (статус/тег/комментарий)."""
+        act = getattr(self, "_last_single", None)
+        if not act:
+            notify(self, "warning", "Отмена", "Нечего отменять")
+            return
+        try:
+            from database import utcnow as _utcnow
+            now = _utcnow()
+            with db(self.project_path) as conn:
+                cur = conn.cursor()
+                cid = act["case_id"]
+                if act["kind"] == "status":
+                    cur.execute("""
+                        INSERT INTO annotations (case_id, status, updated_at)
+                        VALUES (?, ?, ?)
+                        ON CONFLICT(case_id) DO UPDATE SET status=?, updated_at=?
+                    """, (cid, act["old"], now, act["old"], now))
+                    cur.execute("""
+                        INSERT INTO history (case_id, event_type, field_name,
+                                             old_value, new_value, created_at)
+                        VALUES (?, 'status_changed', 'status', ?, ?, ?)
+                    """, (cid, act["new"], act["old"], now))
+                elif act["kind"] == "comment":
+                    cur.execute("""
+                        INSERT INTO annotations (case_id, comment, updated_at)
+                        VALUES (?, ?, ?)
+                        ON CONFLICT(case_id) DO UPDATE SET comment=?, updated_at=?
+                    """, (cid, act["old"] or None, now, act["old"] or None, now))
+                    cur.execute("""
+                        INSERT INTO history (case_id, event_type, field_name,
+                                             old_value, new_value, created_at)
+                        VALUES (?, 'comment_changed', 'comment', ?, ?, ?)
+                    """, (cid, act["new"], act["old"], now))
+                elif act["kind"] == "tag":
+                    if act["added"]:
+                        cur.execute("DELETE FROM case_tags WHERE case_id=? AND tag_id=?",
+                                    (cid, act["tag_id"]))
+                        cur.execute("""
+                            INSERT INTO history (case_id, event_type, field_name,
+                                                 old_value, new_value, created_at)
+                            VALUES (?, 'tag_removed', 'tag', ?, NULL, ?)
+                        """, (cid, str(act["tag_id"]), now))
+                    else:
+                        cur.execute("INSERT OR IGNORE INTO case_tags "
+                                    "(case_id, tag_id, created_at) VALUES (?, ?, ?)",
+                                    (cid, act["tag_id"], now))
+                        cur.execute("""
+                            INSERT INTO history (case_id, event_type, field_name,
+                                                 old_value, new_value, created_at)
+                            VALUES (?, 'tag_added', 'tag', NULL, ?, ?)
+                        """, (cid, str(act["tag_id"]), now))
+                else:
+                    return
+        except Exception as e:
+            self.show_error("Не удалось отменить", e)
+            return
+        self._last_single = None
+        notify(self, "success", "Отмена", "Действие отменено")
+        if self.case_ids and cid in self.case_ids:
+            self.load_case(self.case_ids.index(cid))
 
     def open_similar(self):
         """Похожие на текущий кейс (только контекст, статус не ставится)."""
@@ -2115,26 +2207,57 @@ class ReviewScreen(BaseScreen):
         if not ok or not (text or "").strip():
             return
         name = text.strip()
-        if len(name) > 64:
-            notify(self, "warning", "Ошибка", "Название до 64 символов")
-            return
-        import re as _re
-        code = "user_" + _re.sub(r"\W+", "_", name.lower()).strip("_")[:48] or "user_x"
         try:
-            from database import utcnow as _utcnow
-            with db(self.project_path) as conn:
-                conn.cursor().execute("""
-                    INSERT INTO tags (tag_code, tag_name, is_system, created_at)
-                    VALUES (?, ?, 0, ?)
-                """, (code, name, _utcnow()))
-        except Exception as e:
-            notify(self, "warning", "Ошибка", f"Не удалось создать тег: {e}")
+            from tag_service import create_tag
+            create_tag(self.project_path, name)
+        except ValueError as e:
+            notify(self, "warning", "Ошибка", str(e))
             return
         try:
             self.update_tags_display(set(self.selected_tags))
         except Exception:
             pass
         notify(self, "success", "Тег", f"Тег «{name}» создан")
+
+    def on_delete_tag(self):
+        """Удалить неиспользуемый тег."""
+        try:
+            from tag_service import delete_tag, list_tags, usage_count
+            tags = list_tags(self.project_path)
+        except Exception as e:
+            self.show_error("Не удалось загрузить теги", e)
+            return
+        if not tags:
+            notify(self, "warning", "Теги", "Тегов нет")
+            return
+        names = []
+        by_name = {}
+        for t in tags:
+            n = usage_count(self.project_path, t["tag_id"])
+            label = f"{t['tag_name']} ({n} кейсов)"
+            names.append(label)
+            by_name[label] = t
+        text, ok = QInputDialog.getItem(
+            self, "Удалить тег", "Тег (удалить можно только неиспользуемый):",
+            names, 0, False)
+        if not ok or not text:
+            return
+        tag = by_name[text]
+        if not confirm(self, "Удалить тег",
+                       f"Удалить тег «{tag['tag_name']}»?",
+                       ok_text="Удалить", cancel_text="Отмена"):
+            return
+        try:
+            delete_tag(self.project_path, tag["tag_id"])
+        except ValueError as e:
+            notify(self, "warning", "Ошибка", str(e))
+            return
+        self.selected_tags.discard(tag["tag_id"])
+        try:
+            self.update_tags_display(set(self.selected_tags))
+        except Exception:
+            pass
+        notify(self, "success", "Тег", f"Тег «{tag['tag_name']}» удалён")
 
     def save_tags(self):
         if not self.current_case_id:
@@ -2329,6 +2452,10 @@ class ReviewScreen(BaseScreen):
                     """, (self.current_case_id, old_status, status, now))
             self.current_case['status'] = status
             self.current_case['comment'] = comment or None
+            if old_status != status:
+                self._last_single = {"kind": "status",
+                                     "case_id": self.current_case_id,
+                                     "old": old_status, "new": status}
             if is_bad:
                 # Причина обязательна в строгом режиме и по профилю
                 # («Профили → Причина обязательна для Плохо»).

@@ -91,18 +91,23 @@ def delete_run(project_path: str, run_id: int) -> None:
             raise ValueError("Прогон не найден")
 
 
-def _base_index(cursor) -> tuple:
-    """({src_key: case_id}, {norm_primary: [case_id]})."""
+def _base_index(cursor, need_text: bool = True) -> tuple:
+    """({src_key: case_id}, {norm_primary: [case_id]}).
+
+    need_text=False — без текстового индекса (когда у всех строк прогона
+    есть source_id: primary_text даже не читаем, экономим RAM на 100k+).
+    """
     by_src: dict = {}
     by_text: dict = {}
-    for r in cursor.execute(
-            "SELECT case_id, source_id, primary_text FROM cases").fetchall():
+    cols = "case_id, source_id" + (", primary_text" if need_text else "")
+    for r in cursor.execute(f"SELECT {cols} FROM cases").fetchall():
         sid = (r["source_id"] or "").strip()
         if sid:
             by_src.setdefault("src:" + sid, r["case_id"])
-        norm = _norm(r["primary_text"])
-        if norm:
-            by_text.setdefault(norm, []).append(r["case_id"])
+        if need_text:
+            norm = _norm(r["primary_text"])
+            if norm:
+                by_text.setdefault(norm, []).append(r["case_id"])
     return by_src, by_text
 
 
@@ -122,7 +127,9 @@ def import_run_rows(project_path: str, run_id: int, rows: list,
         if not cur.execute("SELECT 1 FROM model_runs WHERE run_id=?",
                            (run_id,)).fetchone():
             raise ValueError("Прогон не найден")
-        by_src, by_text = _base_index(cur)
+        by_src, by_text = _base_index(
+            cur, need_text=any(not str(row.get("source_id") or "").strip()
+                               for row in rows if isinstance(row, dict)))
         seen: set = set()
         batch: list = []
         total = len(rows)

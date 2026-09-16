@@ -87,6 +87,22 @@ def set_category_active(project_path: str, category_id: int, active: bool) -> No
                               (1 if active else 0, category_id))
 
 
+def usage_count(project_path: str, category_id: int) -> int:
+    """Сколько кейсов используют категорию (саму или её детей / как подкатегорию)."""
+    with db(project_path) as conn:
+        cur = conn.cursor()
+        children = [r["category_id"] for r in cur.execute(
+            "SELECT category_id FROM error_categories WHERE parent_id=?",
+            (category_id,)).fetchall()]
+        ids = [category_id, *children]
+        ph = ",".join(["?"] * len(ids))
+        row = cur.execute(
+            f"SELECT COUNT(DISTINCT case_id) AS c FROM case_errors "
+            f"WHERE category_id IN ({ph}) OR subcategory_id IN ({ph})",
+            (*ids, *ids)).fetchone()
+        return row["c"] if row else 0
+
+
 def archive_category(project_path: str, category_id: int) -> None:
     """Архив вместо удаления: старая разметка живёт (ТЗ §22).
 
@@ -116,7 +132,9 @@ def delete_category(project_path: str, category_id: int) -> None:
             f"OR subcategory_id IN ({ph}) LIMIT 1",
             (*check_ids, *check_ids)).fetchone()
         if used:
-            raise ValueError("Категория используется в разметке — используйте архив")
+            n = usage_count(project_path, category_id)
+            raise ValueError(f"Категория используется в разметке ({n} кейсов) — "
+                             "используйте архив")
         if children:
             cur.execute(f"DELETE FROM error_categories WHERE category_id IN ({ph})",
                         check_ids)

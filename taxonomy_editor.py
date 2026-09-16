@@ -32,8 +32,8 @@ class TaxonomyDialog(QDialog):
         layout.addWidget(hint)
 
         self.tree = QTreeWidget()
-        self.tree.setHeaderLabels(["Название", "Состояние"])
-        self.tree.setColumnWidth(0, 340)
+        self.tree.setHeaderLabels(["Название", "Кейсов", "Состояние"])
+        self.tree.setColumnWidth(0, 300)
         layout.addWidget(self.tree)
         clear_in_fluent(self.tree)
 
@@ -70,14 +70,20 @@ class TaxonomyDialog(QDialog):
             notify(self, "error", "Ошибка", f"Не удалось загрузить таксономию:\n{e}")
             cats = []
         self.tree.clear()
+        try:
+            from taxonomy_service import usage_count as _usage
+        except Exception:
+            _usage = None
         for cat in cats:
-            top = QTreeWidgetItem([cat["name"],
+            n = _usage(self.project_path, cat["category_id"]) if _usage else 0
+            top = QTreeWidgetItem([cat["name"], str(n),
                                    "" if cat["is_active"] else "архив"])
             top.setData(0, Qt.ItemDataRole.UserRole, cat["category_id"])
             if not cat["is_active"]:
                 top.setDisabled(True)
             for sub in cat.get("subs", []):
-                child = QTreeWidgetItem([sub["name"],
+                m = _usage(self.project_path, sub["category_id"]) if _usage else 0
+                child = QTreeWidgetItem([sub["name"], str(m),
                                          "" if sub["is_active"] else "архив"])
                 child.setData(0, Qt.ItemDataRole.UserRole, sub["category_id"])
                 if not sub["is_active"]:

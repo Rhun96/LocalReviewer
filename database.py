@@ -43,8 +43,8 @@ def db(project_path: str):
     except Exception:
         try:
             conn.rollback()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("rollback failed: %s", e)
         raise
     finally:
         conn.close()

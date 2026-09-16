@@ -17,6 +17,35 @@ def compute_content_hash(row_data: dict) -> str:
     return hashlib.sha256(content.encode("utf-8")).hexdigest()
 
 
+def file_sha256(file_path: str) -> str:
+    """Хэш файла чанками (для дедупа повторных импортов одного файла)."""
+    h = hashlib.sha256()
+    with open(file_path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def find_file_by_hash(project_path: str, file_hash: str) -> dict | None:
+    """Уже импортированный файл с таким хэшем (или None)."""
+    with db(project_path) as conn:
+        row = conn.cursor().execute(
+            "SELECT file_id, file_name, row_count, imported_at FROM files "
+            "WHERE file_hash = ? ORDER BY imported_at DESC LIMIT 1",
+            (file_hash,)).fetchone()
+        return dict(row) if row else None
+
+
+def find_file_by_name(project_path: str, file_name: str) -> dict | None:
+    """Файл с таким именем (для импортов до хэшей: хэш тогда неизвестен)."""
+    with db(project_path) as conn:
+        row = conn.cursor().execute(
+            "SELECT file_id, file_name, row_count, imported_at, file_hash FROM files "
+            "WHERE file_name = ? ORDER BY imported_at DESC LIMIT 1",
+            (file_name,)).fetchone()
+        return dict(row) if row else None
+
+
 def _custom_name(role: str) -> str:
     """Своя категория из маппинга: 'custom:Моё' -> 'Моё' (валидация имени)."""
     name = role.split(":", 1)[1].strip()
@@ -84,15 +113,19 @@ def import_file(
 
     with db(project_path) as conn:
         cursor = conn.cursor()
+        try:
+            digest = file_sha256(str(file_path))
+        except OSError:
+            digest = None
         cursor.execute("""
             INSERT INTO files (
                 file_name, file_path, file_type, sheet_name,
-                header_row, row_count, imported_at, mapping_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                header_row, row_count, imported_at, mapping_json, file_hash
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             file_name, str(file_path), file_type, sheet_name,
             header_row, len(data), now,
-            json.dumps(mapping, ensure_ascii=False),
+            json.dumps(mapping, ensure_ascii=False), digest,
         ))
         file_id = cursor.lastrowid
 

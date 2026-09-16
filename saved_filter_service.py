@@ -1,6 +1,19 @@
 """Сохранённые фильтры (ТЗ §28-30)."""
 import json
+import logging
 from database import db, utcnow
+
+logger = logging.getLogger(__name__)
+
+
+def _coerce(payload) -> dict | None:
+    """Битый JSON/структура → None (строка пропускается, данные живут)."""
+    if isinstance(payload, dict):
+        # Новый формат {"filters": {...}, ...} или старый плоский условий.
+        if isinstance(payload.get("filters"), dict) or "statuses" in payload:
+            return payload
+        return None
+    return None
 
 
 def list_saved_filters(project_path: str) -> list:
@@ -8,9 +21,19 @@ def list_saved_filters(project_path: str) -> list:
         cur = conn.cursor()
         cur.execute("SELECT filter_id, name, filter_json, sort_order "
                     "FROM saved_filters ORDER BY sort_order, name")
-        return [{"filter_id": r["filter_id"], "name": r["name"],
-                 "filters": json.loads(r["filter_json"]), "sort_order": r["sort_order"]}
-                for r in cur.fetchall()]
+        out = []
+        for r in cur.fetchall():
+            try:
+                payload = _coerce(json.loads(r["filter_json"]))
+            except (ValueError, TypeError) as e:
+                logger.warning("skip corrupt saved filter %r: %s", r["name"], e)
+                continue
+            if payload is None:
+                logger.warning("skip corrupt saved filter %r: bad schema", r["name"])
+                continue
+            out.append({"filter_id": r["filter_id"], "name": r["name"],
+                        "filters": payload, "sort_order": r["sort_order"]})
+        return out
 
 
 def save_filter(project_path: str, name: str, filters: dict) -> int:
