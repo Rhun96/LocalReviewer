@@ -176,6 +176,10 @@ def import_file(
                 val = get_role_value(row, role_key)
                 if val:
                     metadata[role_key] = val
+            # Тема кейса — отдельная роль маппинга (своё окно в ревью).
+            topic_val = get_role_value(row, "topic_text")
+            if topic_val:
+                metadata["topic"] = topic_val
             # Свои категории маппинга -> ключи метаданных
             for role in role_columns:
                 if isinstance(role, str) and role.startswith("custom:"):

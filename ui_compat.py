@@ -315,3 +315,17 @@ def bound_combo_popup(combo, max_width: int = 560, max_rows: int = 12) -> None:
             win.setMaximumWidth(max_width)
     except Exception:
         pass
+
+
+def mapping_label(header, samples: list) -> str:
+    """Rich-text подпись колонки в маппинге: жирное имя + серые примеры.
+
+    Имя и примеры визуально разделены — не сливаются и не путаются.
+    """
+    import html as _html
+    name = _html.escape(str(header))
+    if not samples:
+        return f"<b>{name}</b>"
+    shown = "<br>".join("↳ " + _html.escape(str(s)[:60]) for s in samples[:2])
+    return (f"<b>{name}</b>"
+            f'<br><span style="color:#888888; font-size:11px;">{shown}</span>')

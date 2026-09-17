@@ -409,10 +409,12 @@ class ReviewScreen(BaseScreen):
         layout = QVBoxLayout()
         layout.setSpacing(8)
 
-        # === 1. Текст кейса ===
-        case_group = QGroupBox("📝 Текст кейса")
-        case_group_layout = QVBoxLayout()
-        case_group_layout.setSpacing(8)
+        # === 1. Текст кейса (плоский контейнер: вложенные группы
+        # криво рисуют заголовки, проверено на скринах) ===
+        case_wrap = QWidget()
+        case_wrap_layout = QVBoxLayout()
+        case_wrap_layout.setSpacing(8)
+        case_wrap_layout.setContentsMargins(0, 0, 0, 0)
         text_scroll = QScrollArea()
         text_scroll.setWidgetResizable(True)
         text_scroll.setMinimumHeight(150)
@@ -431,10 +433,10 @@ class ReviewScreen(BaseScreen):
         self.case_layout.addStretch()
         self.case_content.setLayout(self.case_layout)
         text_scroll.setWidget(self.case_content)
-        case_group_layout.addWidget(text_scroll)
+        case_wrap_layout.addWidget(text_scroll)
         clear_in_fluent(text_scroll)
-        case_group.setLayout(case_group_layout)
-        layout.addWidget(case_group)
+        case_wrap.setLayout(case_wrap_layout)
+        layout.addWidget(case_wrap)
 
         # === 2. Навигация (сразу после текста) ===
         nav_group = QGroupBox("🧭 Навигация")
@@ -1833,7 +1835,7 @@ class ReviewScreen(BaseScreen):
             self.show_error("Не удалось загрузить кейс", e)
 
     def update_case_display(self):
-        """Обновляет отображение текста кейса с реальными названиями колонок из маппинга."""
+        """Три окна: Тема / Текст / Ответ (Ответ шире, меньше скролла)."""
         if not self.current_case:
             return
 
@@ -1843,96 +1845,109 @@ class ReviewScreen(BaseScreen):
             if item.widget():
                 item.widget().deleteLater()
 
-        # Парсим сырые данные
+        def _text_widget(text: str):
+            w = QLabel(str(text) if text else "(пусто)")
+            w.setWordWrap(True)
+            w.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+            w.setStyleSheet("font-size: 14px; padding: 6px;")
+            return w
+
+        def _header(text: str):
+            h = QLabel(text)
+            if not FLUENT:
+                h.setStyleSheet("font-size: 12px; font-weight: bold; color: #00DD38;")
+            return h
+
+        def _box(title: str):
+            # Панель + обычный заголовок вместо вложенного QGroupBox:
+            # вложенные группы криво рисуют заголовки.
+            panel = QFrame()
+            panel.setObjectName("caseBox")
+            panel.setStyleSheet(
+                "#caseBox { border: 1px solid #3a3a3a; border-radius: 8px; }")
+            lay = QVBoxLayout()
+            lay.setSpacing(6)
+            lay.setContentsMargins(10, 10, 10, 10)
+            lay.addWidget(_header(title))
+            panel.setLayout(lay)
+            return panel, lay
+
+        # Парсим сырые данные и метаданные
         raw_data = {}
         if self.current_case.get('raw_json'):
             try:
                 raw_data = json.loads(self.current_case['raw_json'])
             except (ValueError, TypeError):
                 pass
-
-        # Находим колонки по ролям из маппинга
-        mapping = self.current_file_mapping
-        primary_cols = [col for col, role in mapping.items() if role == 'primary_text']
-        response_cols = [col for col, role in mapping.items() if role == 'response_text']
-
-        # Отображаем запрос с реальными названиями колонок
-        if primary_cols:
-            for col_name in primary_cols:
-                label = QLabel(f"📌 {col_name}:")
-                if not FLUENT:
-                    label.setStyleSheet("font-size: 12px; font-weight: bold; color: #00DD38;")
-                self.case_layout.addWidget(label)
-                text = raw_data.get(col_name, '') or '(пусто)'
-                text_label = QLabel(str(text))
-                text_label.setWordWrap(True)
-                text_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
-                text_label.setStyleSheet("font-size: 14px; padding: 6px;")
-                self.case_layout.addWidget(text_label)
-        else:
-            # Fallback: если маппинга нет, показываем стандартно
-            label = QLabel("📌 Запрос:")
-            if not FLUENT:
-                label.setStyleSheet("font-size: 12px; font-weight: bold; color: #00DD38;")
-            self.case_layout.addWidget(label)
-            text_label = QLabel(self.current_case.get('primary_text') or '(пусто)')
-            text_label.setWordWrap(True)
-            text_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
-            text_label.setStyleSheet("font-size: 14px; padding: 6px;")
-            self.case_layout.addWidget(text_label)
-
-        # Разделитель
-        line = QFrame()
-        line.setFrameShape(QFrame.Shape.HLine)
-        line.setStyleSheet("color: #00441A; max-height: 2px;")
-        self.case_layout.addWidget(line)
-
-        # Отображаем ответ с реальными названиями колонок
-        if response_cols:
-            for col_name in response_cols:
-                label = QLabel(f"💬 {col_name}:")
-                if not FLUENT:
-                    label.setStyleSheet("font-size: 12px; font-weight: bold; color: #00DD38;")
-                self.case_layout.addWidget(label)
-                text = raw_data.get(col_name, '') or '(пусто)'
-                text_label = QLabel(str(text))
-                text_label.setWordWrap(True)
-                text_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
-                text_label.setStyleSheet("font-size: 14px; padding: 6px;")
-                self.case_layout.addWidget(text_label)
-        else:
-            # Fallback: если маппинга нет, показываем стандартно
-            response = self.current_case.get('response_text')
-            if response:
-                label = QLabel("💬 Ответ:")
-                if not FLUENT:
-                    label.setStyleSheet("font-size: 12px; font-weight: bold; color: #00DD38;")
-                self.case_layout.addWidget(label)
-                text_label = QLabel(response)
-                text_label.setWordWrap(True)
-                text_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
-                text_label.setStyleSheet("font-size: 14px; padding: 6px;")
-                self.case_layout.addWidget(text_label)
-
-        # Источник (ссылка на БЗ) и свои категории из метаданных
         try:
             metadata = json.loads(self.current_case.get('metadata_json') or '{}')
         except (ValueError, TypeError):
             metadata = {}
-        source = (metadata.get('source') or '').strip() if isinstance(metadata, dict) else ''
-        if source:
-            src_label = QLabel("🔗 Источник:")
-            if not FLUENT:
-                src_label.setStyleSheet("font-size: 12px; font-weight: bold; color: #00DD38;")
-            self.case_layout.addWidget(src_label)
+        if not isinstance(metadata, dict):
+            metadata = {}
+        mapping = self.current_file_mapping
+        primary_cols = [col for col, role in mapping.items() if role == 'primary_text']
+        response_cols = [col for col, role in mapping.items() if role == 'response_text']
+        topic = (metadata.get('topic') or '').strip()
+        topic_title = "📌 Тема"
+        text_cols = list(primary_cols)
+        if not topic and len(primary_cols) >= 2:
+            # Тема и Текст — одна категория «Запрос»: ищем колонку,
+            # похожую на тему по имени, иначе берём первую.
+            # Работает и на старых импортах без роли Темы.
+            # Одна колонка — делить нечего, Темы нет.
+            import re as _re
+            named = [c for c in primary_cols
+                     if _re.search(r"тем|subj|title|topic", c, _re.IGNORECASE)]
+            tcol = named[0] if named else primary_cols[0]
+            topic = str(raw_data.get(tcol, '') or '').strip()
+            if topic:
+                topic_title = f"📌 Тема ({tcol})"
+                text_cols = [c for c in primary_cols if c != tcol]
+
+        # 1. Тема (явная роль — или первая колонка Запроса)
+        if topic:
+            box, lay = _box(topic_title)
+            lay.addWidget(_text_widget(topic))
+            self.case_layout.addWidget(box, 1)
+
+        # 2. Текст (запрос): подпись колонки — только если их несколько.
+        box, lay = _box("📝 Текст")
+        if text_cols:
+            for col_name in text_cols:
+                if len(text_cols) > 1:
+                    lay.addWidget(_header(f"📌 {col_name}:"))
+                lay.addWidget(_text_widget(raw_data.get(col_name, '')))
+        else:
+            # Одна колонка Запроса без Темы — показываем как есть.
+            lay.addWidget(_header("📌 Запрос:"))
+            lay.addWidget(_text_widget(self.current_case.get('primary_text')))
+        source = (metadata.get('source') or '').strip()
+        if source and not topic:
+            # Источник — сюда, только если нет окна Темы.
+            lay.addWidget(_header("🔗 Источник:"))
             src_text = QLabel(source)
             src_text.setWordWrap(True)
-            src_text.setTextInteractionFlags(Qt.TextSelectableByMouse | Qt.TextSelectableByKeyboard)
+            src_text.setTextInteractionFlags(
+                Qt.TextInteractionFlag.TextSelectableByMouse
+                | Qt.TextInteractionFlag.TextSelectableByKeyboard)
             src_text.setOpenExternalLinks(False)
             src_text.setStyleSheet("font-size: 13px; padding: 6px; color: #00AAFF;")
-            self.case_layout.addWidget(src_text)
+            lay.addWidget(src_text)
+        self.case_layout.addWidget(box, 2)
 
-        self.case_layout.addStretch()
+        # 3. Ответ (шире остальных, чтобы меньше скроллить)
+        box, lay = _box("💬 Ответ")
+        if response_cols:
+            for col_name in response_cols:
+                if len(response_cols) > 1:
+                    lay.addWidget(_header(f"💬 {col_name}:"))
+                lay.addWidget(_text_widget(raw_data.get(col_name, '')))
+        else:
+            lay.addWidget(_text_widget(self.current_case.get('response_text')))
+        self.case_layout.addWidget(box, 4)
+
+        self.case_layout.addStretch(0)
 
     def update_info_label(self):
         if not self.current_case:

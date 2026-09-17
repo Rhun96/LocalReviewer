@@ -417,19 +417,18 @@ class ImportWizard(QWidget):
                     samples.append(v)
                 if len(samples) >= 2:
                     break
-            left = QLabel(str(header))
-            if samples:
-                shown = " | ".join(s[:40] for s in samples)
-                left.setText(f"{header}\n↳ {shown}")
+            from ui_compat import mapping_label
+            left = QLabel(mapping_label(header, samples))
             # Иначе длинные названия разъезжают диалог шире экрана.
             left.setWordWrap(True)
             left.setMaximumWidth(420)
+            left.setTextFormat(Qt.TextFormat.RichText)
             combo = FComboBox()
             combo.setMinimumHeight(30)
             for role_code, role_name in roles:
                 combo.addItem(role_name, role_code)
-            if header == headers[0]:
-                combo.setCurrentIndex(1)  # primary_text
+            # Без пресетов: все колонки изначально «Не импортировать»,
+            # включая первую, — пользователь назначает роли сам.
             self.mapping_layout.addRow(left, combo)
             self.mapping_combos[header] = combo
 

@@ -198,11 +198,17 @@ class RunImportDialog(QDialog):
                     samples.append(v[:60])
                 if len(samples) >= 2:
                     break
-            left = QLabel(str(header) + (f"\n↳ {' | '.join(samples)}" if samples else ""))
+            from ui_compat import mapping_label
+            left = QLabel(mapping_label(header, samples))
             # Длинные названия/примеры разъезжают диалог шире экрана —
             # переносим и ограничиваем ширину метки.
             left.setWordWrap(True)
             left.setMaximumWidth(420)
+            try:
+                from PySide6.QtCore import Qt as _Qt
+                left.setTextFormat(_Qt.TextFormat.RichText)
+            except Exception:
+                pass
             combo = FComboBox()
             for code, name in RUN_ROLES:
                 combo.addItem(name, code)

@@ -51,11 +51,12 @@ CHECK_SEVERITIES = [
 ALLOWED_ROLES = {
     "primary_text", "response_text", "group_name", "source_id",
     "comment_source", "metadata", "ticket_number", "product",
-    "operator_response", "source", "ignore",
+    "operator_response", "source", "topic_text", "ignore",
 }
 
 MAPPING_ROLES = [
     ("ignore", "Не импортировать"),
+    ("topic_text", "📌 Тема"),
     ("primary_text", "Запрос"),
     ("response_text", "Ответ модели"),
     ("ticket_number", "Номер обращения"),
