@@ -613,3 +613,57 @@ def migrate_to_v13(cursor) -> None:
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_regression_results_result "
                    "ON regression_results(regression_id, result, severity)")
     logger.info("migrated to v13 (regression)")
+
+
+def migrate_to_v14(cursor) -> None:
+    """Bug Reports (ТЗ V2 §6): баги + связь многие-ко-многим с кейсами.
+
+    Историю пишем в общую history (без отдельной bug_report_history):
+    BUG_CREATED/UPDATED/STATUS_CHANGED/EXTERNAL_LINKED — на все связанные
+    кейсы, CASE_ADDED/REMOVED — на конкретный кейс.
+    """
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS bug_reports (
+            bug_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT NOT NULL,
+            description TEXT DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'New'
+                CHECK (status IN ('New','Confirmed','In Progress',
+                                  'Fixed','Rejected','Duplicate')),
+            severity TEXT NOT NULL DEFAULT 'Medium'
+                CHECK (severity IN ('Low','Medium','High','Critical')),
+            category_id INTEGER,
+            subcategory_id INTEGER,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            model_name TEXT DEFAULT '',
+            model_version TEXT DEFAULT '',
+            prompt_version TEXT DEFAULT '',
+            system_prompt_version TEXT DEFAULT '',
+            external_tracker TEXT DEFAULT '',
+            external_id TEXT DEFAULT '',
+            external_url TEXT DEFAULT '',
+            actual_behavior TEXT DEFAULT '',
+            expected_behavior TEXT DEFAULT '',
+            internal_comment TEXT DEFAULT ''
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS bug_report_cases (
+            bug_id INTEGER NOT NULL,
+            case_id INTEGER NOT NULL,
+            added_at TEXT NOT NULL,
+            PRIMARY KEY (bug_id, case_id),
+            FOREIGN KEY (bug_id) REFERENCES bug_reports(bug_id) ON DELETE CASCADE,
+            FOREIGN KEY (case_id) REFERENCES cases(case_id) ON DELETE CASCADE
+        )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_bugs_status ON bug_reports(status)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_bugs_severity ON bug_reports(severity)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_bugs_created ON bug_reports(created_at)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_bugs_external ON bug_reports(external_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_bug_cases_case "
+                   "ON bug_report_cases(case_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_bug_cases_bug "
+                   "ON bug_report_cases(bug_id)")
+    logger.info("migrated to v14 (bug reports)")

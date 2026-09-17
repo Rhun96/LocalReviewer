@@ -12,35 +12,7 @@ from ui_compat import (FComboBox, FLineEdit, FPrimaryButton, FPushButton,
                        clear_in_fluent, notify)
 import model_run_service as runs
 from model_run_service import VERDICT_NAMES
-
-
-def _diff_html(answer_a: str | None, answer_b: str | None) -> tuple:
-    """Пословный diff: в A красным удалённое, в B зелёным добавленное.
-
-    Одинаковые ответы — без подсветки. Нет ответа — пометка.
-    """
-    import difflib
-    import html as _html
-    if not answer_a and not answer_b:
-        return "(нет ответа)", "(нет ответа)"
-    wa = (answer_a or "").split()
-    wb = (answer_b or "").split()
-    sm = difflib.SequenceMatcher(a=wa, b=wb, autojunk=False)
-    out_a, out_b = [], []
-    for tag, i1, i2, j1, j2 in sm.get_opcodes():
-        if tag == "equal":
-            out_a.append(_html.escape(" ".join(wa[i1:i2])))
-            out_b.append(_html.escape(" ".join(wb[j1:j2])))
-        else:
-            if i1 != i2:
-                out_a.append('<span style="background-color:#5a1a1a; color:#ffb3b3;">'
-                             + _html.escape(" ".join(wa[i1:i2])) + "</span>")
-            if j1 != j2:
-                out_b.append('<span style="background-color:#1a4a22; color:#b3ffbf;">'
-                             + _html.escape(" ".join(wb[j1:j2])) + "</span>")
-    html_a = " ".join(out_a) if answer_a else "(нет ответа)"
-    html_b = " ".join(out_b) if answer_b else "(нет ответа)"
-    return html_a, html_b
+from diff_service import word_diff_html as _diff_html  # noqa: F401 (совместимость)
 
 
 class CompareDialog(QDialog):

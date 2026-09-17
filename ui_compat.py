@@ -275,3 +275,43 @@ def _apply_palette(app, dark: bool) -> None:
     except Exception:
         pass
     app.setPalette(pal)
+
+
+def elide_middle(text: str, limit: int = 45) -> str:
+    """Укорачивает длинные строки для комбо-списков (полный текст — в userData)."""
+    text = str(text or "")
+    if len(text) <= limit:
+        return text
+    return text[: limit - 1] + "…"
+
+
+def add_elided_item(combo, text: str, user_data=None, limit: int = 45) -> None:
+    """addItem с обрезанным отображением. Логика — только по userData/currentData.
+
+    Иначе всплывающий список комбо разъезжается на весь экран на длинных
+    названиях колонок (и в оконном режиме тоже).
+    """
+    combo.addItem(elide_middle(text, limit),
+                  text if user_data is None else user_data)
+
+
+def bound_combo_popup(combo, max_width: int = 560, max_rows: int = 12) -> None:
+    """Всплывающий список в пределах экрана: ширина + число видимых строк.
+
+    У Fluent-комбо нет .view() (свой попап) — там работает только
+    setMaxVisibleItems; у классического QComboBox — оба механизма.
+    """
+    try:
+        if hasattr(combo, "setMaxVisibleItems"):
+            combo.setMaxVisibleItems(max_rows)
+    except Exception:
+        pass
+    try:
+        from PySide6.QtCore import Qt as _Qt
+        view = combo.view()
+        view.setHorizontalScrollBarPolicy(_Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        win = view.window()
+        if win is not None and max_width:
+            win.setMaximumWidth(max_width)
+    except Exception:
+        pass

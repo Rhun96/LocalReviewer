@@ -421,6 +421,9 @@ class ImportWizard(QWidget):
             if samples:
                 shown = " | ".join(s[:40] for s in samples)
                 left.setText(f"{header}\n↳ {shown}")
+            # Иначе длинные названия разъезжают диалог шире экрана.
+            left.setWordWrap(True)
+            left.setMaximumWidth(420)
             combo = FComboBox()
             combo.setMinimumHeight(30)
             for role_code, role_name in roles:

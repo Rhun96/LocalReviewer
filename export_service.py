@@ -27,6 +27,15 @@ def _resolve_output(output_path: str) -> Path:
     return p
 
 
+def _resolve_text_output(output_path: str, suffix: str) -> Path:
+    p = Path(output_path)
+    if not p.parent.exists():
+        raise FileNotFoundError(f"Папка не найдена: {p.parent}")
+    if p.suffix.lower() != suffix:
+        raise ValueError(f"Файл экспорта должен иметь расширение {suffix}")
+    return p
+
+
 def _atomic_save(wb, output_path: Path) -> None:
     tmp_fd, tmp_name = tempfile.mkstemp(suffix=".xlsx", dir=str(output_path.parent))
     os.close(tmp_fd)
@@ -128,6 +137,112 @@ def export_results_to_xlsx(project_path: str, output_path: str, file_id=None):
     _atomic_save(wb, out)
     logger.info("exported %s rows -> %s", len(rows), out)
     return len(rows)
+
+
+JSONL_BASE = ("id", "case_id", "query", "response", "status", "category",
+              "subcategory", "severity", "comment")
+JSONL_OPTIONAL = ("tags", "group", "file", "source_id", "reviewed_at")
+
+
+def export_results_jsonl(project_path: str, output_path: str, file_id=None,
+                         extra_fields: list | None = None) -> int:
+    """Экспорт JSONL (ТЗ V2 §14, §35): один кейс — одна строка, UTF-8.
+
+    Стабильная схема: base-поля всегда, extra — по выбору (tags/group/file/
+    source_id/reviewed_at). id = source_id из маппинга, иначе case_id строкой.
+    """
+    import json as _json
+    extra = [f for f in (extra_fields or []) if f in JSONL_OPTIONAL]
+    out = _resolve_text_output(output_path, ".jsonl")
+    tmp = str(out) + ".part"
+    count = 0
+    with db(project_path) as conn:
+        cursor = conn.cursor()
+        file_condition = ""
+        params: list = []
+        if file_id:
+            file_condition = " WHERE c.file_id = ?"
+            params.append(file_id)
+        cursor.execute(f"""
+            SELECT
+                c.case_id, c.source_id, c.primary_text, c.response_text,
+                c.group_name, f.file_name,
+                COALESCE(a.status, 'unreviewed') as status,
+                a.comment as review_comment, a.updated_at as reviewed_at,
+                ec.name as error_category, es.name as error_subcategory,
+                e.severity as error_severity
+            FROM cases c
+            JOIN files f ON c.file_id = f.file_id
+            LEFT JOIN annotations a ON c.case_id = a.case_id
+            LEFT JOIN case_errors e ON e.case_id = c.case_id
+            LEFT JOIN error_categories ec ON ec.category_id = e.category_id
+            LEFT JOIN error_categories es ON es.category_id = e.subcategory_id
+            {file_condition}
+            ORDER BY f.imported_at, c.row_index
+        """, params)
+        cols = [d[0] for d in cursor.description]
+        with open(tmp, "w", encoding="utf-8") as fh:
+            while True:
+                batch = cursor.fetchmany(2000)
+                if not batch:
+                    break
+                for r in batch:
+                    row = dict(zip(cols, r, strict=True))
+                    sid = (row["source_id"] or "").strip()
+                    obj = {
+                        "id": sid or str(row["case_id"]),
+                        "case_id": row["case_id"],
+                        "query": row["primary_text"] or "",
+                        "response": row["response_text"] or "",
+                        "status": row["status"],
+                        "category": row["error_category"] or "",
+                        "subcategory": row["error_subcategory"] or "",
+                        "severity": row["error_severity"] or "",
+                        "comment": row["review_comment"] or "",
+                    }
+                    if "tags" in extra:
+                        obj["tags"] = []
+                    if "group" in extra:
+                        obj["group"] = row["group_name"] or ""
+                    if "file" in extra:
+                        obj["file"] = row["file_name"] or ""
+                    if "source_id" in extra:
+                        obj["source_id"] = sid
+                    if "reviewed_at" in extra:
+                        obj["reviewed_at"] = row["reviewed_at"] or ""
+                    fh.write(_json.dumps(obj, ensure_ascii=False) + "\n")
+                    count += 1
+    if "tags" in extra:
+        # Теги — вторым проходом по чанкам (таблица может быть большой).
+        with db(project_path) as conn:
+            cursor = conn.cursor()
+            ids = [r["case_id"] for r in cursor.execute(
+                "SELECT case_id FROM cases" +
+                (" WHERE file_id = ?" if file_id else ""),
+                ([file_id] if file_id else [])).fetchall()]
+            tag_map: dict = {}
+            for i in range(0, len(ids), 2000):
+                chunk = ids[i:i + 2000]
+                ph = ",".join(["?"] * len(chunk))
+                for t in cursor.execute(f"""
+                        SELECT ct.case_id, tg.tag_name FROM case_tags ct
+                        JOIN tags tg ON tg.tag_id = ct.tag_id
+                        WHERE ct.case_id IN ({ph})
+                    """, chunk).fetchall():
+                    tag_map.setdefault(t["case_id"], []).append(t["tag_name"])
+        import json as _json2
+        lines = open(tmp, encoding="utf-8").read().splitlines()
+        with open(tmp, "w", encoding="utf-8") as fh:
+            for line in lines:
+                try:
+                    obj = _json2.loads(line)
+                except ValueError:
+                    continue
+                obj["tags"] = tag_map.get(obj.get("case_id"), [])
+                fh.write(_json2.dumps(obj, ensure_ascii=False) + "\n")
+    Path(tmp).replace(out)
+    logger.info("exported %s jsonl rows -> %s", count, out)
+    return count
 
 
 def export_report_to_xlsx(project_path: str, output_path: str, file_id=None):

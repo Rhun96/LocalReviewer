@@ -7,7 +7,7 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 13
+SCHEMA_VERSION = 14
 DB_TIMEOUT = 10.0
 
 
@@ -20,6 +20,14 @@ def _apply_pragmas(conn: sqlite3.Connection) -> None:
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA busy_timeout=5000")
     conn.execute("PRAGMA synchronous=NORMAL")
+    # Встроенный LOWER понимает только ASCII: для поиска по-русски без учёта
+    # регистра — своя функция (Python lower знает Unicode).
+    try:
+        conn.create_function(
+            "lower_ru", 1, lambda s: s.lower() if isinstance(s, str) else s,
+            deterministic=True)
+    except Exception:
+        pass
 
 
 def get_db_connection(project_path: str) -> sqlite3.Connection:
@@ -329,6 +337,11 @@ def init_database(project_path: str):
             from migrations import migrate_to_v13
             migrate_to_v13(cursor)
             cursor.execute("PRAGMA user_version=13")
+            version = 13
+        if version < 14:
+            from migrations import migrate_to_v14
+            migrate_to_v14(cursor)
+            cursor.execute("PRAGMA user_version=14")
         conn.commit()
     except Exception:
         try:

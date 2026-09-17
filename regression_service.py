@@ -345,3 +345,89 @@ def export_regressions_xlsx(project_path: str, regression_id: int,
     out = _resolve_output(output_path)
     _atomic_save(wb, out)
     return out
+
+
+def bug_prefill(project_path: str, regression_id: int, stable_key: str) -> dict:
+    """Префилл бага из строки регрессии (ТЗ V2 §11): baseline/candidate,
+    ответы, статусы, версии модели/промптов — без ручного копирования."""
+    reg = get_regression(project_path, regression_id)
+    if not reg:
+        raise ValueError("Запуск не найден")
+    rows = list_regression_results(project_path, regression_id)
+    row = next((r for r in rows if r["stable_key"] == stable_key), None)
+    if not row:
+        raise ValueError("Строка не найдена")
+    with db(project_path) as conn:
+        cur = conn.cursor()
+        cand = cur.execute("SELECT answer_text FROM run_answers "
+                           "WHERE run_id=? AND stable_key=?",
+                           (reg["candidate_run_id"], stable_key)).fetchone()
+        cand_ans = cand["answer_text"] if cand else ""
+        base_ans = ""
+        if reg["baseline_type"] == "run":
+            b = cur.execute("SELECT answer_text FROM run_answers "
+                            "WHERE run_id=? AND stable_key=?",
+                            (reg["baseline_id"], stable_key)).fetchone()
+            base_ans = b["answer_text"] if b else ""
+            meta_run = cur.execute("SELECT model_name, model_version, prompt_version,"
+                                   " system_prompt_version FROM model_runs WHERE run_id=?",
+                                   (reg["baseline_id"],)).fetchone()
+        else:
+            meta_run = None
+        if row["case_id"]:
+            case = cur.execute("SELECT c.primary_text, c.response_text, c.group_name,"
+                               " c.metadata_json, c.source_id, e.category_id,"
+                               " e.subcategory_id FROM cases c "
+                               "LEFT JOIN case_errors e ON e.case_id = c.case_id "
+                               "WHERE c.case_id=?", (row["case_id"],)).fetchone()
+        else:
+            case = None
+        cand_meta = cur.execute("SELECT model_name, model_version, prompt_version,"
+                                " system_prompt_version FROM model_runs WHERE run_id=?",
+                                (reg["candidate_run_id"],)).fetchone()
+    import json as _json
+    case = dict(case) if case else {}
+    try:
+        m = _json.loads(case.get("metadata_json") or "{}")
+        product = m.get("product", "") if isinstance(m, dict) else ""
+        reference = (m.get("operator_response") or "").strip() if isinstance(
+            m, dict) else ""
+    except Exception:
+        product, reference = "", ""
+    if reg["baseline_type"] == "run" and meta_run:
+        model_name = meta_run["model_name"] or ""
+        model_version = meta_run["model_version"] or ""
+        prompt_version = meta_run["prompt_version"] or ""
+        system_prompt = meta_run["system_prompt_version"] or ""
+    else:
+        model_name = (cand_meta["model_name"] or "") if cand_meta else ""
+        model_version = (cand_meta["model_version"] or "") if cand_meta else ""
+        prompt_version = (cand_meta["prompt_version"] or "") if cand_meta else ""
+        system_prompt = (cand_meta["system_prompt_version"] or "") if cand_meta else ""
+    query = case.get("primary_text") or ""
+    return {
+        "case_id": row["case_id"],
+        "source_id": case.get("source_id") or "",
+        "query": query,
+        "model_response": cand_ans or "",
+        "reference": reference,
+        "product": product,
+        "group": case.get("group_name") or "",
+        "review_status": row.get("candidate_status") or "unreviewed",
+        "review_comment": "",
+        "category_id": case.get("category_id"),
+        "subcategory_id": case.get("subcategory_id"),
+        "category_name": None,
+        "subcategory_name": None,
+        "model_name": model_name,
+        "model_version": model_version,
+        "prompt_version": prompt_version,
+        "system_prompt_version": system_prompt,
+        "expected_behavior": reference,
+        "title_suggest": (f"[регрессия {reg['name']}] {query[:60]}").strip(),
+        "description": (
+            f"Регрессия {reg['name']}: {row.get('baseline_status')} → "
+            f"{row.get('candidate_status')} ({row.get('result')}).\n"
+            f"Было: {(base_ans or case.get('response_text') or '')[:500]}\n"
+            f"Стало: {(cand_ans or '')[:500]}"),
+    }

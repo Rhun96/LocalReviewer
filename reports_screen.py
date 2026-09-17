@@ -91,6 +91,10 @@ class ReportsScreen(BaseScreen):
         self.checks_tab = self.create_checks_tab()
         self.tabs.addTab(self.checks_tab, "⚠️ Автопроверки")
 
+        # Вкладка 6: Личное (ТЗ V2 §23, без командных дашбордов)
+        self.personal_tab = self.create_personal_tab()
+        self.tabs.addTab(self.personal_tab, "🙂 Личное")
+
         layout.addWidget(self.tabs)
         clear_in_fluent(self.tabs)
 
@@ -106,6 +110,16 @@ class ReportsScreen(BaseScreen):
         btn_export_report.setMinimumHeight(45)
         btn_export_report.clicked.connect(self.on_export_report)
 
+        btn_export_jsonl = FPushButton("📄 Экспорт JSONL")
+        btn_export_jsonl.setMinimumHeight(45)
+        btn_export_jsonl.setToolTip("Один кейс — одна строка JSON (UTF-8)")
+        btn_export_jsonl.clicked.connect(self.on_export_jsonl)
+
+        btn_export_ann = FPushButton("🏷 Экспорт разметки")
+        btn_export_ann.setMinimumHeight(45)
+        btn_export_ann.setToolTip("Только разметка (JSONL для обмена)")
+        btn_export_ann.clicked.connect(self.on_export_annotations)
+
         btn_back = FPushButton("🚪 Назад к проекту")
         btn_back.setObjectName("danger")
         btn_back.setMinimumHeight(45)
@@ -113,6 +127,8 @@ class ReportsScreen(BaseScreen):
 
         buttons_layout.addWidget(btn_export_results)
         buttons_layout.addWidget(btn_export_report)
+        buttons_layout.addWidget(btn_export_jsonl)
+        buttons_layout.addWidget(btn_export_ann)
         buttons_layout.addStretch()
         buttons_layout.addWidget(btn_back)
         layout.addLayout(buttons_layout)
@@ -257,6 +273,7 @@ class ReportsScreen(BaseScreen):
             self.load_files_report()
             self.load_tags_report()
             self.load_checks_report()
+            self.load_personal_report()
             self.refresh_charts()
         except Exception as e:
             self.show_error("Не удалось загрузить отчёты", e)
@@ -337,6 +354,52 @@ class ReportsScreen(BaseScreen):
                 cell += " ⚠ правило бесполезно?"
             self.checks_table.setItem(row, 3, QTableWidgetItem(cell))
         self.checks_table.resizeColumnsToContents()
+
+    def create_personal_tab(self):
+        """Вкладка личной аналитики (§23)."""
+        widget = QWidget()
+        layout = QVBoxLayout()
+        hint = QLabel("Моя статистика (только личная, без командных метрик)")
+        layout.addWidget(hint)
+        self.personal_table = FTable()
+        layout.addWidget(self.personal_table)
+        widget.setLayout(layout)
+        return widget
+
+    def load_personal_report(self):
+        from report_service import get_personal_stats
+        stats = get_personal_stats(self.project_path)
+        rows = []
+        rev = stats.get("review", {})
+        rows.append(("Размечено кейсов", f"{rev.get('reviewed', 0)}/{rev.get('total', 0)}"))
+        for key, label in (("good", "Хорошо"), ("bad", "Плохо"),
+                           ("uncertain", "Сомневаюсь"), ("duplicate", "Дубль"),
+                           ("skip", "Пропущено")):
+            rows.append((label, rev.get(key, 0)))
+        rows.append(("--- Ошибки по категориям ---", ""))
+        for e in stats.get("errors", [])[:10]:
+            rows.append((e["category"], e["n"]))
+        rows.append(("--- Баги по статусам ---", ""))
+        for b in stats.get("bugs", []):
+            rows.append((b["status"], b["n"]))
+        regs = stats.get("regressions", {}) or {}
+        if regs.get("total"):
+            rows.append(("--- Регрессии ---", ""))
+            rows.append(("Запусков", regs.get("total", 0)))
+            rows.append(("PASS", regs.get("passed", 0)))
+            rows.append(("Регрессий всего", regs.get("regressions", 0)))
+            rows.append(("Улучшений всего", regs.get("improvements", 0)))
+        rows.append(("--- Тренд (по дням) ---", ""))
+        for d in stats.get("by_day", [])[:14]:
+            rows.append((d["day"], d["n"]))
+        self.personal_table.clear()
+        self.personal_table.setColumnCount(2)
+        self.personal_table.setRowCount(len(rows))
+        self.personal_table.setHorizontalHeaderLabels(["Показатель", "Значение"])
+        for i, (k, v) in enumerate(rows):
+            self.personal_table.setItem(i, 0, QTableWidgetItem(str(k)))
+            self.personal_table.setItem(i, 1, QTableWidgetItem(str(v)))
+        self.personal_table.resizeColumnsToContents()
 
     def refresh_charts(self):
         """Обновляет графики."""
@@ -559,6 +622,69 @@ class ReportsScreen(BaseScreen):
                     notify(self, "error", "Ошибка", f"Не удалось экспортировать:\n{msg}")),
             )
 
+    def on_export_jsonl(self):
+        from export_service import JSONL_OPTIONAL, export_results_jsonl
+        from PySide6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel
+        from report_service import get_files_list
+        from ui_compat import FCheckBox, FComboBox
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Экспорт JSONL")
+        dlg.setMinimumWidth(420)
+        layout = QVBoxLayout()
+        layout.addWidget(QLabel("Охват:"))
+        file_combo = FComboBox()
+        file_combo.addItem("Весь проект", None)
+        try:
+            for f in get_files_list(self.project_path):
+                file_combo.addItem(f["file_name"], f["file_id"])
+        except Exception:
+            pass
+        layout.addWidget(file_combo)
+        layout.addWidget(QLabel("Доп. поля (база: id, query, response, status,"
+                                " category, subcategory, severity, comment):"))
+        boxes = {}
+        for field in JSONL_OPTIONAL:
+            cb = FCheckBox(field)
+            boxes[field] = cb
+            layout.addWidget(cb)
+        btns = QHBoxLayout()
+        from ui_compat import FPrimaryButton
+        ok = FPrimaryButton("Экспортировать")
+        cancel = FPushButton("Отмена")
+        btns.addWidget(ok)
+        btns.addWidget(cancel)
+        layout.addLayout(btns)
+        dlg.setLayout(layout)
+        chosen = {}
+
+        def _go():
+            chosen["file_id"] = file_combo.currentData()
+            chosen["extra"] = [f for f, cb in boxes.items() if cb.isChecked()]
+            dlg.accept()
+
+        ok.clicked.connect(_go)
+        cancel.clicked.connect(dlg.reject)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        file_path, _ = QFileDialog.getSaveFileName(
+            self, "Сохранить JSONL", f"results_{timestamp}.jsonl",
+            "JSONL (*.jsonl)")
+        if not file_path:
+            return
+        self.setEnabled(False)
+        run_in_background(
+            export_results_jsonl, self.project_path, file_path,
+            chosen["file_id"], chosen["extra"],
+            on_finished=lambda count: (
+                self.setEnabled(True),
+                notify(self, "success", "Экспорт завершён",
+                       f"Экспортировано {count} кейсов в:\n{file_path}")),
+            on_error=lambda msg: (
+                self.setEnabled(True),
+                notify(self, "error", "Ошибка", f"Не удалось экспортировать:\n{msg}")),
+        )
+
     def on_export_report(self):
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         default_name = f"report_{timestamp}.xlsx"
@@ -587,3 +713,7 @@ class ReportsScreen(BaseScreen):
             mw.show_screen("project")
         else:
             self.reports_closed.emit()
+
+    def on_export_annotations(self):
+        from annotation_io_dialog import ExportAnnotationsDialog
+        ExportAnnotationsDialog(self.project_path, self).exec()

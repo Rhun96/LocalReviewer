@@ -22,27 +22,9 @@ RUN_ROLES = [
 
 
 def _guess_roles(headers: list) -> dict:
-    """Автоподбор ролей по названиям колонок (можно поменять вручную)."""
-    out: dict = {}
-    low = {h: str(h).lower() for h in headers}
-
-    def take(pred, role):
-        for h, name in low.items():
-            if h in out:
-                continue
-            if pred(name):
-                out[h] = role
-                return True
-        return False
-
-    take(lambda s: "ответ" in s or "answer" in s or "response" in s, "answer")
-    take(lambda s: s.strip() in ("id", "ид", "номер", "ticket", "key")
-         or "id" in s.split() or "идентификатор" in s
-         or s.strip().endswith("_id"), "source_id")
-    take(lambda s: any(k in s for k in ("вопрос", "запрос", "промпт", "обращени",
-                                        "текст", "prompt", "question", "query",
-                                        "text")), "prompt")
-    return out
+    """Совместимость: подбор ролей живёт в sheet_align_service."""
+    from sheet_align_service import guess_roles
+    return guess_roles(headers)
 
 
 class RunMetaDialog(QDialog):
@@ -135,6 +117,13 @@ class RunImportDialog(QDialog):
         btns.addWidget(ok)
         btns.addWidget(cancel)
         layout.addLayout(btns)
+        cmp_row = QHBoxLayout()
+        btn_cmp = FPushButton("⇄ Сравнить листы / упорядочить")
+        btn_cmp.setToolTip("Структура листов относительно друг друга + выгрузка")
+        btn_cmp.clicked.connect(self._open_sheet_compare)
+        cmp_row.addWidget(btn_cmp)
+        cmp_row.addStretch()
+        layout.addLayout(cmp_row)
         self.setLayout(layout)
 
     def _select_file(self):
@@ -210,6 +199,10 @@ class RunImportDialog(QDialog):
                 if len(samples) >= 2:
                     break
             left = QLabel(str(header) + (f"\n↳ {' | '.join(samples)}" if samples else ""))
+            # Длинные названия/примеры разъезжают диалог шире экрана —
+            # переносим и ограничиваем ширину метки.
+            left.setWordWrap(True)
+            left.setMaximumWidth(420)
             combo = FComboBox()
             for code, name in RUN_ROLES:
                 combo.addItem(name, code)
@@ -224,6 +217,18 @@ class RunImportDialog(QDialog):
 
     def _mapping(self) -> dict:
         return {h: c.currentData() for h, c in self.combos.items()}
+
+    def _open_sheet_compare(self):
+        if not self.file_path:
+            notify(self, "warning", "Внимание", "Сначала выбери файл")
+            return
+        from sheet_compare_dialog import SheetCompareDialog
+        SheetCompareDialog(self.file_path, self).exec()
+        # После упорядочивания превью могло устареть — обновляем.
+        try:
+            self._reload_preview()
+        except Exception:
+            pass
 
     def _on_import(self):
         if not self.file_path or not self.preview:
@@ -328,11 +333,22 @@ class ModelRunsScreen(BaseScreen):
         btn_cmp = FPushButton("⇄ Сравнить")
         btn_cmp.clicked.connect(self._compare)
         cmp_row.addWidget(btn_cmp)
+        btn_sheets = FPushButton("⇄ Листы файла")
+        btn_sheets.setToolTip("Структура листов xlsx/ods: сравнить, упорядочить, выгрузить")
+        btn_sheets.clicked.connect(self._compare_sheets)
+        cmp_row.addWidget(btn_sheets)
         btn_reg = FPushButton("🧪 Регрессия")
         btn_reg.setToolTip("Baseline vs кандидат: матрица, gate PASS/FAIL, экспорт")
         btn_reg.clicked.connect(self._regression)
         cmp_row.addWidget(btn_reg)
         layout.addLayout(cmp_row)
+        sheet_row = QHBoxLayout()
+        btn_sheets = FPushButton("⇄ Листы файла: сравнить / упорядочить")
+        btn_sheets.setToolTip("Структура листов xlsx/ods относительно друг друга")
+        btn_sheets.clicked.connect(self._sheet_compare)
+        sheet_row.addWidget(btn_sheets)
+        sheet_row.addStretch()
+        layout.addLayout(sheet_row)
         self.setLayout(layout)
 
     def refresh(self):
@@ -505,6 +521,17 @@ class ModelRunsScreen(BaseScreen):
         from compare_dialog import CompareDialog
         CompareDialog(self.project_path, self._run_id, run_b, self).exec()
 
+    def _compare_sheets(self):
+        """Сравнение листов прямо с экрана: Прогоны → «⇄ Листы файла»."""
+        from PySide6.QtWidgets import QFileDialog as _FD
+        path, _ = _FD.getOpenFileName(
+            self, "Файл с листами", "",
+            "Таблицы (*.xlsx *.ods);;Все файлы (*.*)")
+        if not path:
+            return
+        from sheet_compare_dialog import SheetCompareDialog
+        SheetCompareDialog(path, self).exec()
+
     def _review_answers(self):
         if self._run_id is None:
             notify(self, "warning", "Внимание", "Сначала выбери прогон")
@@ -516,3 +543,13 @@ class ModelRunsScreen(BaseScreen):
     def _regression(self):
         from regression_dialog import RegressionDialog
         RegressionDialog(self.project_path, self).exec()
+
+    def _sheet_compare(self):
+        from PySide6.QtWidgets import QFileDialog as _QFD
+        path, _ = _QFD.getOpenFileName(
+            self, "Файл с листами", "",
+            "Таблицы (*.xlsx *.ods);;Все файлы (*.*)")
+        if not path:
+            return
+        from sheet_compare_dialog import SheetCompareDialog
+        SheetCompareDialog(path, self).exec()

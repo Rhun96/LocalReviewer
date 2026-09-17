@@ -72,6 +72,20 @@ class ProjectScreen(BaseScreen):
         layout.addWidget(files_group)
         layout.addSpacing(5)
 
+        # Обмен разметкой между проектами
+        io_group = QGroupBox("🔄 Обмен разметкой")
+        io_layout = QHBoxLayout()
+        btn_import_ann = FPushButton("📥 Импорт разметки")
+        btn_import_ann.setMinimumHeight(40)
+        btn_import_ann.setSizePolicy(QSizePolicy.Policy.Expanding,
+                                     QSizePolicy.Policy.Fixed)
+        btn_import_ann.setToolTip("Preview → Merge/Update из JSONL")
+        btn_import_ann.clicked.connect(self.on_import_annotations)
+        io_layout.addWidget(btn_import_ann)
+        io_group.setLayout(io_layout)
+        layout.addWidget(io_group)
+        layout.addSpacing(5)
+
         # Карточка с кнопками
         actions_group = QGroupBox("⚡ Действия")
         buttons_grid = QGridLayout()
@@ -297,6 +311,12 @@ class ProjectScreen(BaseScreen):
         """Датасеты и версии."""
         from datasets_dialog import DatasetsDialog
         DatasetsDialog(self.project_path, self).exec()
+        self.load_project_info()
+
+    def on_import_annotations(self):
+        """Импорт разметки: Preview → Merge/Update."""
+        from annotation_io_dialog import ImportAnnotationsDialog
+        ImportAnnotationsDialog(self.project_path, self).exec()
         self.load_project_info()
 
     def on_runs(self):

@@ -160,3 +160,49 @@ def get_history_report(project_path: str, limit: int = 100, file_id=None) -> lis
             LIMIT ?
         """, params)
         return [dict(row) for row in cursor.fetchall()]
+
+
+def get_personal_stats(project_path: str) -> dict:
+    """Личная аналитика (ТЗ V2 §23): разметка, ошибки, баги, регрессии, тренд."""
+    from review_profile_service import code_to_base
+    mapping = code_to_base(project_path)
+    with db(project_path) as conn:
+        cur = conn.cursor()
+        overall = get_overall_report(project_path)
+        by_day = [dict(r) for r in cur.execute("""
+            SELECT date(updated_at) AS day, COUNT(*) AS n FROM annotations
+            WHERE updated_at IS NOT NULL
+            GROUP BY date(updated_at) ORDER BY day DESC LIMIT 30
+        """).fetchall()]
+        errors = [dict(r) for r in cur.execute("""
+            SELECT COALESCE(ec.name, '(без категории)') AS category,
+                   COUNT(*) AS n
+            FROM case_errors e
+            LEFT JOIN error_categories ec ON ec.category_id = e.category_id
+            GROUP BY category ORDER BY n DESC
+        """).fetchall()]
+        bugs = [dict(r) for r in cur.execute("""
+            SELECT status, COUNT(*) AS n FROM bug_reports
+            GROUP BY status
+        """).fetchall()] if _has_table(cur, "bug_reports") else []
+        regs = {}
+        if _has_table(cur, "regression_runs"):
+            r = cur.execute("""
+                SELECT COUNT(*) AS total,
+                       SUM(CASE WHEN gate_result='PASS' THEN 1 ELSE 0 END) AS passed,
+                       COALESCE(SUM(regressions), 0) AS regressions,
+                       COALESCE(SUM(improvements), 0) AS improvements
+                FROM regression_runs
+            """).fetchone()
+            regs = dict(r)
+            regs["passed"] = regs.get("passed") or 0
+    buckets = {k: overall.get(k, 0) for k in
+               ("total", "reviewed", "good", "bad", "uncertain", "duplicate", "skip")}
+    return {"review": buckets, "by_day": by_day, "errors": errors,
+            "bugs": bugs, "regressions": regs, "base_map_known": bool(mapping)}
+
+
+def _has_table(cursor, name: str) -> bool:
+    return bool(cursor.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+        (name,)).fetchone())

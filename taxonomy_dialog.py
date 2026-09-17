@@ -8,9 +8,10 @@ from ui_compat import FComboBox, FPrimaryButton, FPushButton
 class ErrorCauseDialog(QDialog):
     """result = (category_id, subcategory_id|None, severity) или None (пропустить)."""
 
-    def __init__(self, project_path: str, parent=None):
+    def __init__(self, project_path: str, parent=None, case_id: int | None = None):
         super().__init__(parent)
         self.project_path = project_path
+        self.case_id = case_id
         self.setWindowTitle("Причина ошибки")
         self.setMinimumWidth(480)
         self.result = None
@@ -33,6 +34,16 @@ class ErrorCauseDialog(QDialog):
         hint.setWordWrap(True)
         hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(hint)
+
+        self.suggest_row = QHBoxLayout()
+        self.suggest_label = QLabel("")
+        self.suggest_label.setWordWrap(True)
+        self.suggest_btn = FPushButton("Применить")
+        self.suggest_btn.setMaximumWidth(110)
+        self.suggest_btn.clicked.connect(self._apply_suggestion)
+        self.suggest_row.addWidget(self.suggest_label, 3)
+        self.suggest_row.addWidget(self.suggest_btn)
+        layout.addLayout(self.suggest_row)
 
         self.cats_layout = QGridLayout()
         self.cats_layout.setSpacing(6)
@@ -87,6 +98,40 @@ class ErrorCauseDialog(QDialog):
                 row += 1
         if self._categories:
             self._select_cat(self._categories[0]["category_id"])
+        self._load_suggestion()
+
+    def _load_suggestion(self):
+        """Предложено backend'ом (§18) — применяется вручную кнопкой."""
+        self._suggested = None
+        self.suggest_label.setText("")
+        self.suggest_btn.setVisible(False)
+        if not self.case_id:
+            return
+        try:
+            import category_suggestion_service as sug
+            res = sug.suggest_annotations(self.project_path, self.case_id)
+            cat = (res or {}).get("category")
+        except Exception:
+            cat = None
+        if not cat or not cat.get("category_id"):
+            return
+        self._suggested = cat
+        self.suggest_label.setText(
+            f"💡 Предложено: {cat.get('category_name', '')} → "
+            f"{cat.get('subcategory_name', '')} "
+            f"({cat.get('support', 0)} похожих)")
+        self.suggest_btn.setVisible(True)
+
+    def _apply_suggestion(self):
+        cat = getattr(self, "_suggested", None) or {}
+        if not cat.get("category_id"):
+            return
+        self._select_cat(cat["category_id"])
+        if cat.get("subcategory_id"):
+            for i in range(self.sub_combo.count()):
+                if self.sub_combo.itemData(i) == cat["subcategory_id"]:
+                    self.sub_combo.setCurrentIndex(i)
+                    break
 
     @staticmethod
     def _style_cat_btn(btn, selected: bool) -> None:

@@ -87,6 +87,10 @@ class RegressionDialog(QDialog):
         btn_export = FPushButton("📤 Экспорт регрессий")
         btn_export.clicked.connect(self._export)
         filt.addWidget(btn_export)
+        btn_bug = FPushButton("🐞 Создать баг")
+        btn_bug.setToolTip("Баг из выбранной строки — контекст подставится сам")
+        btn_bug.clicked.connect(self._create_bug)
+        filt.addWidget(btn_bug)
         layout.addLayout(filt)
 
         self.table = QTableWidget()
@@ -225,3 +229,34 @@ class RegressionDialog(QDialog):
             notify(self, "error", "Ошибка", str(e))
             return
         notify(self, "success", "Экспорт", f"Сохранено:\n{out}")
+
+    def _create_bug(self):
+        """Баг из выбранной строки регрессии — без ручного копирования (§34)."""
+        if not self._reg_id:
+            notify(self, "warning", "Внимание", "Сначала запусти сравнение")
+            return
+        item = self.table.currentItem()
+        if item is None:
+            notify(self, "warning", "Внимание", "Выбери строку в таблице")
+            return
+        # Строка таблицы 1-в-1 соответствует выдаче с текущими фильтрами.
+        try:
+            rows = rg.list_regression_results(
+                self.project_path, self._reg_id,
+                result=self.result_combo.currentData(),
+                severity=self.sev_combo.currentData())
+            row = rows[item.row()] if 0 <= item.row() < len(rows) else None
+        except Exception as e:
+            notify(self, "warning", "Ошибка", str(e))
+            return
+        if not row:
+            return
+        try:
+            prefill = rg.bug_prefill(self.project_path, self._reg_id,
+                                     row["stable_key"])
+        except ValueError as e:
+            notify(self, "warning", "Ошибка", str(e))
+            return
+        from bug_report_dialog import BugReportDialog
+        dlg = BugReportDialog(self.project_path, prefill, None, self)
+        dlg.exec()

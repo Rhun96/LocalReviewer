@@ -309,6 +309,36 @@ class ReviewScreen(BaseScreen):
         # Ctrl+Z — отмена одиночного действия; в полях ввода работает
         # нативный undo текста (guarded пропускает), вне полей — наш.
         _add("Ctrl+Z", self.undo_single)
+        # §26: рабочие хоткеи, если не заняты статусами профиля.
+        used = {(s.get("hotkey") or "").strip().upper() for s in statuses}
+        if "B" not in used:
+            _add("B", self.open_bug_report)
+        if "H" not in used:
+            _add("H", self.open_history)
+        if "S" not in used:
+            _add("S", self.open_similar)
+        _add("Ctrl+A", self.on_bulk_select_all)
+        _add("Ctrl+Shift+A", self.on_bulk_clear)
+        sc_save = QShortcut(QKeySequence("Ctrl+Return"), self)
+        sc_save.setContext(Qt.ShortcutContext.WindowShortcut)
+        sc_save.activated.connect(self.save_marks_hotkey)
+        self._shortcuts.append(sc_save)
+
+    def save_marks_hotkey(self):
+        """Ctrl+Enter: сохранить разметку (черновик комментария). Везде."""
+        if not self.current_case_id:
+            return
+        self.save_comment(silent=True)
+        try:
+            self.save_indicator.setText("💾 Сохранено (Ctrl+Enter)")
+        except Exception:
+            pass
+
+    def open_history(self):
+        """Переход к истории (H)."""
+        mw = getattr(getattr(self, "parent_window", None), "main_window", None)
+        if mw is not None and hasattr(mw, "show_screen"):
+            mw.show_screen("history")
 
     def init_ui(self):
         main_layout = QVBoxLayout()
@@ -561,6 +591,26 @@ class ReviewScreen(BaseScreen):
         self.btn_similar.setToolTip("Похожие кейсы (TF-IDF) — только контекст")
         self.btn_similar.clicked.connect(self.open_similar)
         tags_row.addWidget(self.btn_similar)
+        self.btn_bug = FPushButton("🐞 Баг")
+        self.btn_bug.setMinimumHeight(30)
+        self.btn_bug.setToolTip("Создать Bug Report из кейса")
+        self.btn_bug.clicked.connect(self.open_bug_report)
+        tags_row.addWidget(self.btn_bug)
+        self.btn_quick_bug = FPushButton("⚡ Быстрый баг")
+        self.btn_quick_bug.setMinimumHeight(30)
+        self.btn_quick_bug.setToolTip("Быстрый баг: только заголовок")
+        self.btn_quick_bug.clicked.connect(self.open_quick_bug)
+        tags_row.addWidget(self.btn_quick_bug)
+        self.btn_case_bugs = FPushButton("🐞 Баги (0)")
+        self.btn_case_bugs.setMinimumHeight(30)
+        self.btn_case_bugs.setToolTip("Баги текущего кейса — клик открывает")
+        self.btn_case_bugs.clicked.connect(self.open_case_bugs)
+        tags_row.addWidget(self.btn_case_bugs)
+        self.btn_context = FPushButton("📤 Контекст")
+        self.btn_context.setMinimumHeight(30)
+        self.btn_context.setToolTip("Контекст кейса в буфер (Markdown/Plain)")
+        self.btn_context.clicked.connect(self.copy_case_context)
+        tags_row.addWidget(self.btn_context)
         layout.addLayout(tags_row)
         self.tags_group = QGroupBox("🏷️ Теги")
         self.tags_layout = QGridLayout()
@@ -737,8 +787,11 @@ class ReviewScreen(BaseScreen):
         self.column_filter_combo.blockSignals(True)
         self.column_filter_combo.clear()
         self.column_filter_combo.addItem("Фильтр по столбцу...", None)
+        from ui_compat import add_elided_item as _addc, bound_combo_popup as _boundc
         for col in self.available_columns:
-            self.column_filter_combo.addItem(col, col)
+            _addc(self.column_filter_combo, col, col)
+        _boundc(self.column_filter_combo)
+        _boundc(self.value_filter_combo)
         self.column_filter_combo.blockSignals(False)
 
     def open_column_selector(self):
@@ -834,8 +887,9 @@ class ReviewScreen(BaseScreen):
                             except (ValueError, TypeError):
                                 continue
                         values = sorted(values)[:100]
+            from ui_compat import add_elided_item as _addv
             for value in values:
-                self.value_filter_combo.addItem(str(value), str(value))
+                _addv(self.value_filter_combo, str(value), str(value))
         except Exception as e:
             logger.warning("column filter values failed: %s", e)
             notify(self, "warning", "Фильтр по столбцу",
@@ -1901,6 +1955,12 @@ class ReviewScreen(BaseScreen):
             text += f" | ⚠ {err['category_name']}{sub} [{sev}]"
         self.info_label.setText(text)
         self.update_finish_button()
+        try:
+            from bug_report_service import bugs_for_case
+            n = len(bugs_for_case(self.project_path, self.current_case_id))
+            self.btn_case_bugs.setText(f"🐞 Баги ({n})")
+        except Exception:
+            pass
 
     def _review_scope(self):
         """Скоуп ревью: файл из фильтров или весь проект.
@@ -2168,6 +2228,94 @@ class ReviewScreen(BaseScreen):
         dlg = SimilarDialog(self.project_path, self.current_case_id, self)
         if dlg.exec() == QDialog.DialogCode.Accepted and dlg.result_case_id:
             self._jump_to_case(dlg.result_case_id)
+
+    def open_bug_report(self):
+        """Полный Bug Report из текущего кейса (контекст подставляется)."""
+        if not self.current_case_id:
+            return
+        try:
+            from bug_report_service import build_from_case
+            prefill = build_from_case(self.project_path, self.current_case_id)
+        except ValueError as e:
+            notify(self, "warning", "Ошибка", str(e))
+            return
+        from bug_report_dialog import BugReportDialog
+        dlg = BugReportDialog(self.project_path, prefill, None, self)
+        if dlg.exec() == QDialog.DialogCode.Accepted and dlg.result_id:
+            notify(self, "success", "Баг", f"Создан баг #{dlg.result_id}")
+
+    def open_quick_bug(self):
+        """Быстрый баг: только заголовок, остальное — из кейса."""
+        if not self.current_case_id:
+            return
+        try:
+            from bug_report_service import build_from_case
+            prefill = build_from_case(self.project_path, self.current_case_id)
+        except ValueError as e:
+            notify(self, "warning", "Ошибка", str(e))
+            return
+        from bug_report_dialog import QuickBugDialog
+        dlg = QuickBugDialog(self.project_path, prefill, self)
+        if dlg.exec() == QDialog.DialogCode.Accepted and dlg.result_id:
+            notify(self, "success", "Баг", f"Создан баг #{dlg.result_id}")
+            self.update_info_label()
+
+    def open_case_bugs(self):
+        """Баги кейса (ID/status/severity/title) — клик открывает баг."""
+        if not self.current_case_id:
+            return
+        try:
+            from bug_report_service import bugs_for_case
+            items = bugs_for_case(self.project_path, self.current_case_id)
+        except Exception as e:
+            self.show_error("Не удалось загрузить баги", e)
+            return
+        if not items:
+            notify(self, "warning", "Баги", "У кейса пока нет багов — создай 🐞")
+            return
+        menu = QMenu(self)
+        for b in items:
+            action = menu.addAction(
+                f"#{b['bug_id']} [{b['status']}/{b['severity']}] {b['title'][:60]}")
+            action.triggered.connect(
+                lambda _c, bid=b["bug_id"]: self._open_bug_dialog(bid))
+        anchor = getattr(self, "btn_case_bugs", None) or self
+        try:
+            menu.exec(anchor.mapToGlobal(anchor.rect().bottomLeft()))
+        except Exception:
+            menu.exec()
+
+    def _open_bug_dialog(self, bug_id: int):
+        from bug_report_dialog import BugReportDialog
+        dlg = BugReportDialog(self.project_path, None, bug_id, self)
+        dlg.exec()
+        self.update_info_label()
+
+    def copy_case_context(self):
+        """Контекст кейса в буфер без создания бага (§22)."""
+        if not self.current_case_id:
+            return
+        menu = QMenu(self)
+        for fmt, label in (("markdown", "Markdown"), ("plain", "Plain Text")):
+            action = menu.addAction(label)
+            action.triggered.connect(
+                lambda _c, f=fmt, name=label: self._do_copy_context(f, name))
+        anchor = getattr(self, "btn_context", None) or self
+        try:
+            menu.exec(anchor.mapToGlobal(anchor.rect().bottomLeft()))
+        except Exception:
+            menu.exec()
+
+    def _do_copy_context(self, fmt: str, label: str):
+        from PySide6.QtGui import QGuiApplication
+        import bug_export_service as bex
+        try:
+            text = bex.render_case(self.project_path, self.current_case_id, fmt)
+        except ValueError as e:
+            notify(self, "warning", "Ошибка", str(e))
+            return
+        QGuiApplication.clipboard().setText(text)
+        notify(self, "success", "Скопировано", f"Контекст ({label}) — в буфере")
 
     def open_duplicates(self):
         """Потенциальные дубли в области текущего фильтра/файла."""
@@ -2503,7 +2651,8 @@ class ReviewScreen(BaseScreen):
                    "или исправь таксономию в настройках.")
             return False
         try:
-            dlg = ErrorCauseDialog(self.project_path, self)
+            dlg = ErrorCauseDialog(self.project_path, self,
+                                   case_id=self.current_case_id)
             if dlg.exec() == QDialog.DialogCode.Accepted and dlg.result:
                 cat_id, sub_id, sev = dlg.result
                 set_case_error(self.project_path, self.current_case_id,

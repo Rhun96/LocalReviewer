@@ -258,3 +258,37 @@ def find_duplicates(project_path: str, file_id: int | None = None,
     pairs.sort(key=lambda p: -p["score"])
     return {"total": len(pairs), "pairs": pairs[:limit],
             "truncated": len(pairs) > limit}
+
+
+class SimilarityBackend:
+    """Интерфейс движка схожести (ТЗ V2 §19, §33)."""
+    name = "base"
+
+    def find_similar(self, project_path: str, case_id: int, **kwargs) -> dict:
+        raise NotImplementedError
+
+    def find_duplicates(self, project_path: str, **kwargs) -> dict:
+        raise NotImplementedError
+
+
+class TfidfSimilarityBackend(SimilarityBackend):
+    """Локальный TF-IDF backend (по умолчанию, без LLM/embeddings)."""
+    name = "tfidf"
+
+    def find_similar(self, project_path: str, case_id: int, **kwargs) -> dict:
+        return find_similar(project_path, case_id, **kwargs)
+
+    def find_duplicates(self, project_path: str, **kwargs) -> dict:
+        return find_duplicates(project_path, **kwargs)
+
+
+# Будущий EmbeddingSimilarityBackend регистрируется здесь же;
+# UI ходит через get_backend() и не зависит от реализации.
+BACKENDS = {"tfidf": TfidfSimilarityBackend()}
+
+
+def get_backend(name: str = "tfidf") -> SimilarityBackend:
+    be = BACKENDS.get(name)
+    if be is None:
+        raise ValueError(f"Неизвестный backend: {name!r}")
+    return be

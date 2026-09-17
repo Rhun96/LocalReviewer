@@ -90,9 +90,9 @@ def filter_from(filters: dict):
 
     search_text = ((filters or {}).get("search_text") or "").strip()
     if search_text:
-        esc = _escape_like(search_text)
-        conditions.append("(c.primary_text LIKE ? ESCAPE '\\' "
-                          "OR c.response_text LIKE ? ESCAPE '\\')")
+        esc = _escape_like(search_text.lower())
+        conditions.append("(lower_ru(c.primary_text) LIKE ? ESCAPE '\\' "
+                           "OR lower_ru(c.response_text) LIKE ? ESCAPE '\\')")
         params.extend([f"%{esc}%", f"%{esc}%"])
 
     return extra_joins, conditions, params
