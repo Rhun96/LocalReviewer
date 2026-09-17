@@ -23,11 +23,13 @@ def get_overall_report(project_path: str, file_id=None) -> dict:
         if file_id:
             file_condition = " WHERE c.file_id = ?"
             params.append(file_id)
-        cursor.execute(f"SELECT COUNT(*) as total FROM cases c{file_condition}", params)
+        cursor.execute(f"SELECT COUNT(*) as total FROM cases c "
+                       f"JOIN files f ON f.file_id = c.file_id{file_condition}", params)
         total = cursor.fetchone()["total"]
         cursor.execute(f"""
             SELECT COALESCE(a.status, 'unreviewed') as status, COUNT(*) as count
             FROM cases c
+            JOIN files f ON f.file_id = c.file_id
             LEFT JOIN annotations a ON c.case_id = a.case_id
             {file_condition}
             GROUP BY COALESCE(a.status, 'unreviewed')
@@ -83,6 +85,10 @@ def get_tags_report(project_path: str, file_id=None) -> list:
         if file_id:
             file_condition = " AND ct.case_id IN (SELECT case_id FROM cases WHERE file_id = ?)"
             params.append(file_id)
+        else:
+            # Без скоупа файла сироты удалённых файлов не считаются.
+            file_condition = (" AND ct.case_id IN (SELECT c.case_id FROM cases c "
+                              "JOIN files f ON f.file_id = c.file_id)")
         cursor.execute(f"""
             SELECT
                 t.tag_id,
@@ -106,6 +112,10 @@ def get_checks_report(project_path: str, file_id=None) -> list:
         if file_id:
             file_condition = " WHERE cc.case_id IN (SELECT case_id FROM cases WHERE file_id = ?)"
             params.append(file_id)
+        else:
+            # Без скоупа файла сироты удалённых файлов не считаются.
+            file_condition = (" WHERE cc.case_id IN (SELECT c.case_id FROM cases c "
+                              "JOIN files f ON f.file_id = c.file_id)")
         cursor.execute(f"""
             SELECT
                 cc.check_code as check_code,

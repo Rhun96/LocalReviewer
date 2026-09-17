@@ -172,10 +172,13 @@ class ProjectScreen(BaseScreen):
                 cursor.execute("SELECT file_id, file_name, row_count FROM files "
                                "ORDER BY imported_at DESC")
                 files = cursor.fetchall()
-                cursor.execute("SELECT COUNT(*) AS total FROM cases")
+                cursor.execute("SELECT COUNT(*) AS total FROM cases c "
+                               "JOIN files f ON f.file_id = c.file_id")
                 total = cursor.fetchone()["total"]
-                cursor.execute("SELECT COUNT(*) AS reviewed FROM annotations "
-                               "WHERE status != 'unreviewed'")
+                cursor.execute("SELECT COUNT(*) AS reviewed FROM annotations a "
+                               "JOIN cases c ON c.case_id = a.case_id "
+                               "JOIN files f ON f.file_id = c.file_id "
+                               "WHERE a.status != 'unreviewed'")
                 reviewed = cursor.fetchone()["reviewed"]
             pct = int(reviewed / total * 100) if total else 0
             self.info_label.setText(
@@ -273,6 +276,9 @@ class ProjectScreen(BaseScreen):
         try:
             with db(self.project_path) as conn:
                 cursor = conn.cursor()
+                # Кейсы — явно до файла: safety net на случай выключенного FK,
+                # иначе остаются сироты (невидимы в ревью, но портят счётчики).
+                cursor.execute("DELETE FROM cases WHERE file_id = ?", (file_id,))
                 cursor.execute("DELETE FROM files WHERE file_id = ?", (file_id,))
                 if cursor.rowcount == 0:
                     raise RuntimeError("Файл уже удалён")

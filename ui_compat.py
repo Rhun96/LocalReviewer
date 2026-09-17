@@ -240,7 +240,7 @@ def apply_theme(mode: str = "system") -> str:
             # приложение при переключении темы (проверено падением).
             # setStyleSheet сам перечитывает стили и перекрашивает окна.
             app.setStyleSheet(FLUENT_BASE_DARK if dark else FLUENT_BASE_LIGHT)
-            _apply_palette(app, dark)
+            _push_palette(app, _apply_palette(app, dark))
     except Exception as e:
         logger.warning("apply_theme failed: %s", e)
     return mode
@@ -275,6 +275,26 @@ def _apply_palette(app, dark: bool) -> None:
     except Exception:
         pass
     app.setPalette(pal)
+    return pal
+
+
+def _push_palette(app, pal) -> None:
+    """Copy the app palette into every widget (fixes live theme switch).
+
+    Plain widgets cache their palette at creation: after app.setPalette()
+    they keep painting with the previous theme (dark slabs in light theme
+    and vice versa). QSS rules still win where they match, and fresh
+    windows inherit exactly these values, so converging to them is safe.
+    """
+    try:
+        widgets = list(app.allWidgets())
+    except Exception:
+        return
+    for w in widgets:
+        try:
+            w.setPalette(pal)
+        except Exception:
+            continue
 
 
 def elide_middle(text: str, limit: int = 45) -> str:

@@ -185,11 +185,14 @@ class Sidebar(QWidget):
             ph = ",".join(["?"] * len(unrev))
             with db(self.project_path) as conn:
                 cursor = conn.cursor()
-                cursor.execute("SELECT COUNT(*) as total FROM cases")
+                cursor.execute("SELECT COUNT(*) as total FROM cases c "
+                               "JOIN files f ON f.file_id = c.file_id")
                 total = cursor.fetchone()['total']
                 cursor.execute(f"""
-                    SELECT COUNT(*) as reviewed FROM annotations
-                    WHERE COALESCE(status, 'unreviewed') NOT IN ({ph})
+                    SELECT COUNT(*) as reviewed FROM annotations a
+                    JOIN cases c ON c.case_id = a.case_id
+                    JOIN files f ON f.file_id = c.file_id
+                    WHERE COALESCE(a.status, 'unreviewed') NOT IN ({ph})
                 """, unrev)
                 reviewed = cursor.fetchone()['reviewed']
             pct = int(reviewed / total * 100) if total > 0 else 0

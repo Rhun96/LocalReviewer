@@ -153,21 +153,28 @@ def queue_stats(project_path: str, file_id=None) -> dict:
         fcond_ann = "AND c.file_id = ?" if file_id else ""
         fcond_cc = "AND c.file_id = ?" if file_id else ""
         p = [file_id] if file_id else []
+        # JOIN files: осиротевшие кейсы удалённых файлов невидимы в ревью,
+        # поэтому в статистику не входят (иначе тотал врёт).
         total = cur.execute(
-            f"SELECT COUNT(*) AS c FROM cases c {fcond_cases}", p).fetchone()["c"]
+            "SELECT COUNT(*) AS c FROM cases c "
+            "JOIN files f ON f.file_id = c.file_id "
+            f"{fcond_cases}", p).fetchone()["c"]
         reviewed = cur.execute(f"""
             SELECT COUNT(*) AS c FROM annotations a
             JOIN cases c ON c.case_id = a.case_id
+            JOIN files f ON f.file_id = c.file_id
             WHERE COALESCE(a.status, 'unreviewed') NOT IN ({ph}) {fcond_ann}
         """, (*unrev_codes, *p)).fetchone()["c"]
         bad = cur.execute(f"""
             SELECT COUNT(*) AS c FROM annotations a
             JOIN cases c ON c.case_id = a.case_id
+            JOIN files f ON f.file_id = c.file_id
             WHERE COALESCE(a.status, 'unreviewed') IN ({bad_ph}) {fcond_ann}
         """, (*bad_codes, *p)).fetchone()["c"]
         problematic = cur.execute(f"""
             SELECT COUNT(DISTINCT cc.case_id) AS c FROM case_checks cc
             JOIN cases c ON c.case_id = cc.case_id
+            JOIN files f ON f.file_id = c.file_id
             WHERE 1=1 {fcond_cc}
         """, p).fetchone()["c"]
     return {"total": total, "reviewed": reviewed, "problematic": problematic,

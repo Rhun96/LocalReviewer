@@ -13,7 +13,7 @@
 ![Qt](https://img.shields.io/badge/Interface-PySide6_Fluent-41CD52?logo=qt&logoColor=white)
 ![Windows](https://img.shields.io/badge/OS-Windows_10%2F11-0078D6?logo=windows&logoColor=white)
 ![SQLite](https://img.shields.io/badge/Storage-SQLite-003B57?logo=sqlite&logoColor=white)
-![Version](https://img.shields.io/badge/Version-0.4.0-0b7a34)
+![Version](https://img.shields.io/badge/Version-0.4.1-0b7a34)
 
 ---
 
@@ -56,6 +56,12 @@
 - 🧪 Регрессия: baseline (frozen-версия или прогон) vs кандидат, матрица
   Good→Bad, gate ✅ PASS / ❌ FAIL, фильтры, экспорт `regressions.xlsx`
 
+### Баги и обмен разметкой (V2)
+- Bug Report из кейса и из регрессии, связь баг-кейс, Copy Jira/Markdown/Plain
+- History Search + Visual Diff ответов
+- Annotation IO: JSONL, Merge/Update/Preview; экспорт контекста кейса (MD/Plain)
+- Подсказки категорий и похожих, вкладка «Личное»
+
 ### 🤖 Автопроверки (Rules Engine)
 - Пустой/короткий/длинный текст, URL, email, телефоны, дубли, CAPS, повторы
   слов и символов, серии `?!`, длинные предложения, служебный мусор (`SYSTEM:`),
@@ -70,7 +76,7 @@
 - Экспорт результатов и отчётов в `.xlsx` (защита от formula injection)
 
 ### 💾 Надёжность
-- Хранение в SQLite — одна папка проекта на диске, версионированные миграции (v13)
+- Хранение в SQLite — одна папка проекта на диске, версионированные миграции (v14)
   с autobackup и аккуратным слиянием дублей старых импортов
 - Резервные копии через SQLite backup API с проверкой целостности и ротацией
 - История изменений по каждому кейсу, включая массовые операции и вердикты
@@ -128,13 +134,16 @@ python main.py
 Первое ТЗ закрыто целиком: ручное ревью (A), датасеты и прогоны (B),
 регрессия (C), TF-IDF-похожие без LLM (D).
 
+ТЗ V2 закрыто: P0 (баги, history search, diff) и P1 (JSONL, annotation IO,
+подсказки, контекст кейса, вкладка «Личное»).
+
 ```
 LocalReviewer/
 │
 ├── main.py                   # Точка входа, FluentWindow + навигация
 │
 ├── database.py               # Схема, подключение, PRAGMA, индексы
-├── migrations.py             # Миграции v1–v13 без потери данных
+├── migrations.py             # Миграции v1–v14 без потери данных
 ├── constants.py              # Статусы, роли маппинга, проверки
 ├── ui_compat.py              # Fluent/fallback слой, темы, палитра, InfoBar
 ├── ui_base.py                # Базовый класс экранов
@@ -148,7 +157,12 @@ LocalReviewer/
 ├── file_reader.py            # xlsx / ods / csv / json / jsonl
 ├── importer.py               # Запись данных в базу (батчи, дедуп, прогресс)
 │
-├── review_screen.py          # Ревью: кейс + таблица + bulk + очередь + вердикты
+├── review_screen.py          # Ревью: тонкая оболочка (миксины + init UI)
+├── review_profile.py         # Миксин: профиль, статусы, хоткеи
+├── review_case.py            # Миксин: кейс, навигация, статусы
+├── review_table.py           # Миксин: таблица, фильтры, очередь
+├── review_bulk.py            # Миксин: bulk run/recheck/undo
+├── review_verdicts.py        # Миксин: вердикты, теги, шаблоны
 ├── bulk_dialog.py            # Диалог массовой операции
 ├── bulk_operation_service.py # Массовые операции + undo без lost update
 ├── column_select_dialog.py   # Диалог выбора столбцов
@@ -166,6 +180,8 @@ LocalReviewer/
 ├── profile_dialog.py         # Редактор профилей
 ├── similarity_service.py     # TF-IDF-похожие и дубли (только stdlib)
 ├── similar_dialog.py         # Диалоги похожих и дублей
+├── category_suggestion_service.py # Подсказки категорий (только вручную)
+├── tag_service.py            # Системные и свои теги
 │
 ├── dataset_service.py        # Датасеты, полные слепки, freeze, сравнение
 ├── datasets_dialog.py        # Диалог датасетов
@@ -177,6 +193,17 @@ LocalReviewer/
 ├── regression_service.py     # Матрица регрессии, gate, экспорт
 ├── regression_dialog.py      # Baseline vs кандидат, PASS/FAIL
 │
+├── bug_report_service.py     # Баги: хранение, связь баг-кейс
+├── bug_export_service.py     # Копипаст Jira/Markdown/Plain
+├── bug_report_dialog.py      # Диалог создания бага
+├── bug_reports_screen.py     # Экран багов
+├── history_service.py        # Поиск по истории (даты/поле/diff)
+├── diff_service.py           # Visual Diff ответов
+├── annotation_io_service.py  # Импорт/экспорт разметки (JSONL)
+├── annotation_io_dialog.py   # Диалог annotation IO
+├── sheet_align_service.py    # SheetAlign: структура листов
+├── sheet_compare_dialog.py   # Диалог сравнения листов
+│
 ├── report_service.py         # Расчёт отчётов (base-агрегация, precision)
 ├── reports_screen.py         # Экран отчётов с графиками
 ├── export_service.py         # Экспорт в xlsx (+ regressions.xlsx)
@@ -186,7 +213,7 @@ LocalReviewer/
 ├── settings_screen.py        # Настройки (ревью, веса, проверки, тема)
 │
 ├── docs/USER_GUIDE.md        # Подробная инструкция пользователя
-├── tests/                    # pytest (61 тест: все подсистемы)
+├── tests/                    # pytest (88 тестов: все подсистемы)
 └── requirements.txt
 ```
 

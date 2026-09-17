@@ -545,10 +545,6 @@ QPushButton:hover {{
 # Пер-виджетные inline-QSS приоритетнее app-level и продолжают работать.
 def _fluent_base(bg, bg_card, bg_input, text, text_dim, border, accent, accent_soft, header_bg):
     return f"""
-QWidget[screen="true"] {{
-    background-color: {bg};
-    color: {text};
-}}
 QDialog {{
     background-color: {bg};
     color: {text};
