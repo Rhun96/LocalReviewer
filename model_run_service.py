@@ -7,6 +7,7 @@ Absolute quality живёт в annotations.status (не дублируем); з�
 только pairwise-предпочтения A vs B (§48: не смешивать).
 """
 import hashlib
+import json
 import logging
 from database import db, utcnow
 
@@ -65,7 +66,7 @@ def list_runs(project_path: str) -> list:
             FROM model_runs r
             LEFT JOIN run_answers a ON a.run_id = r.run_id
             GROUP BY r.run_id
-            ORDER BY r.created_at DESC, r.run_id DESC
+            ORDER BY r.created_at ASC, r.run_id ASC
         """).fetchall()
         return [dict(x) for x in rows]
 
@@ -113,7 +114,8 @@ def _base_index(cursor, need_text: bool = True) -> tuple:
 
 def import_run_rows(project_path: str, run_id: int, rows: list,
                     progress_callback=None, cancel_event=None) -> dict:
-    """Сохраняет ответы прогона. Строка: {answer, source_id?, prompt?}.
+    """Сохраняет ответы прогона. Строка: {answer, source_id?, prompt?,
+    product?, metadata?}.
 
     Возвращает {total, matched, new, dups, no_key}. dups — повторы ключа
     внутри файла (взят первый). no_key — строки без ID и без промпта
@@ -138,12 +140,13 @@ def import_run_rows(project_path: str, run_id: int, rows: list,
             nonlocal matched, new
             if not batch:
                 return
-            for stable_key, case_id, answer in batch:
+            for stable_key, case_id, answer, product, meta, prompt in batch:
                 cur.execute("""
                     INSERT OR IGNORE INTO run_answers
-                        (run_id, stable_key, case_id, answer_text, created_at)
-                    VALUES (?, ?, ?, ?, ?)
-                """, (run_id, stable_key, case_id, answer, now))
+                        (run_id, stable_key, case_id, answer_text,
+                         product, metadata_json, prompt_text, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, (run_id, stable_key, case_id, answer, product, meta, prompt, now))
                 if cur.rowcount > 0:
                     if case_id is not None:
                         matched += 1
@@ -160,6 +163,17 @@ def import_run_rows(project_path: str, run_id: int, rows: list,
             answer = str(answer) if answer not in (None, "") else None
             sid = str(row.get("source_id") or "").strip()
             prompt = str(row.get("prompt") or "")
+            product = str(row.get("product") or "").strip()
+            meta = row.get("metadata")
+            meta_json = None
+            if isinstance(meta, dict) and meta:
+                clean = {str(k): str(v) for k, v in meta.items()
+                         if str(v or "").strip()}
+                if clean:
+                    try:
+                        meta_json = json.dumps(clean, ensure_ascii=False)
+                    except (TypeError, ValueError):
+                        meta_json = None
             if sid:
                 key = "src:" + sid
             elif _norm(prompt):
@@ -178,7 +192,7 @@ def import_run_rows(project_path: str, run_id: int, rows: list,
                 cands = by_text.get(_norm(prompt), [])
                 if len(cands) == 1:
                     case_id = cands[0]
-            batch.append((key, case_id, answer))
+            batch.append((key, case_id, answer, product, meta_json, prompt or None))
             if len(batch) >= 500:
                 flush()
             if progress_callback and (i + 1) % 500 == 0:
@@ -198,6 +212,7 @@ def list_answers(project_path: str, run_id: int) -> list:
     with db(project_path) as conn:
         rows = conn.cursor().execute("""
             SELECT a.stable_key, a.case_id, a.answer_text,
+                   a.product, a.metadata_json, a.prompt_text,
                    c.source_id, c.primary_text,
                    COALESCE(an.status, 'unreviewed') AS case_status
             FROM run_answers a
@@ -207,6 +222,17 @@ def list_answers(project_path: str, run_id: int) -> list:
             ORDER BY a.stable_key
         """, (run_id,)).fetchall()
         return [dict(r) for r in rows]
+
+
+def _case_product(metadata_json: str | None) -> str:
+    """Продукт кейса из metadata (для показа в сравнении)."""
+    try:
+        meta = json.loads(metadata_json or "") or {}
+    except (TypeError, ValueError):
+        return ""
+    if not isinstance(meta, dict):
+        return ""
+    return str(meta.get("product") or "").strip()
 
 
 def compare_runs(project_path: str, run_a: int, run_b: int) -> dict:
@@ -220,12 +246,14 @@ def compare_runs(project_path: str, run_a: int, run_b: int) -> dict:
             if not cur.execute("SELECT 1 FROM model_runs WHERE run_id=?",
                                (rid,)).fetchone():
                 raise ValueError(f"Прогон #{rid} не найден")
-        rows_a = {r["stable_key"]: r for r in cur.execute(
-            "SELECT stable_key, case_id, answer_text FROM run_answers WHERE run_id=?",
-            (run_a,)).fetchall()}
-        rows_b = {r["stable_key"]: r for r in cur.execute(
-            "SELECT stable_key, case_id, answer_text FROM run_answers WHERE run_id=?",
-            (run_b,)).fetchall()}
+            rows_a = {r["stable_key"]: dict(r) for r in cur.execute(
+                "SELECT stable_key, case_id, answer_text, product, prompt_text"
+                " FROM run_answers WHERE run_id=?",
+                (run_a,)).fetchall()}
+            rows_b = {r["stable_key"]: dict(r) for r in cur.execute(
+                "SELECT stable_key, case_id, answer_text, product, prompt_text"
+                " FROM run_answers WHERE run_id=?",
+                (run_b,)).fetchall()}
         prefs = {}
         for r in cur.execute("""
                 SELECT stable_key, verdict, rank_a, rank_b, comment
@@ -239,6 +267,7 @@ def compare_runs(project_path: str, run_a: int, run_b: int) -> dict:
             ph = ",".join(["?"] * len(all_case_ids))
             for r in cur.execute(f"""
                     SELECT c.case_id, c.source_id, c.primary_text,
+                           c.metadata_json,
                            COALESCE(an.status, 'unreviewed') AS case_status
                     FROM cases c
                     LEFT JOIN annotations an ON an.case_id = c.case_id
@@ -271,6 +300,11 @@ def compare_runs(project_path: str, run_a: int, run_b: int) -> dict:
             "source_id": info.get("source_id"),
             "primary_text": info.get("primary_text"),
             "case_status": info.get("case_status", "unreviewed"),
+            "product_a": ((ra or {}).get("product") or "").strip(),
+            "product_b": ((rb or {}).get("product") or "").strip(),
+            "prompt_a": (ra or {}).get("prompt_text") or "",
+            "prompt_b": (rb or {}).get("prompt_text") or "",
+            "product_case": _case_product(info.get("metadata_json")),
             "answer_a": ra["answer_text"] if ra else None,
             "answer_b": rb["answer_text"] if rb else None,
             "verdict": pref.get("verdict", "unknown") if pref else "unknown",

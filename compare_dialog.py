@@ -170,10 +170,23 @@ class CompareDialog(QDialog):
             return
         name_a = self._names.get(self.run_a, "A")
         name_b = self._names.get(self.run_b, "B")
-        prompt = row.get("primary_text") or ""
+        prompt = (row.get("primary_text") or row.get("prompt_a")
+                  or row.get("prompt_b") or "")
+        pa = (row.get("product_a") or "").strip()
+        pb = (row.get("product_b") or "").strip()
+        if pa and pa == pb:
+            prod = pa
+        else:
+            parts = []
+            if pa:
+                parts.append(f"A: {pa}")
+            if pb:
+                parts.append(f"B: {pb}")
+            prod = " / ".join(parts) or (row.get("product_case") or "").strip()
         self.prompt_label.setText(
             f"📌 {prompt[:400]}{'…' if len(prompt) > 400 else ''}"
-            f"\n🆔 {row.get('source_id') or row['stable_key']}")
+            f"\n🆔 {row.get('source_id') or row['stable_key']}"
+            + (f"\n🏷️ {prod}" if prod else ""))
         html_a, html_b = _diff_html(row["answer_a"], row["answer_b"])
         self.pane_a.setHtml(f"<b>[{name_a}]</b><br><br>{html_a}")
         self.pane_b.setHtml(f"<b>[{name_b}]</b><br><br>{html_b}")

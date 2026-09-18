@@ -89,17 +89,20 @@ class RunReviewDialog(QDialog):
             item = self.status_layout.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
+        self.status_buttons = {}
         for i, spec in enumerate(specs):
             btn = FPushButton(spec.get("name", spec["code"]))
+            btn.setCheckable(True)
             btn.setMinimumHeight(32)
             btn.setSizePolicy(QSizePolicy.Policy.Expanding,
                               QSizePolicy.Policy.Fixed)
             btn.clicked.connect(lambda _c, s=spec["code"]: self._set_status(s))
+            self.status_buttons[spec["code"]] = btn
             self.status_layout.addWidget(btn, i // 3, i % 3)
         self.keys_list.clear()
         for row in self._rows:
             st = row.get("review_status") or "unreviewed"
-            mark = "✅" if st != "unreviewed" else "·"
+            mark = self.EMOJI.get(st, "✅" if st != "unreviewed" else "·")
             label = row.get("source_id") or row["stable_key"]
             if len(label) > 28:
                 label = label[:28] + "…"
@@ -128,12 +131,18 @@ class RunReviewDialog(QDialog):
         row = self._current()
         if not row:
             return
-        prompt = row.get("primary_text") or ""
+        prompt = row.get("primary_text") or row.get("prompt_text") or ""
         self.prompt_label.setText(
             f"📌 {prompt[:400]}{'…' if len(prompt) > 400 else ''}"
             f"\n🆔 {row.get('source_id') or row['stable_key']}")
         self.answer_pane.setPlainText(row.get("answer_text") or "(пусто)")
         self.comment_edit.setPlainText(row.get("review_comment") or "")
+        cur_st = row.get("review_status") or "unreviewed"
+        for code, btn in getattr(self, "status_buttons", {}).items():
+            try:
+                btn.setChecked(code == cur_st)
+            except Exception:
+                pass
 
     def _set_status(self, status: str):
         row = self._current()
@@ -150,7 +159,9 @@ class RunReviewDialog(QDialog):
         row["review_comment"] = comment
         item = self.keys_list.item(self._idx)
         if item:
-            item.setText("✅ " + item.text()[2:])
+            rest = item.text().split(" ", 1)
+            rest = rest[1] if len(rest) > 1 else item.text()
+            item.setText(f"{self.EMOJI.get(status, '✅')} {rest}")
         self._update_title()
         self._next()
 

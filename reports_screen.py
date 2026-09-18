@@ -5,11 +5,13 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QPixmap
-from report_service import get_overall_report, get_files_report, get_tags_report, get_checks_report
+from report_service import (get_files_list, get_overall_report, get_files_report,
+                            get_tags_report, get_checks_report)
 from export_service import export_results_to_xlsx, export_report_to_xlsx
 from datetime import datetime
 from ui_base import BaseScreen
-from ui_compat import FPushButton, FTable, clear_in_fluent, effective_theme, notify
+from ui_compat import (FComboBox, FPushButton, FTable, clear_in_fluent,
+                      effective_theme, notify)
 from workers import run_in_background
 import matplotlib
 matplotlib.use('Agg')
@@ -36,7 +38,9 @@ class ReportsScreen(BaseScreen):
         super().__init__(parent)
         self.project_path = project_path
         self.parent_window = parent
+        self.report_file_id = None
         self.init_ui()
+        self._reload_scope()
         self.load_reports()
 
     def init_ui(self):
@@ -49,6 +53,14 @@ class ReportsScreen(BaseScreen):
         title.setObjectName("title")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(title)
+
+        # Охват отчётов: весь проект или один файл
+        scope_row = QHBoxLayout()
+        scope_row.addWidget(QLabel("Охват:"))
+        self.scope_combo = FComboBox()
+        self.scope_combo.currentIndexChanged.connect(self._on_scope_changed)
+        scope_row.addWidget(self.scope_combo, 1)
+        layout.addLayout(scope_row)
 
         # Вкладки
         self.tabs = QTabWidget()
@@ -267,6 +279,43 @@ class ReportsScreen(BaseScreen):
         widget.setLayout(layout)
         return widget
 
+    def _reload_scope(self):
+        """Список файлов в комбо охвата; выбор сохраняем, если файл жив."""
+        try:
+            current = self.scope_combo.currentData()
+        except Exception:
+            current = None
+        try:
+            self.scope_combo.blockSignals(True)
+            self.scope_combo.clear()
+            self.scope_combo.addItem("Весь проект", None)
+            ids = set()
+            for f in get_files_list(self.project_path):
+                self.scope_combo.addItem(f["file_name"], f["file_id"])
+                ids.add(f["file_id"])
+            if current in ids:
+                for i in range(self.scope_combo.count()):
+                    if self.scope_combo.itemData(i) == current:
+                        self.scope_combo.setCurrentIndex(i)
+                        break
+                self.report_file_id = current
+            else:
+                self.report_file_id = None
+        except Exception:
+            self.report_file_id = None
+        finally:
+            try:
+                self.scope_combo.blockSignals(False)
+            except Exception:
+                pass
+
+    def _on_scope_changed(self):
+        try:
+            self.report_file_id = self.scope_combo.currentData()
+        except Exception:
+            self.report_file_id = None
+        self.load_reports()
+
     def load_reports(self):
         try:
             self.load_overall_report()
@@ -279,10 +328,11 @@ class ReportsScreen(BaseScreen):
             self.show_error("Не удалось загрузить отчёты", e)
 
     def refresh(self):
+        self._reload_scope()
         self.load_reports()
 
     def load_overall_report(self):
-        report = get_overall_report(self.project_path)
+        report = get_overall_report(self.project_path, self.report_file_id)
         self.overall_table.clear()
         self.overall_table.setColumnCount(2)
         self.overall_table.setRowCount(8)
@@ -305,6 +355,8 @@ class ReportsScreen(BaseScreen):
 
     def load_files_report(self):
         files = get_files_report(self.project_path)
+        if self.report_file_id is not None:
+            files = [f for f in files if f["file_id"] == self.report_file_id]
         self.files_table.clear()
         self.files_table.setColumnCount(4)
         self.files_table.setRowCount(len(files))
@@ -320,7 +372,7 @@ class ReportsScreen(BaseScreen):
         self.files_table.resizeColumnsToContents()
 
     def load_tags_report(self):
-        tags = get_tags_report(self.project_path)
+        tags = get_tags_report(self.project_path, self.report_file_id)
         self.tags_table.clear()
         self.tags_table.setColumnCount(3)
         self.tags_table.setRowCount(len(tags))
@@ -334,7 +386,7 @@ class ReportsScreen(BaseScreen):
         self.tags_table.resizeColumnsToContents()
 
     def load_checks_report(self):
-        checks = get_checks_report(self.project_path)
+        checks = get_checks_report(self.project_path, self.report_file_id)
         self.checks_table.clear()
         self.checks_table.setColumnCount(4)
         self.checks_table.setRowCount(len(checks))
@@ -408,9 +460,9 @@ class ReportsScreen(BaseScreen):
             if item.widget():
                 item.widget().deleteLater()
 
-        report = get_overall_report(self.project_path)
+        report = get_overall_report(self.project_path, self.report_file_id)
         files = get_files_report(self.project_path)
-        tags = get_tags_report(self.project_path)
+        tags = get_tags_report(self.project_path, self.report_file_id)
 
         # График 1: Круговая диаграмма статусов
         self._create_pie_chart(report)

@@ -50,8 +50,8 @@ def list_output_reviews(project_path: str, run_id: int) -> list:
     """Разметка ответов прогона + тексты для UI."""
     with db(project_path) as conn:
         rows = conn.cursor().execute("""
-            SELECT a.stable_key, a.case_id, a.answer_text,
-                   c.source_id, c.primary_text,
+            SELECT a.stable_key, a.case_id, a.answer_text, a.prompt_text,
+                    c.source_id, c.primary_text,
                    r.status AS review_status, r.comment AS review_comment
             FROM run_answers a
             LEFT JOIN cases c ON c.case_id = a.case_id

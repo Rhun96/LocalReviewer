@@ -85,6 +85,66 @@ def test_compare_and_preferences():
         m.compare_runs(p, a, 9999)
 
 
+def test_run_answer_product_and_metadata():
+    import json as _json
+    p = _proj()
+    a = m.create_run(p, "v", "mx")
+    res = m.import_run_rows(p, a, [
+        {"source_id": "k1", "answer": "да", "product": "Авиа",
+         "metadata": {"Канал": "Чат", "пусто": "  "}},
+        {"source_id": "k2", "answer": "там"},
+    ])
+    assert res["matched"] == 2
+    ans = {x["stable_key"]: x for x in m.list_answers(p, a)}
+    assert ans["src:k1"]["product"] == "Авиа"
+    assert _json.loads(ans["src:k1"]["metadata_json"]) == {"Канал": "Чат"}
+    assert ans["src:k2"]["product"] in ("", None)
+    assert ans["src:k2"]["metadata_json"] is None
+    b = m.create_run(p, "w", "mx")
+    m.import_run_rows(p, b, [{"source_id": "k1", "answer": "да2"}])
+    row = next(r for r in m.compare_runs(p, a, b)["rows"]
+               if r["stable_key"] == "src:k1")
+    assert row["product_a"] == "Авиа" and row["product_b"] == ""
+    assert row["product_case"] == ""
+
+
+def test_run_custom_metadata_grouping():
+    from runs_screen import collect_run_metadata
+    row = {"a": "x", "b": "y", "c": " ", "d": "z"}
+    assert collect_run_metadata(row, {"a": "K", "b": "K", "c": "K"}) == {"K": "x\n\ny"}
+    assert collect_run_metadata(row, {"d": "D2"}) == {"D2": "z"}
+    assert collect_run_metadata(row, {}) == {}
+
+
+def test_run_rows_without_answer_column():
+    p = _proj()
+    a = m.create_run(p, "q-only", "mx")
+    res = m.import_run_rows(p, a, [
+        {"source_id": "k1"},
+        {"source_id": "k2", "answer": ""},
+        {"source_id": "", "prompt": "где мой заказ"},
+    ])
+    assert res["matched"] == 3 and res["no_key"] == 0
+    ans = {x["stable_key"]: x for x in m.list_answers(p, a)}
+    assert ans["src:k1"]["answer_text"] is None
+
+
+def test_runs_listed_oldest_first():
+    p = _proj()
+    a = m.create_run(p, "first", "mx")
+    b = m.create_run(p, "second", "mx")
+    assert [r["run_id"] for r in m.list_runs(p)] == [a, b]
+
+
+def test_run_answer_prompt_text_fallback():
+    p = _proj()
+    a = m.create_run(p, "v", "mx")
+    m.import_run_rows(p, a, [{"answer": "x", "prompt": "новый вопрос без кейса"}])
+    ans = m.list_answers(p, a)
+    assert len(ans) == 1 and ans[0]["case_id"] is None
+    assert ans[0]["prompt_text"] == "новый вопрос без кейса"
+
+
 def test_import_cancel_rolls_back():
     import threading
     from workers import Cancelled

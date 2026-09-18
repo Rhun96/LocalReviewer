@@ -667,3 +667,18 @@ def migrate_to_v14(cursor) -> None:
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_bug_cases_bug "
                    "ON bug_report_cases(bug_id)")
     logger.info("migrated to v14 (bug reports)")
+
+
+def migrate_to_v15(cursor) -> None:
+    """Продукт, свои категории и текст вопроса в ответах прогонов.
+
+    Только ADD COLUMN: старые ответы получают пустые значения.
+    """
+    cols = {r[1] for r in cursor.execute("PRAGMA table_info(run_answers)").fetchall()}
+    if "product" not in cols:
+        cursor.execute("ALTER TABLE run_answers ADD COLUMN product TEXT DEFAULT ''")
+    if "metadata_json" not in cols:
+        cursor.execute("ALTER TABLE run_answers ADD COLUMN metadata_json TEXT")
+    if "prompt_text" not in cols:
+        cursor.execute("ALTER TABLE run_answers ADD COLUMN prompt_text TEXT")
+    logger.info("migrated to v15 (run answer product/metadata/prompt)")

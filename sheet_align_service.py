@@ -35,6 +35,7 @@ def guess_roles(headers: list) -> dict:
     take(lambda s: any(k in s for k in ("вопрос", "запрос", "промпт", "обращени",
                                         "текст", "prompt", "question", "query",
                                         "text")), "prompt")
+    take(lambda s: "продукт" in s or s.strip() == "product", "product")
     return out
 
 

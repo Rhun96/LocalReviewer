@@ -83,7 +83,7 @@ def export_results_to_xlsx(project_path: str, output_path: str, file_id=None):
         cursor.execute(f"""
             SELECT
                 c.case_id, c.row_index, c.primary_text, c.response_text,
-                c.group_name, f.file_name,
+                c.group_name, c.metadata_json, f.file_name,
                 COALESCE(a.status, 'unreviewed') as status,
                 a.comment as review_comment, a.updated_at as reviewed_at,
                 ec.name as error_category, es.name as error_subcategory,
@@ -100,13 +100,29 @@ def export_results_to_xlsx(project_path: str, output_path: str, file_id=None):
         rows = cursor.fetchall()
         case_ids = [r["case_id"] for r in rows]
         tags_map = _tags_chunked(cursor, case_ids) if case_ids else {}
+        import json as _json
+        metas = []
+        meta_keys: list = []
+        for r in rows:
+            try:
+                meta = _json.loads(r["metadata_json"] or "") or {}
+            except (TypeError, ValueError):
+                meta = {}
+            if not isinstance(meta, dict):
+                meta = {}
+            metas.append(meta)
+            for k in meta:
+                if k != "product" and k not in meta_keys:
+                    meta_keys.append(k)
+        meta_keys.sort()
 
     wb = openpyxl.Workbook(write_only=False)
     ws = wb.active
     ws.title = "Результаты разметки"
     headers = ["№", "Файл", "Строка", "Запрос", "Ответ", "Группа",
                "Статус", "Теги", "Комментарий", "Дата проверки",
-               "Категория ошибки", "Подкатегория", "Критичность"]
+               "Категория ошибки", "Подкатегория", "Критичность",
+               "Продукт", *meta_keys]
     header_font = Font(bold=True, color="00FF41")
     header_fill = PatternFill(start_color="003300", end_color="003300", fill_type="solid")
     for col, header in enumerate(headers, 1):
@@ -130,8 +146,13 @@ def export_results_to_xlsx(project_path: str, output_path: str, file_id=None):
         ws.cell(row=row_idx, column=11, value=safe_cell(row["error_category"] or ""))
         ws.cell(row=row_idx, column=12, value=safe_cell(row["error_subcategory"] or ""))
         ws.cell(row=row_idx, column=13, value=safe_cell(row["error_severity"] or ""))
+        meta = metas[row_idx - 2]
+        ws.cell(row=row_idx, column=14, value=safe_cell(meta.get("product") or ""))
+        for ci, key in enumerate(meta_keys, 15):
+            ws.cell(row=row_idx, column=ci, value=safe_cell(meta.get(key) or ""))
 
-    for i, width in enumerate([5, 20, 8, 50, 50, 15, 12, 25, 30, 20, 20, 20, 12], 1):
+    for i, width in enumerate([5, 20, 8, 50, 50, 15, 12, 25, 30, 20, 20, 20, 12,
+                               15, *([25] * len(meta_keys))], 1):
         ws.column_dimensions[get_column_letter(i)].width = width
 
     _atomic_save(wb, out)

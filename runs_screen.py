@@ -18,6 +18,7 @@ RUN_ROLES = [
     ("answer", "Ответ модели"),
     ("source_id", "Идентификатор"),
     ("prompt", "Промпт / запрос"),
+    ("product", "Продукт"),
 ]
 
 
@@ -63,6 +64,19 @@ class RunMetaDialog(QDialog):
         self.accept()
 
 
+def collect_run_metadata(row: dict, custom_map: dict) -> dict:
+    """Метаданные ответа из custom-колонок: {колонка: категория} -> {категория: текст}.
+
+    Несколько колонок одной категории склеиваются, как в импорте кейсов.
+    """
+    grouped: dict = {}
+    for header, name in (custom_map or {}).items():
+        v = row.get(header, "")
+        if str(v or "").strip():
+            grouped.setdefault(name, []).append(str(v).strip())
+    return {k: "\n\n".join(v) for k, v in grouped.items()}
+
+
 class RunImportDialog(QDialog):
     """Импорт ответов прогона из файла: файл + маппинг колонок."""
 
@@ -77,6 +91,7 @@ class RunImportDialog(QDialog):
         self.sheet_name = None
         self.preview = None
         self.combos = {}
+        self.extra_roles = []
         self.result_rows = None
         self._init_ui()
 
@@ -95,12 +110,23 @@ class RunImportDialog(QDialog):
         self.sheet_combo.currentIndexChanged.connect(self._reload_preview)
         self.sheet_row.addWidget(self.sheet_combo)
         layout.addLayout(self.sheet_row)
-        hint = QLabel("Назначь роли колонкам: «Ответ модели» — обязательно "
-                      "(одной колонке), «Идентификатор» и «Промпт» — для "
-                      "сопоставления с кейсами. Роли подставляются сами "
+        hint = QLabel("Назначь роли колонкам: «Ответ модели» — не более "
+                      "одной колонки (можно без неё — тогда размечаются сами "
+                      "вопросы), «Идентификатор» и «Промпт» — для "
+                      "сопоставления с кейсами, «Продукт» — подпись в сравнении. "
+                      "Кнопка «+ Своя категория…» создаёт именованную категорию — "
+                      "значение уйдёт в метаданные ответа под этим именем. "
+                      "Роли подставляются сами "
                       "по названиям — проверь и жми «Импортировать».")
         hint.setWordWrap(True)
         layout.addWidget(hint)
+        custom_row = QHBoxLayout()
+        btn_custom = FPushButton("+ Своя категория…")
+        btn_custom.setToolTip("Именованная категория: значение уйдёт в метаданные ответа")
+        btn_custom.clicked.connect(self.on_add_custom_role)
+        custom_row.addWidget(btn_custom)
+        custom_row.addStretch()
+        layout.addLayout(custom_row)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         self.map_host = QWidget()
@@ -210,7 +236,7 @@ class RunImportDialog(QDialog):
             except Exception:
                 pass
             combo = FComboBox()
-            for code, name in RUN_ROLES:
+            for code, name in list(RUN_ROLES) + getattr(self, "extra_roles", []):
                 combo.addItem(name, code)
             want = guessed.get(header)
             if want:
@@ -220,6 +246,30 @@ class RunImportDialog(QDialog):
                         break
             self.map_layout.addRow(left, combo)
             self.combos[header] = combo
+
+    def on_add_custom_role(self):
+        from PySide6.QtWidgets import QInputDialog
+        name, ok = QInputDialog.getText(
+            self, "Своя категория",
+            "Название категории (попадёт в метаданные ответа):")
+        if not ok:
+            return
+        name = (name or "").strip()
+        if not name:
+            return
+        if len(name) > 64 or any(ch in name for ch in "\n\r\t"):
+            notify(self, "warning", "Ошибка", "Название до 64 символов, без переносов")
+            return
+        if not hasattr(self, "extra_roles"):
+            self.extra_roles = []
+        code = f"custom:{name}"
+        if any(c == code for c, _ in self.extra_roles):
+            notify(self, "warning", "Ошибка", "Такая категория уже есть")
+            return
+        self.extra_roles.append((code, f"📎 {name}"))
+        self._build_mapping()
+        notify(self, "success", "Категория",
+               f"Категория «{name}» добавлена — выбери её в нужных колонках")
 
     def _mapping(self) -> dict:
         return {h: c.currentData() for h, c in self.combos.items()}
@@ -242,11 +292,6 @@ class RunImportDialog(QDialog):
             return
         mapping = self._mapping()
         answers = [h for h, r in mapping.items() if r == "answer"]
-        if not answers:
-            notify(self, "warning", "Маппинг",
-                   "Не выбрана колонка с ответами: поставь одной колонке "
-                   "роль «Ответ модели» (повторяющиеся значения — не проблема).")
-            return
         if len(answers) > 1:
             notify(self, "warning", "Маппинг",
                    "Роль «Ответ модели» должна быть только у одной колонки "
@@ -270,18 +315,26 @@ class RunImportDialog(QDialog):
         except Exception as e:
             notify(self, "error", "Ошибка чтения", str(e))
             return
-        cols = {"answer": answers[0]}
+        cols = {}
+        if answers:
+            cols["answer"] = answers[0]
         for h, r in mapping.items():
-            if r in ("source_id", "prompt") and r not in cols:
+            if r in ("source_id", "prompt", "product") and r not in cols:
                 cols[r] = h
+        custom_map = {}
+        for h, r in mapping.items():
+            if isinstance(r, str) and r.startswith("custom:"):
+                custom_map[h] = r.split(":", 1)[1].strip()
         rows = []
         for row in data:
             if not isinstance(row, dict):
                 continue
             rows.append({
-                "answer": row.get(cols["answer"], ""),
+                "answer": row.get(cols["answer"], "") if "answer" in cols else "",
                 "source_id": row.get(cols["source_id"], "") if "source_id" in cols else "",
                 "prompt": row.get(cols["prompt"], "") if "prompt" in cols else "",
+                "product": row.get(cols["product"], "") if "product" in cols else "",
+                "metadata": collect_run_metadata(row, custom_map),
             })
         if not rows:
             notify(self, "warning", "Внимание", "Нет строк для импорта")

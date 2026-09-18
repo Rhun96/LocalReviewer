@@ -182,11 +182,20 @@ class RegressionDialog(QDialog):
         if not reg:
             return
         gate = reg["gate_result"] or "?"
+        n_reg = reg["regressions"] or 0
+        n_imp = reg["improvements"] or 0
+        if n_reg > n_imp:
+            balance = "в целом хуже baseline"
+        elif n_imp > n_reg:
+            balance = "в целом лучше baseline"
+        else:
+            balance = "паритет с baseline"
         self.summary.setText(
             f"{'✅ PASS' if gate == 'PASS' else '❌ FAIL'} {reg['name']}: "
             f"всего {reg['total']}, регрессий {reg['regressions']} "
             f"(rate {reg['regression_rate']:.1%}), улучшений {reg['improvements']}, "
-            f"без изменений {reg['unchanged']}.")
+            f"без изменений {reg['unchanged']}."
+            f"\n⚖️ Баланс: {balance} (по числу кейсов; решает gate).")
 
     def _load_results(self):
         if not self._reg_id:
