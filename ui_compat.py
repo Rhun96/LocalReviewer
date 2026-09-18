@@ -253,11 +253,11 @@ def _apply_palette(app, dark: bool) -> None:
     if dark:
         window, base, text = QColor("#202020"), QColor("#2b2b2b"), QColor("#ffffff")
         dim, accent = QColor("#a0a0a0"), QColor("#4ade80")
-        highlight = QColor("#1d3a28")
+        highlight, hl_text = QColor("#2ea043"), QColor("#ffffff")
     else:
         window, base, text = QColor("#f3f3f3"), QColor("#ffffff"), QColor("#1b1b1b")
         dim, accent = QColor("#616161"), QColor("#0b7a34")
-        highlight = QColor("#d3e9dc")
+        highlight, hl_text = QColor("#0b7a34"), QColor("#ffffff")
     pal.setColor(QPalette.ColorRole.Window, window)
     pal.setColor(QPalette.ColorRole.WindowText, text)
     pal.setColor(QPalette.ColorRole.Base, base)
@@ -267,7 +267,7 @@ def _apply_palette(app, dark: bool) -> None:
     pal.setColor(QPalette.ColorRole.ButtonText, text)
     pal.setColor(QPalette.ColorRole.BrightText, accent)
     pal.setColor(QPalette.ColorRole.Highlight, highlight)
-    pal.setColor(QPalette.ColorRole.HighlightedText, text)
+    pal.setColor(QPalette.ColorRole.HighlightedText, hl_text)
     pal.setColor(QPalette.ColorRole.ToolTipBase, base)
     pal.setColor(QPalette.ColorRole.ToolTipText, text)
     try:

@@ -138,6 +138,7 @@ class BulkMixin:
             self.load_table_data()
             self.update_filter_indicator()
             self.update_queue_indicator()
+            self._review_finished = False
             if self.case_ids:
                 self.load_case(min(self.current_index, len(self.case_ids) - 1))
             # Bulk мог сменить статус текущего кейса — pending пересчитываем.
@@ -268,6 +269,7 @@ class BulkMixin:
             self.load_table_data()
             self.update_filter_indicator()
             self.update_queue_indicator()
+            self._review_finished = False
             notify(self, "success", "Готово", f"Отменено изменений: {done}")
         except Exception as e:
             self.show_error("Не удалось отменить", e)

@@ -88,10 +88,13 @@ def test_theme_switch_converges_palettes():
         w.show()
         app.processEvents()
         role = app.palette().ColorRole.Window
-        for mode, expect in (("dark", "#202020"), ("light", "#f3f3f3")):
+        for mode, expect, hl in (("dark", "#202020", "#2ea043"),
+                                 ("light", "#f3f3f3", "#0b7a34")):
             apply_theme(mode)
             app.processEvents()
             assert app.palette().color(role).name() == expect
+            assert app.palette().color(
+                app.palette().ColorRole.Highlight).name() == hl
             # Only visible widgets: hidden ones repolish on show.
             shown = [x for x in [w] + w.findChildren(QWidget) if x.isVisible()]
             assert shown, "window did not show offscreen"

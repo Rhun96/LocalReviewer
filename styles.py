@@ -543,7 +543,8 @@ QPushButton:hover {{
 # Причина: часть поверхностей Fluent рисует через палитру/по-своему, и без
 # явных цветов получается каша (белые кнопки с белым текстом на тёмной теме).
 # Пер-виджетные inline-QSS приоритетнее app-level и продолжают работать.
-def _fluent_base(bg, bg_card, bg_input, text, text_dim, border, accent, accent_soft, header_bg):
+def _fluent_base(bg, bg_card, bg_input, text, text_dim, border, accent, accent_soft, header_bg,
+                 sel_bg, sel_text):
     return f"""
 QDialog {{
     background-color: {bg};
@@ -639,8 +640,8 @@ QLineEdit, QTextEdit, QPlainTextEdit, LineEdit, TextEdit {{
     border: 1px solid {border};
     border-radius: 6px;
     padding: 4px 8px;
-    selection-background-color: {accent_soft};
-    selection-color: {text};
+    selection-background-color: {sel_bg};
+    selection-color: {sel_text};
 }}
 QSpinBox, SpinBox, QComboBox, ComboBox {{
     background-color: {bg_input};
@@ -648,8 +649,8 @@ QSpinBox, SpinBox, QComboBox, ComboBox {{
     border: 1px solid {border};
     border-radius: 6px;
     padding: 4px 8px;
-    selection-background-color: {accent_soft};
-    selection-color: {text};
+    selection-background-color: {sel_bg};
+    selection-color: {sel_text};
 }}
 QComboBox QAbstractItemView, ComboBox QAbstractItemView {{
     background-color: {bg_card};
@@ -708,10 +709,12 @@ FLUENT_BASE_LIGHT = _fluent_base(
     bg="#f3f3f3", bg_card="#ffffff", bg_input="#ffffff",
     text="#1b1b1b", text_dim="#616161", border="#e0e0e0",
     accent="#0b7a34", accent_soft="#d3e9dc", header_bg="#ececec",
+    sel_bg="#0b7a34", sel_text="#ffffff",
 )
 
 FLUENT_BASE_DARK = _fluent_base(
     bg="#202020", bg_card="#2b2b2b", bg_input="#2b2b2b",
     text="#ffffff", text_dim="#a0a0a0", border="#3a3a3a",
     accent="#4ade80", accent_soft="#1d3a28", header_bg="#2d2d2d",
+    sel_bg="#2ea043", sel_text="#ffffff",
 )

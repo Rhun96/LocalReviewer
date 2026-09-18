@@ -67,6 +67,8 @@ class ReviewScreen(BaseScreen, ProfileMixin, CaseMixin, TableMixin, BulkMixin, V
         self.bulk_selected: set = set()
         # Последнее одиночное действие для Ctrl+Z
         self._last_single = None
+        # «Завершить ревью» уже нажимали: кнопка гаснет до новой разметки
+        self._review_finished = False
         # Умная очередь (ТЗ §8): normal | unreviewed | problematic
         self.queue_mode = "normal"
         self.load_case_ids()

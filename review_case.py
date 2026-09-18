@@ -504,6 +504,10 @@ class CaseMixin:
             btn.setEnabled(False)
             return
         if total and remaining == 0:
+            if getattr(self, "_review_finished", False):
+                btn.setEnabled(False)
+                btn.setToolTip("Ревью уже завершено (новая разметка разблокирует кнопку)")
+                return
             btn.setEnabled(True)
             btn.setToolTip(f"Всё размечено ({self._scope_name()}) — "
                            "сохранить версию датасета (снимок всех оценок)")
@@ -538,9 +542,18 @@ class CaseMixin:
                    f"🔄 Дубль: {rep['duplicate']}\n"
                    f"⏭️ Пропущено: {rep['skip']}")
         if confirm(self, "Завершить ревью",
-                   summary + "\n\nСохранить версию датасета?"):
+                   summary + "\n\nСохранить версию датасета?",
+                   ok_text="Да", cancel_text="Нет"):
+            self._review_finished = True
             from datasets_dialog import DatasetsDialog
             DatasetsDialog(self.project_path, self).exec()
+        else:
+            self._review_finished = True
+            logger.info("finish review without dataset version: scope=%s", scope)
+            notify(self, "success", "Ревью завершено",
+                   f"{scope.capitalize()}: проверено {rep['reviewed']} из {rep['total']}. "
+                   "Версия датасета не создавалась.")
+        self.update_finish_button()
 
     def save_comment_manual(self):
         """Явное «Сохранить» — запоминаем для одиночной отмены (Ctrl+Z)."""
@@ -611,6 +624,7 @@ class CaseMixin:
             self.show_error("Не удалось отменить", e)
             return
         self._last_single = None
+        self._review_finished = False
         notify(self, "success", "Отмена", "Действие отменено")
         if self.case_ids and cid in self.case_ids:
             self.load_case(self.case_ids.index(cid))
@@ -779,6 +793,7 @@ class CaseMixin:
                 self._last_single = {"kind": "status",
                                      "case_id": self.current_case_id,
                                      "old": old_status, "new": status}
+            self._review_finished = False
             if is_bad:
                 # Причина обязательна в строгом режиме и по профилю
                 # («Профили → Причина обязательна для Плохо»).

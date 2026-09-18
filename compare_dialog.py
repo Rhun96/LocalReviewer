@@ -56,6 +56,10 @@ class CompareDialog(QDialog):
         splitter.addWidget(self.pane_b)
         splitter.setSizes([450, 450])
         right.addWidget(splitter, 2)
+        legend = QLabel("🔴 есть только в A · 🟢 есть только в B — "
+                        "это diff текстов, а не оценка (оценка — кнопки вердикта ниже)")
+        legend.setWordWrap(True)
+        right.addWidget(legend)
         self.abs_label = QLabel("")
         right.addWidget(self.abs_label)
 
