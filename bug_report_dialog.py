@@ -36,12 +36,12 @@ class BugReportDialog(QDialog):
         form.addRow("Заголовок *:", self.title_edit)
         self.sev_combo = FComboBox()
         for s in bugs.SEVERITIES:
-            self.sev_combo.addItem(s, s)
+            self.sev_combo.addItem(bugs.BUG_SEVERITY_NAMES.get(s, s), s)
         self.sev_combo.setCurrentIndex(1)
-        form.addRow("Severity:", self.sev_combo)
+        form.addRow("Критичность:", self.sev_combo)
         self.status_combo = FComboBox()
         for s in bugs.STATUSES:
-            self.status_combo.addItem(s, s)
+            self.status_combo.addItem(bugs.BUG_STATUS_NAMES.get(s, s), s)
         form.addRow("Статус:", self.status_combo)
         self.cat_combo = FComboBox()
         self.cat_combo.addItem("— нет —", None)
@@ -349,10 +349,10 @@ class QuickBugDialog(QDialog):
         self.title_edit = FLineEdit()
         self.title_edit.setText(prefill.get("title_suggest", ""))
         layout.addWidget(self.title_edit)
-        layout.addWidget(QLabel("Severity:"))
+        layout.addWidget(QLabel("Критичность:"))
         self.sev_combo = FComboBox()
         for s in bugs.SEVERITIES:
-            self.sev_combo.addItem(s, s)
+            self.sev_combo.addItem(bugs.BUG_SEVERITY_NAMES.get(s, s), s)
         self.sev_combo.setCurrentIndex(1)
         layout.addWidget(self.sev_combo)
         btns = QHBoxLayout()

@@ -10,6 +10,11 @@ logger = logging.getLogger(__name__)
 
 STATUSES = ("New", "Confirmed", "In Progress", "Fixed", "Rejected", "Duplicate")
 SEVERITIES = ("Low", "Medium", "High", "Critical")
+BUG_STATUS_NAMES = {"New": "Новый", "Confirmed": "Подтверждён",
+                    "In Progress": "В работе", "Fixed": "Исправлен",
+                    "Rejected": "Отклонён", "Duplicate": "Дубль"}
+BUG_SEVERITY_NAMES = {"Low": "Низкая", "Medium": "Средняя", "High": "Высокая",
+                      "Critical": "Критическая"}
 
 _EDITABLE = ("title", "description", "status", "severity", "category_id",
              "subcategory_id", "model_name", "model_version", "prompt_version",
@@ -167,7 +172,7 @@ def list_bugs(project_path: str, status: str | None = None,
     """
     if conds:
         query += " WHERE " + " AND ".join(conds)
-    query += " GROUP BY b.bug_id ORDER BY b.updated_at DESC, b.bug_id DESC"
+    query += " GROUP BY b.bug_id ORDER BY b.updated_at ASC, b.bug_id ASC"
     with db(project_path) as conn:
         return [dict(r) for r in conn.cursor().execute(query, params).fetchall()]
 
@@ -267,7 +272,7 @@ def bugs_for_case(project_path: str, case_id: int) -> list:
             FROM bug_report_cases bc
             JOIN bug_reports b ON b.bug_id = bc.bug_id
             WHERE bc.case_id = ?
-            ORDER BY b.updated_at DESC
+            ORDER BY b.updated_at ASC
         """, (case_id,)).fetchall()]
 
 

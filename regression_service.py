@@ -11,6 +11,11 @@ from database import db, utcnow
 logger = logging.getLogger(__name__)
 
 RESULTS = ("UNCHANGED", "IMPROVED", "REGRESSION", "NEW", "REMOVED", "UNRESOLVED")
+RESULT_NAMES = {"UNCHANGED": "Без изменений", "IMPROVED": "Улучшено",
+                "REGRESSION": "Регрессия", "NEW": "Новое",
+                "REMOVED": "Удалено", "UNRESOLVED": "Не размечено"}
+SEVERITY_NAMES = {"critical": "Критическая", "warning": "Предупреждение",
+                  "info": "Инфо"}
 
 
 def _base_of(project_path: str, status: str | None) -> str | None:
@@ -88,9 +93,11 @@ def list_baseline_candidates(project_path: str) -> list:
                 JOIN datasets d ON d.dataset_id = v.dataset_id
                 ORDER BY d.name, v.version_number
             """).fetchall():
+            from dataset_service import VERSION_STATUS_NAMES
+            st = VERSION_STATUS_NAMES.get(r["status"], r["status"])
             out.append({"type": "dataset_version", "id": r["version_id"],
                         "label": f"Датасет «{r['ds_name']}» v{r['version_number']} "
-                                 f"[{r['status']}, {r['case_count']}]",
+                                 f"[{st}, {r['case_count']}]",
                         "frozen": r["status"] == "frozen"})
         for r in cur.execute("""
                 SELECT r.run_id, r.name,

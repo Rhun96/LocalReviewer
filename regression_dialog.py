@@ -73,13 +73,13 @@ class RegressionDialog(QDialog):
         self.result_combo.addItem("Все", None)
         for code in ("REGRESSION", "IMPROVED", "UNCHANGED", "NEW", "REMOVED",
                      "UNRESOLVED"):
-            self.result_combo.addItem(code, code)
+            self.result_combo.addItem(rg.RESULT_NAMES.get(code, code), code)
         filt.addWidget(self.result_combo)
         filt.addWidget(QLabel("Severity:"))
         self.sev_combo = FComboBox()
         self.sev_combo.addItem("Все", None)
         for code in ("critical", "warning", "info"):
-            self.sev_combo.addItem(code, code)
+            self.sev_combo.addItem(rg.SEVERITY_NAMES.get(code, code), code)
         filt.addWidget(self.sev_combo)
         btn_apply = FPushButton("Применить")
         btn_apply.clicked.connect(self._load_results)
@@ -218,8 +218,10 @@ class RegressionDialog(QDialog):
             self.table.setItem(i, 0, QTableWidgetItem(str(key)[:40]))
             self.table.setItem(i, 1, QTableWidgetItem(r["baseline_status"] or "—"))
             self.table.setItem(i, 2, QTableWidgetItem(r["candidate_status"] or "—"))
-            self.table.setItem(i, 3, QTableWidgetItem(r["result"]))
-            self.table.setItem(i, 4, QTableWidgetItem(r["severity"]))
+            self.table.setItem(i, 3, QTableWidgetItem(
+                rg.RESULT_NAMES.get(r["result"], r["result"] or "")))
+            self.table.setItem(i, 4, QTableWidgetItem(
+                rg.SEVERITY_NAMES.get(r["severity"], r["severity"] or "")))
             self.table.setItem(i, 5, QTableWidgetItem((r["primary_text"] or "")[:80]))
         self.table.resizeColumnsToContents()
 

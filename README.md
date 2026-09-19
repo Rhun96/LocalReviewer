@@ -13,7 +13,7 @@
 ![Qt](https://img.shields.io/badge/Interface-PySide6_Fluent-41CD52?logo=qt&logoColor=white)
 ![Windows](https://img.shields.io/badge/OS-Windows_10%2F11-0078D6?logo=windows&logoColor=white)
 ![SQLite](https://img.shields.io/badge/Storage-SQLite-003B57?logo=sqlite&logoColor=white)
-![Version](https://img.shields.io/badge/Version-0.4.3-0b7a34)
+![Version](https://img.shields.io/badge/Version-0.5.0-0b7a34)
 
 ---
 
@@ -213,7 +213,7 @@ LocalReviewer/
 ├── settings_screen.py        # Настройки (ревью, веса, проверки, тема)
 │
 ├── docs/USER_GUIDE.md        # Подробная инструкция пользователя
-├── tests/                    # pytest (95 тестов: все подсистемы)
+├── tests/                    # pytest (110 тестов: все подсистемы)
 └── requirements.txt
 ```
 

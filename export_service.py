@@ -336,3 +336,148 @@ def export_report_to_xlsx(project_path: str, output_path: str, file_id=None):
 
     _atomic_save(wb, out)
     return True
+
+
+def export_management_report(project_path: str, output_path: str, file_id=None) -> bool:
+    """Отчёт для руководства одним файлом: сводка + вердикт к релизу."""
+    import openpyxl
+    from datetime import datetime
+    from openpyxl.styles import Font
+    from openpyxl.utils import get_column_letter
+    from report_service import (get_error_top, get_model_leaderboard,
+                                get_overall_report, get_product_report,
+                                get_velocity, consistency_check,
+                                get_golden_info)
+    import regression_service as _rg
+
+    out = _resolve_output(output_path)
+    overall = get_overall_report(project_path, file_id)
+    products = get_product_report(project_path, file_id)
+    errors = get_error_top(project_path, file_id)
+    velo = get_velocity(project_path, file_id)
+    board = get_model_leaderboard(project_path)
+    regs = sorted(_rg.list_regressions(project_path),
+                  key=lambda r: r.get("created_at") or "", reverse=True)[:10]
+    with db(project_path) as conn:
+        versions = [dict(r) for r in conn.execute("""
+            SELECT d.name AS ds_name, v.version_number, v.status, v.case_count
+            FROM dataset_versions v
+            JOIN datasets d ON d.dataset_id = v.dataset_id
+            ORDER BY d.name, v.version_number DESC""").fetchall()]
+        scope_name = "Весь проект"
+        if file_id:
+            frow = conn.execute("SELECT file_name FROM files WHERE file_id=?",
+                                (file_id,)).fetchone()
+            if frow:
+                scope_name = frow["file_name"]
+    total, reviewed = overall.get("total", 0), overall.get("reviewed", 0)
+    remaining = max(0, total - reviewed)
+    bad_rate = (overall.get("bad", 0) / total) if total else 0
+    latest = regs[0] if regs else None
+    chk = consistency_check(project_path, file_id)
+    gi = get_golden_info(project_path)
+    top3 = sum(e["n"] for e in errors[:3])
+    if remaining > 0:
+        verdict = f"НЕ ГОТОВ (осталось {remaining})"
+    elif latest and (latest.get("gate_result") or "") == "FAIL":
+        verdict = "НЕ ГОТОВ (gate FAIL)"
+    elif latest:
+        verdict = "ГОТОВ"
+    else:
+        verdict = "ЧАСТИЧНО (разметка 100%, регрессии не было)"
+
+    wb = openpyxl.Workbook(write_only=False)
+
+    first = True
+
+    def _sheet(name, headers, widths):
+        nonlocal first
+        if first:
+            ws = wb.active
+            ws.title = name
+            first = False
+        else:
+            ws = wb.create_sheet(name)
+        for col, header in enumerate(headers, 1):
+            ws.cell(row=1, column=col, value=header).font = Font(bold=True)
+        for i, w in enumerate(widths, 1):
+            ws.column_dimensions[get_column_letter(i)].width = w
+        return ws
+
+    ws = _sheet("Сводка", ["Показатель", "Значение"], [30, 40])
+    summary = [
+        ("Проект", Path(project_path).name),
+        ("Дата", datetime.now().strftime("%Y-%m-%d %H:%M")),
+        ("Охват", scope_name),
+        ("Всего кейсов", total),
+        ("Проверено", reviewed),
+        ("Осталось", remaining),
+        ("Bad-rate", round(bad_rate, 4)),
+        ("Скорость, кейсов/день", velo["avg_per_day"]),
+        ("Прогноз, дней", velo["eta_days"] if velo["eta_days"] is not None else "—"),
+        ("Топ-причина", (errors[0]["category"] + " (" + str(errors[0]["n"]) + ")")
+         if errors else "—"),
+        ("Gate последний", ((latest.get("name", "") + ": " + latest.get("gate_result", ""))
+                            if latest else "—")),
+        ("Сверка сумм", "✅" if chk["ok"] else "❌"),
+        ("Golden свеж", (f"{gi['count']}, {gi['oldest_days']} дн." if gi["count"]
+                         else "нет замороженных")),
+        ("Концентрация топ-3", (round(top3 / overall.get("bad", 0), 4)
+                                if overall.get("bad", 0) else 0)),
+        ("ВЕРДИКТ", verdict),
+    ]
+    for i, (k, v) in enumerate(summary, 2):
+        ws.cell(row=i, column=1, value=k)
+        ws.cell(row=i, column=2, value=safe_cell(v) if isinstance(v, str) else v)
+
+    ws = _sheet("Сверка", ["Проверка", "ОК", "Ожидалось", "Факт"], [30, 8, 15, 15])
+    for i, c in enumerate(chk["checks"], 2):
+        ws.cell(row=i, column=1, value=safe_cell(c["name"]))
+        ws.cell(row=i, column=2, value="✅" if c["ok"] else "❌")
+        ws.cell(row=i, column=3, value=safe_cell(str(c["expected"])))
+        ws.cell(row=i, column=4, value=safe_cell(str(c["actual"])))
+
+    ws = _sheet("Продукты", ["Продукт", "Всего", "Проверено", "Плохих"], [25, 10, 12, 10])
+    for i, p in enumerate(products, 2):
+        ws.cell(row=i, column=1, value=safe_cell(p["product"]))
+        ws.cell(row=i, column=2, value=p["total"])
+        ws.cell(row=i, column=3, value=p["reviewed"])
+        ws.cell(row=i, column=4, value=p["bad"])
+
+    ws = _sheet("Причины", ["Категория", "Подкатегория", "Критичность", "Число"], [25, 25, 14, 10])
+    for i, e in enumerate(errors, 2):
+        ws.cell(row=i, column=1, value=safe_cell(e["category"]))
+        ws.cell(row=i, column=2, value=safe_cell(e["subcategory"]))
+        ws.cell(row=i, column=3, value=safe_cell(e["severity"]))
+        ws.cell(row=i, column=4, value=e["n"])
+
+    ws = _sheet("Прогоны", ["Прогон", "Модель", "Ответов", "Размечено", "Хорошо",
+                            "Плохо", "Побед", "Gate"], [25, 20, 10, 12, 10, 10, 10, 12])
+    for i, b in enumerate(board, 2):
+        ws.cell(row=i, column=1, value=safe_cell(b["name"]))
+        ws.cell(row=i, column=2, value=safe_cell(b["model_name"]))
+        ws.cell(row=i, column=3, value=b["answers"])
+        ws.cell(row=i, column=4, value=b["reviewed"])
+        ws.cell(row=i, column=5, value=b["good"])
+        ws.cell(row=i, column=6, value=b["bad"])
+        ws.cell(row=i, column=7, value=b["wins"])
+        ws.cell(row=i, column=8, value=f"{b['gates_passed']}/{b['gates']}")
+
+    ws = _sheet("Регрессии", ["Запуск", "Gate", "Всего", "Регрессий",
+                             "Улучшений"], [25, 10, 10, 12, 12])
+    for i, r in enumerate(regs, 2):
+        ws.cell(row=i, column=1, value=safe_cell(r.get("name", "")))
+        ws.cell(row=i, column=2, value=r.get("gate_result", ""))
+        ws.cell(row=i, column=3, value=r.get("total", 0))
+        ws.cell(row=i, column=4, value=r.get("regressions", 0))
+        ws.cell(row=i, column=5, value=r.get("improvements", 0))
+
+    ws = _sheet("Версии", ["Датасет", "Версия", "Статус", "Кейсов"], [25, 10, 12, 10])
+    for i, v in enumerate(versions, 2):
+        ws.cell(row=i, column=1, value=safe_cell(v["ds_name"]))
+        ws.cell(row=i, column=2, value=v["version_number"])
+        ws.cell(row=i, column=3, value=v["status"])
+        ws.cell(row=i, column=4, value=v["case_count"])
+
+    _atomic_save(wb, out)
+    return True

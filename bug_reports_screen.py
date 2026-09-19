@@ -30,13 +30,13 @@ class BugReportsScreen(BaseScreen):
         self.status_combo = FComboBox()
         self.status_combo.addItem("Все", None)
         for s in bugs.STATUSES:
-            self.status_combo.addItem(s, s)
+            self.status_combo.addItem(bugs.BUG_STATUS_NAMES.get(s, s), s)
         filt.addWidget(self.status_combo)
-        filt.addWidget(QLabel("Severity:"))
+        filt.addWidget(QLabel("Критичность:"))
         self.sev_combo = FComboBox()
         self.sev_combo.addItem("Все", None)
         for s in bugs.SEVERITIES:
-            self.sev_combo.addItem(s, s)
+            self.sev_combo.addItem(bugs.BUG_SEVERITY_NAMES.get(s, s), s)
         filt.addWidget(self.sev_combo)
         filt.addWidget(QLabel("Трекер:"))
         self.tracker_combo = FComboBox()
@@ -49,7 +49,7 @@ class BugReportsScreen(BaseScreen):
         search_row = QHBoxLayout()
         self.search_edit = FLineEdit()
         self.search_edit.setPlaceholderText(
-            "Поиск: title, описание, ID кейса, external ID… (Enter)")
+            "Поиск: заголовок, описание, ID кейса, external ID… (Enter)")
         self.search_edit.returnPressed.connect(self.refresh)
         search_row.addWidget(self.search_edit, 3)
         btn_find = FPushButton("🔍 Найти")
@@ -108,14 +108,16 @@ class BugReportsScreen(BaseScreen):
         self.table.setColumnCount(8)
         self.table.setRowCount(len(rows))
         self.table.setHorizontalHeaderLabels(
-            ["ID", "Title", "Status", "Severity", "Категория", "Кейсы",
+            ["ID", "Заголовок", "Статус", "Критичность", "Категория", "Кейсы",
              "External", "Обновлён"])
         for i, r in enumerate(rows):
             cat = cats.get(r["category_id"], "") if r["category_id"] else ""
+            st = bugs.BUG_STATUS_NAMES.get(r["status"] or "", r["status"] or "")
+            sv = bugs.BUG_SEVERITY_NAMES.get(r["severity"] or "", r["severity"] or "")
             self.table.setItem(i, 0, QTableWidgetItem(str(r["bug_id"])))
             self.table.setItem(i, 1, QTableWidgetItem((r["title"] or "")[:80]))
-            self.table.setItem(i, 2, QTableWidgetItem(r["status"]))
-            self.table.setItem(i, 3, QTableWidgetItem(r["severity"]))
+            self.table.setItem(i, 2, QTableWidgetItem(st))
+            self.table.setItem(i, 3, QTableWidgetItem(sv))
             self.table.setItem(i, 4, QTableWidgetItem(cat))
             self.table.setItem(i, 5, QTableWidgetItem(str(r["cases"])))
             self.table.setItem(i, 6, QTableWidgetItem(r["external_id"] or "—"))

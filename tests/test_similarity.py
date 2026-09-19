@@ -74,6 +74,28 @@ def test_duplicates_and_cap():
         sim.find_duplicates(p, threshold=1.5)
 
 
+def test_synonyms_stopwords_trigrams():
+    from similarity_service import _terms
+    t = _terms("Здравствуйте, как перенести поездку?")
+    assert "обмен" in t  # перенести -> обмен
+    assert "обмен поездку" in t  # биграммы канонизированы
+    assert "здравствуйте" not in t and "как" not in t  # стоп-слова
+    assert any(x.startswith("~") for x in t)  # символьные триграммы
+    assert "нельзя" in _terms("нельзя обменять")  # отрицание живёт в токене
+    assert "можно" not in _terms("нельзя обменять")
+
+
+def test_paraphrase_scores_above_noise():
+    p = _proj(["Нужно перенести поездку на поезде на день позже. Как обменять билет?",
+               "Как перенести поездку на поезде на другую дату?",
+               "Нужна ли виза в Турцию?"])
+    ids = _ids(p)
+    res = sim.find_similar(p, ids[0], min_score=0.0, scope="project")
+    by_id = {r["case_id"]: r["score"] for r in res["results"]}
+    assert by_id[ids[1]] > 0.4
+    assert by_id[ids[2]] < 0.2
+
+
 def test_reviewed_mark():
     from bulk_operation_service import bulk_set_status
     p = _proj(["похожий текст раз", "похожий текст два"])

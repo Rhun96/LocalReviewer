@@ -682,3 +682,15 @@ def migrate_to_v15(cursor) -> None:
     if "prompt_text" not in cols:
         cursor.execute("ALTER TABLE run_answers ADD COLUMN prompt_text TEXT")
     logger.info("migrated to v15 (run answer product/metadata/prompt)")
+
+
+def migrate_to_v16(cursor) -> None:
+    """Locked-флаг датасетов (дисциплина golden): состав зафиксирован.
+
+    Только ADD COLUMN. Locked блокирует новые версии и удаление версий;
+    freeze/archive разрешены (это усиление, а не изменение состава).
+    """
+    cols = {r[1] for r in cursor.execute("PRAGMA table_info(datasets)").fetchall()}
+    if "locked" not in cols:
+        cursor.execute("ALTER TABLE datasets ADD COLUMN locked INTEGER DEFAULT 0")
+    logger.info("migrated to v16 (dataset locked flag)")

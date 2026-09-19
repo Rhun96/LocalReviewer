@@ -6,7 +6,8 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QPixmap
 from report_service import (get_files_list, get_overall_report, get_files_report,
-                            get_tags_report, get_checks_report)
+                            get_tags_report, get_checks_report,
+                            get_quality_trend)
 from export_service import export_results_to_xlsx, export_report_to_xlsx
 from datetime import datetime
 from ui_base import BaseScreen
@@ -103,6 +104,10 @@ class ReportsScreen(BaseScreen):
         self.checks_tab = self.create_checks_tab()
         self.tabs.addTab(self.checks_tab, "⚠️ Автопроверки")
 
+        # Вкладка: Модели (лидерборд прогонов)
+        self.models_tab = self.create_models_tab()
+        self.tabs.addTab(self.models_tab, "🏆 Модели")
+
         # Вкладка 6: Личное (ТЗ V2 §23, без командных дашбордов)
         self.personal_tab = self.create_personal_tab()
         self.tabs.addTab(self.personal_tab, "🙂 Личное")
@@ -132,6 +137,11 @@ class ReportsScreen(BaseScreen):
         btn_export_ann.setToolTip("Только разметка (JSONL для обмена)")
         btn_export_ann.clicked.connect(self.on_export_annotations)
 
+        btn_mgmt = FPushButton("📋 Сводный отчёт")
+        btn_mgmt.setMinimumHeight(45)
+        btn_mgmt.setToolTip("Сводка xlsx: цифры, вердикт к релизу")
+        btn_mgmt.clicked.connect(self.on_export_management)
+
         btn_back = FPushButton("🚪 Назад к проекту")
         btn_back.setObjectName("danger")
         btn_back.setMinimumHeight(45)
@@ -141,6 +151,7 @@ class ReportsScreen(BaseScreen):
         buttons_layout.addWidget(btn_export_report)
         buttons_layout.addWidget(btn_export_jsonl)
         buttons_layout.addWidget(btn_export_ann)
+        buttons_layout.addWidget(btn_mgmt)
         buttons_layout.addStretch()
         buttons_layout.addWidget(btn_back)
         layout.addLayout(buttons_layout)
@@ -322,6 +333,7 @@ class ReportsScreen(BaseScreen):
             self.load_files_report()
             self.load_tags_report()
             self.load_checks_report()
+            self.load_models_report()
             self.load_personal_report()
             self.refresh_charts()
         except Exception as e:
@@ -332,13 +344,19 @@ class ReportsScreen(BaseScreen):
         self.load_reports()
 
     def load_overall_report(self):
-        report = get_overall_report(self.project_path, self.report_file_id)
-        self.overall_table.clear()
-        self.overall_table.setColumnCount(2)
-        self.overall_table.setRowCount(8)
-        self.overall_table.setHorizontalHeaderLabels(["Показатель", "Значение"])
-        self.overall_table.setSortingEnabled(False)
-        data = [
+        from report_service import (consistency_check, get_alerts,
+                                    get_error_top, get_golden_info)
+        fid = self.report_file_id
+        report = get_overall_report(self.project_path, fid)
+        data = []
+        if fid is None:
+            try:
+                for a in get_alerts(self.project_path):
+                    mark = {"critical": "🛑", "warning": "⚠️"}.get(a["level"], "ℹ️")
+                    data.append((f"{mark} {a['text']}", ""))
+            except Exception:
+                pass
+        data += [
             ("Всего кейсов", report.get('total', 0)),
             ("Проверено", report.get('reviewed', 0)),
             ("Не проверено", report.get('unreviewed', 0)),
@@ -348,6 +366,34 @@ class ReportsScreen(BaseScreen):
             ("Дубль", report.get('duplicate', 0)),
             ("Пропущено", report.get('skip', 0)),
         ]
+        try:
+            chk = consistency_check(self.project_path, fid)
+            bad = [c["name"] for c in chk["checks"] if not c["ok"]]
+            data.append(("Сверка сумм", "✅" if chk["ok"]
+                         else f"❌ {', '.join(bad)}"))
+        except Exception:
+            pass
+        try:
+            gi = get_golden_info(self.project_path)
+            if gi["count"]:
+                data.append(("Эталоны", f"{gi['count']}, свеж. "
+                                        f"{gi['oldest_days']} дн."))
+            else:
+                data.append(("Эталоны", "нет замороженных"))
+        except Exception:
+            pass
+        try:
+            top = get_error_top(self.project_path, fid, limit=3)
+            s = sum(e["n"] for e in top)
+            tot_bad = report.get('bad', 0) or 1
+            data.append(("Концентрация топ-3", f"{s / tot_bad:.0%}"))
+        except Exception:
+            pass
+        self.overall_table.clear()
+        self.overall_table.setColumnCount(2)
+        self.overall_table.setRowCount(len(data))
+        self.overall_table.setHorizontalHeaderLabels(["Показатель", "Значение"])
+        self.overall_table.setSortingEnabled(False)
         for row, (name, value) in enumerate(data):
             self.overall_table.setItem(row, 0, QTableWidgetItem(name))
             self.overall_table.setItem(row, 1, QTableWidgetItem(str(value)))
@@ -407,6 +453,40 @@ class ReportsScreen(BaseScreen):
             self.checks_table.setItem(row, 3, QTableWidgetItem(cell))
         self.checks_table.resizeColumnsToContents()
 
+    def create_models_tab(self):
+        """Лидерборд прогонов: разметка, победы, gate."""
+        widget = QWidget()
+        layout = QVBoxLayout()
+        hint = QLabel("Прогоны: качество ответов, победы в парах, gate-кандидаты")
+        layout.addWidget(hint)
+        self.models_table = FTable()
+        layout.addWidget(self.models_table)
+        widget.setLayout(layout)
+        return widget
+
+    def load_models_report(self):
+        from report_service import get_model_leaderboard
+        board = get_model_leaderboard(self.project_path)
+        self.models_table.clear()
+        self.models_table.setColumnCount(8)
+        self.models_table.setRowCount(len(board))
+        self.models_table.setHorizontalHeaderLabels([
+            "Прогон", "Модель", "Ответов", "Размечено",
+            "Хорошо", "Плохо", "Побед", "Gate",
+        ])
+        for row, b in enumerate(board):
+            self.models_table.setItem(row, 0, QTableWidgetItem(str(b["name"])))
+            self.models_table.setItem(row, 1, QTableWidgetItem(str(b["model_name"])))
+            self.models_table.setItem(row, 2, QTableWidgetItem(str(b["answers"])))
+            self.models_table.setItem(row, 3, QTableWidgetItem(str(b["reviewed"])))
+            self.models_table.setItem(row, 4, QTableWidgetItem(str(b["good"])))
+            self.models_table.setItem(row, 5, QTableWidgetItem(str(b["bad"])))
+            self.models_table.setItem(
+                row, 6, QTableWidgetItem(f"{b['wins']}/{b['pairs']}"))
+            self.models_table.setItem(
+                row, 7, QTableWidgetItem(f"{b['gates_passed']}/{b['gates']}"))
+        self.models_table.resizeColumnsToContents()
+
     def create_personal_tab(self):
         """Вкладка личной аналитики (§23)."""
         widget = QWidget()
@@ -441,6 +521,19 @@ class ReportsScreen(BaseScreen):
             rows.append(("PASS", regs.get("passed", 0)))
             rows.append(("Регрессий всего", regs.get("regressions", 0)))
             rows.append(("Улучшений всего", regs.get("improvements", 0)))
+        from report_service import get_velocity
+        try:
+            velo = get_velocity(self.project_path, file_id=self.report_file_id)
+        except Exception:
+            velo = {}
+        if velo:
+            rows.append(("--- Скорость ---", ""))
+            rows.append(("Кейсов/день", velo.get("avg_per_day", 0)))
+            rows.append(("Активных дней", velo.get("active_days", 0)))
+            rows.append(("Осталось", velo.get("remaining", 0)))
+            eta = velo.get("eta_days")
+            rows.append(("Прогноз, дней", eta if eta is not None else "—"))
+            rows.append(("Готово к дате", velo.get("eta_date") or "—"))
         rows.append(("--- Тренд (по дням) ---", ""))
         for d in stats.get("by_day", [])[:14]:
             rows.append((d["day"], d["n"]))
@@ -453,6 +546,40 @@ class ReportsScreen(BaseScreen):
             self.personal_table.setItem(i, 1, QTableWidgetItem(str(v)))
         self.personal_table.resizeColumnsToContents()
 
+    def _create_quality_trend_chart(self, pts):
+        """Линия bad-rate по версиям датасетов."""
+        pal = _chart_palette()
+        labels = [f"{p['dataset']} v{p['version']}" for p in pts]
+        rates = [p["bad_rate"] * 100 for p in pts]
+        plt.style.use(pal["style"])
+        fig, ax = plt.subplots(figsize=(10, 4), dpi=100)
+        fig.patch.set_facecolor(pal["bg"])
+        ax.set_facecolor(pal["bg"])
+        ax.plot(labels, rates, marker="o", color="#CC3333", linewidth=2)
+        ax.set_ylabel("Bad-rate, %", color=pal["fg"])
+        ax.set_title("Качество по версиям", color=pal["fg"], fontsize=14, pad=15)
+        ax.tick_params(colors=pal["fg"])
+        for tick in ax.get_xticklabels():
+            tick.set_rotation(20)
+            tick.set_ha("right")
+            tick.set_color(pal["fg"])
+        fig.tight_layout()
+        buf = BytesIO()
+        fig.savefig(buf, format="png", bbox_inches="tight",
+                    facecolor=fig.get_facecolor())
+        plt.close(fig)
+        buf.seek(0)
+        pixmap = QPixmap()
+        pixmap.loadFromData(buf.read())
+        lbl = QLabel()
+        lbl.setPixmap(pixmap.scaled(
+            700, 450,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation
+        ))
+        lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.charts_layout.addWidget(lbl)
+
     def refresh_charts(self):
         """Обновляет графики."""
         while self.charts_layout.count():
@@ -463,6 +590,7 @@ class ReportsScreen(BaseScreen):
         report = get_overall_report(self.project_path, self.report_file_id)
         files = get_files_report(self.project_path)
         tags = get_tags_report(self.project_path, self.report_file_id)
+        trend = get_quality_trend(self.project_path)
 
         # График 1: Круговая диаграмма статусов
         self._create_pie_chart(report)
@@ -474,6 +602,11 @@ class ReportsScreen(BaseScreen):
         # График 3: Горизонтальная диаграмма тегов
         if tags:
             self._create_tags_bar_chart(tags[:10])
+
+        # График 4: bad-rate по версиям
+        pts = [p for p in trend if p["total"] > 0 and p["bad_rate"] is not None]
+        if pts:
+            self._create_quality_trend_chart(pts)
 
     def _create_pie_chart(self, report):
         """Круговая диаграмма распределения статусов с легендой."""
@@ -732,6 +865,28 @@ class ReportsScreen(BaseScreen):
                 self.setEnabled(True),
                 notify(self, "success", "Экспорт завершён",
                        f"Экспортировано {count} кейсов в:\n{file_path}")),
+            on_error=lambda msg: (
+                self.setEnabled(True),
+                notify(self, "error", "Ошибка", f"Не удалось экспортировать:\n{msg}")),
+        )
+
+    def on_export_management(self):
+        from export_service import export_management_report
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        default_name = f"summary_{timestamp}.xlsx"
+        file_path, _ = QFileDialog.getSaveFileName(
+            self, "Сохранить отчёт для руководства",
+            default_name, "Excel файлы (*.xlsx)")
+        if not file_path:
+            return
+        self.setEnabled(False)
+        run_in_background(
+            export_management_report, self.project_path, file_path,
+            self.report_file_id,
+            on_finished=lambda _ok: (
+                self.setEnabled(True),
+                notify(self, "success", "Экспорт завершён",
+                       f"Отчёт сохранён:\n{file_path}")),
             on_error=lambda msg: (
                 self.setEnabled(True),
                 notify(self, "error", "Ошибка", f"Не удалось экспортировать:\n{msg}")),

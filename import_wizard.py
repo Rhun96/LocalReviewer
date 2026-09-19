@@ -66,7 +66,6 @@ class ImportWizard(QWidget):
         self.sheet_name = None
         self.preview_data = None
         self.mapping_combos = {}
-        self.extra_roles = []
         # Одобрение дубля: digest файла, по которому уже ответили «Импортировать».
         self._dup_approved = None
         self.init_ui()
@@ -232,6 +231,11 @@ class ImportWizard(QWidget):
                               "значение попадёт в метаданные кейса")
         btn_custom.clicked.connect(self.on_add_custom_role)
         custom_layout.addWidget(btn_custom)
+        btn_del_custom = FPushButton("－ Категория")
+        btn_del_custom.setMinimumHeight(32)
+        btn_del_custom.setToolTip("Удалить свою категорию маппинга")
+        btn_del_custom.clicked.connect(self.on_remove_custom_role)
+        custom_layout.addWidget(btn_del_custom)
         custom_layout.addStretch()
         layout.addLayout(custom_layout)
 
@@ -395,6 +399,8 @@ class ImportWizard(QWidget):
         self.title.setText("🔧 МАППИНГ КОЛОНОК")
 
     def build_mapping_ui(self):
+        from mapping_custom import custom_roles, reapply_mapping
+        saved = {h: c.currentData() for h, c in self.mapping_combos.items()}
         while self.mapping_layout.count():
             item = self.mapping_layout.takeAt(0)
             if item.widget():
@@ -403,7 +409,8 @@ class ImportWizard(QWidget):
 
         headers = self.preview_data['headers']
         rows = self.preview_data.get('rows', []) or []
-        roles = list(MAPPING_ROLES) + getattr(self, "extra_roles", [])
+        roles = list(MAPPING_ROLES) + custom_roles(self.project_path)
+        restored = reapply_mapping(headers, roles, saved)
         for idx, header in enumerate(headers):
             # Примеры значений из превью: видно, что за данные в колонке,
             # и сразу заметно, где идентификаторы, а где пусто.
@@ -427,6 +434,12 @@ class ImportWizard(QWidget):
             combo.setMinimumHeight(30)
             for role_code, role_name in roles:
                 combo.addItem(role_name, role_code)
+            want = restored.get(header)
+            if want:
+                for i in range(combo.count()):
+                    if combo.itemData(i) == want:
+                        combo.setCurrentIndex(i)
+                        break
             # Без пресетов: все колонки изначально «Не импортировать»,
             # включая первую, — пользователь назначает роли сам.
             self.mapping_layout.addRow(left, combo)
@@ -434,26 +447,38 @@ class ImportWizard(QWidget):
 
     def on_add_custom_role(self):
         from PySide6.QtWidgets import QInputDialog
+        from mapping_custom import add_custom_category
         name, ok = QInputDialog.getText(
             self, "Своя категория", "Название категории (попадёт в метаданные):")
         if not ok:
             return
-        name = (name or "").strip()
-        if not name:
+        try:
+            add_custom_category(self.project_path, name)
+        except ValueError as e:
+            notify(self, "warning", "Ошибка", str(e))
             return
-        if len(name) > 64 or any(ch in name for ch in "\n\r\t"):
-            notify(self, "warning", "Ошибка", "Название до 64 символов, без переносов")
-            return
-        if not hasattr(self, "extra_roles"):
-            self.extra_roles = []
-        code = f"custom:{name}"
-        if any(c == code for c, _ in self.extra_roles):
-            notify(self, "warning", "Ошибка", "Такая категория уже есть")
-            return
-        self.extra_roles.append((code, f"📎 {name}"))
         self.build_mapping_ui()
         notify(self, "success", "Категория",
-               f"Категория «{name}» добавлена — выбери её в нужных колонках")
+               f"Категория «{str(name).strip()}» добавлена — выбери её в нужных колонках")
+
+    def on_remove_custom_role(self):
+        from PySide6.QtWidgets import QInputDialog
+        from mapping_custom import load_custom_categories, remove_custom_category
+        names = load_custom_categories(self.project_path)
+        if not names:
+            notify(self, "warning", "Внимание", "Своих категорий пока нет")
+            return
+        name, ok = QInputDialog.getItem(
+            self, "Удалить категорию", "Категория:", names, 0, False)
+        if not ok or not name:
+            return
+        try:
+            remove_custom_category(self.project_path, name)
+        except ValueError as e:
+            notify(self, "warning", "Ошибка", str(e))
+            return
+        self.build_mapping_ui()
+        notify(self, "success", "Категория", f"«{name}» удалена")
 
     def on_back_step(self):
         self.step2_widget.setVisible(False)

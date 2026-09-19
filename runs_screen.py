@@ -91,7 +91,6 @@ class RunImportDialog(QDialog):
         self.sheet_name = None
         self.preview = None
         self.combos = {}
-        self.extra_roles = []
         self.result_rows = None
         self._init_ui()
 
@@ -125,6 +124,10 @@ class RunImportDialog(QDialog):
         btn_custom.setToolTip("Именованная категория: значение уйдёт в метаданные ответа")
         btn_custom.clicked.connect(self.on_add_custom_role)
         custom_row.addWidget(btn_custom)
+        btn_del_custom = FPushButton("－ Категория")
+        btn_del_custom.setToolTip("Удалить свою категорию маппинга")
+        btn_del_custom.clicked.connect(self.on_remove_custom_role)
+        custom_row.addWidget(btn_del_custom)
         custom_row.addStretch()
         layout.addLayout(custom_row)
         scroll = QScrollArea()
@@ -205,6 +208,8 @@ class RunImportDialog(QDialog):
             notify(self, "error", "Ошибка", str(e))
 
     def _build_mapping(self):
+        from mapping_custom import custom_roles, reapply_mapping
+        saved = {h: c.currentData() for h, c in self.combos.items()}
         while self.map_layout.count():
             item = self.map_layout.takeAt(0)
             if item.widget():
@@ -212,6 +217,8 @@ class RunImportDialog(QDialog):
         self.combos.clear()
         headers = (self.preview or {}).get("headers", [])
         rows = (self.preview or {}).get("rows", []) or []
+        roles = list(RUN_ROLES) + custom_roles(self.project_path)
+        restored = reapply_mapping(headers, roles, saved)
         guessed = _guess_roles(headers)
         for idx, header in enumerate(headers):
             samples = []
@@ -236,9 +243,9 @@ class RunImportDialog(QDialog):
             except Exception:
                 pass
             combo = FComboBox()
-            for code, name in list(RUN_ROLES) + getattr(self, "extra_roles", []):
+            for code, name in roles:
                 combo.addItem(name, code)
-            want = guessed.get(header)
+            want = restored.get(header) or guessed.get(header)
             if want:
                 for i in range(combo.count()):
                     if combo.itemData(i) == want:
@@ -249,27 +256,39 @@ class RunImportDialog(QDialog):
 
     def on_add_custom_role(self):
         from PySide6.QtWidgets import QInputDialog
+        from mapping_custom import add_custom_category
         name, ok = QInputDialog.getText(
             self, "Своя категория",
             "Название категории (попадёт в метаданные ответа):")
         if not ok:
             return
-        name = (name or "").strip()
-        if not name:
+        try:
+            add_custom_category(self.project_path, name)
+        except ValueError as e:
+            notify(self, "warning", "Ошибка", str(e))
             return
-        if len(name) > 64 or any(ch in name for ch in "\n\r\t"):
-            notify(self, "warning", "Ошибка", "Название до 64 символов, без переносов")
-            return
-        if not hasattr(self, "extra_roles"):
-            self.extra_roles = []
-        code = f"custom:{name}"
-        if any(c == code for c, _ in self.extra_roles):
-            notify(self, "warning", "Ошибка", "Такая категория уже есть")
-            return
-        self.extra_roles.append((code, f"📎 {name}"))
         self._build_mapping()
         notify(self, "success", "Категория",
-               f"Категория «{name}» добавлена — выбери её в нужных колонках")
+               f"Категория «{str(name).strip()}» добавлена — выбери её в нужных колонках")
+
+    def on_remove_custom_role(self):
+        from PySide6.QtWidgets import QInputDialog
+        from mapping_custom import load_custom_categories, remove_custom_category
+        names = load_custom_categories(self.project_path)
+        if not names:
+            notify(self, "warning", "Внимание", "Своих категорий пока нет")
+            return
+        name, ok = QInputDialog.getItem(
+            self, "Удалить категорию", "Категория:", names, 0, False)
+        if not ok or not name:
+            return
+        try:
+            remove_custom_category(self.project_path, name)
+        except ValueError as e:
+            notify(self, "warning", "Ошибка", str(e))
+            return
+        self._build_mapping()
+        notify(self, "success", "Категория", f"«{name}» удалена")
 
     def _mapping(self) -> dict:
         return {h: c.currentData() for h, c in self.combos.items()}

@@ -6,7 +6,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt
 from dataset_service import (
     compare_versions, create_dataset, create_version, delete_version,
-    freeze_version, list_datasets, list_versions,
+    freeze_version, list_datasets, list_versions, set_dataset_locked,
 )
 from ui_compat import FComboBox, FPrimaryButton, FPushButton, clear_in_fluent, notify
 
@@ -46,6 +46,12 @@ class DatasetsDialog(QDialog):
         btn_new_ds = FPrimaryButton("＋ Датасет")
         btn_new_ds.clicked.connect(self._new_dataset)
         row_ds.addWidget(btn_new_ds)
+        btn_lock = FPushButton("🔒")
+        btn_lock.setMaximumWidth(44)
+        btn_lock.setToolTip("Запереть/отпереть датасет: запертый не даёт "
+                            "создавать и удалять версии")
+        btn_lock.clicked.connect(self._toggle_lock)
+        row_ds.addWidget(btn_lock)
         left.addLayout(row_ds)
         top.addLayout(left, 2)
 
@@ -110,8 +116,9 @@ class DatasetsDialog(QDialog):
             datasets = []
         self.ds_list.clear()
         for ds in datasets:
+            mark = " 🔒" if ds.get("locked") else ""
             item = QListWidgetItem(f"{ds['name']} [{ds['dataset_type']}] "
-                                   f"({ds['versions']} верс.)")
+                                   f"({ds['versions']} верс.){mark}")
             item.setData(Qt.ItemDataRole.UserRole, ds["dataset_id"])
             self.ds_list.addItem(item)
         if self.ds_list.count():
@@ -134,7 +141,10 @@ class DatasetsDialog(QDialog):
         self.combo_a.clear()
         self.combo_b.clear()
         for v in versions:
-            text = f"v{v['version_number']} [{v['status']}] ({v['case_count']})"
+            st = v["status"]
+            from dataset_service import VERSION_STATUS_NAMES
+            text = (f"v{v['version_number']} "
+                    f"[{VERSION_STATUS_NAMES.get(st, st)}] ({v['case_count']})")
             item = QListWidgetItem(text)
             item.setData(Qt.ItemDataRole.UserRole, v["version_id"])
             self.ver_list.addItem(item)
@@ -160,6 +170,33 @@ class DatasetsDialog(QDialog):
             self.reload_datasets()
         except ValueError as e:
             notify(self, "warning", "Ошибка", str(e))
+
+    def _toggle_lock(self):
+        ds_id = self._current_ds()
+        if ds_id is None:
+            notify(self, "warning", "Внимание", "Сначала выбери датасет слева")
+            return
+        try:
+            cur = next(d for d in list_datasets(self.project_path)
+                       if d["dataset_id"] == ds_id)
+        except Exception as e:
+            notify(self, "error", "Ошибка", str(e))
+            return
+        locked = bool(cur.get("locked"))
+        from ui_compat import confirm
+        action = "Отпереть" if locked else "Запереть"
+        if not confirm(self, f"{action} датасет",
+                       f"{action} «{cur['name']}»? Запертый датасет не даёт "
+                       "создавать и удалять версии (freeze разрешён).",
+                       ok_text=action, cancel_text="Отмена"):
+            return
+        try:
+            set_dataset_locked(self.project_path, ds_id, not locked)
+            notify(self, "success", "Датасет",
+                   f"«{cur['name']}» {'заперт' if not locked else 'отперт'}")
+            self.reload_datasets()
+        except Exception as e:
+            notify(self, "error", "Ошибка", str(e))
 
     def _reload_files(self):
         from database import db as _db
@@ -262,10 +299,21 @@ class DatasetsDialog(QDialog):
             notify(self, "error", "Ошибка", str(e))
             return
         c = res["counts"]
+        from dataset_service import version_agreement
+        try:
+            agr = version_agreement(self.project_path, res)
+            agree_line = (f"\n🤝 Согласие разметки: {agr['pct']:.0%} "
+                          f"({agr['agreed']}/{agr['matched']}, "
+                          f"в т.ч. со сменой вердикта: {agr['verdict_changed']})"
+                          if agr["pct"] is not None else
+                          "\n🤝 Согласие разметки: нет общих ключей")
+        except Exception:
+            agree_line = ""
         self.cmp_result.setText(
             f"A vs B (по source_id/хэшу): добавлено {c['added']}, "
             f"удалено {c['removed']}, изменено {c['changed']}, "
-            f"без изменений {c['unchanged']}, конфликтов {c['conflicted']}.")
+            f"без изменений {c['unchanged']}, конфликтов {c['conflicted']}."
+            f"{agree_line}")
         self.cmp_details.clear()
         for d in res["details"][:200]:
             ch = ",".join(d.get("changes", []) or [])

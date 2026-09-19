@@ -10,6 +10,8 @@ logger = logging.getLogger(__name__)
 
 DATASET_TYPES = ("working", "golden", "test", "safety", "archive")
 VERSION_STATUSES = ("draft", "review", "frozen", "archived")
+VERSION_STATUS_NAMES = {"draft": "Черновик", "review": "На ревью",
+                        "frozen": "Заморожена", "archived": "В архиве"}
 
 # frozen/archived неизменяемы: разрешены только draft->review->frozen->archived,
 # draft->frozen, review->frozen, frozen->archived. Назад из frozen/archived нельзя.
@@ -46,6 +48,7 @@ def list_datasets(project_path: str) -> list:
     with db(project_path) as conn:
         rows = conn.cursor().execute("""
             SELECT d.dataset_id, d.name, d.description, d.dataset_type,
+                   d.locked,
                    COUNT(v.version_id) AS versions
             FROM datasets d
             LEFT JOIN dataset_versions v ON v.dataset_id = d.dataset_id
@@ -96,6 +99,31 @@ def _dataset_case_columns(cursor) -> set:
         return {"version_id", "case_id", "stable_key", "status", "comment"}
 
 
+def _dataset_locked(cur, dataset_id: int) -> bool:
+    """Locked = состав зафиксирован (терпимо к pre-v16 БД без колонки)."""
+    try:
+        cols = {r[1] for r in cur.execute("PRAGMA table_info(datasets)").fetchall()}
+        if "locked" not in cols:
+            return False
+        row = cur.execute("SELECT locked FROM datasets WHERE dataset_id=?",
+                          (dataset_id,)).fetchone()
+        return bool(row and row["locked"])
+    except Exception:
+        return False
+
+
+def set_dataset_locked(project_path: str, dataset_id: int, locked: bool) -> None:
+    """Запереть/отпереть датасет. Разблокировка — явная, через тот же вызов."""
+    now = utcnow()
+    with db(project_path) as conn:
+        cur = conn.cursor()
+        if not cur.execute("SELECT 1 FROM datasets WHERE dataset_id=?",
+                           (dataset_id,)).fetchone():
+            raise ValueError("Датасет не найден")
+        cur.execute("UPDATE datasets SET locked=?, updated_at=? WHERE dataset_id=?",
+                    (1 if locked else 0, now, dataset_id))
+
+
 def create_version(project_path: str, dataset_id: int, case_ids: list | None = None,
                    description: str = "", file_id: int | None = None) -> int:
     """Полный снимок разметки: статус/комментарий/ошибка/теги/хэш текста.
@@ -112,6 +140,8 @@ def create_version(project_path: str, dataset_id: int, case_ids: list | None = N
                          (dataset_id,)).fetchone()
         if not ds:
             raise ValueError("Датасет не найден")
+        if _dataset_locked(cur, dataset_id):
+            raise ValueError("Датасет заперт (locked): состав зафиксирован")
         if case_ids is None:
             if file_id is not None:
                 case_ids = [r["case_id"] for r in cur.execute(
@@ -280,10 +310,12 @@ def delete_version(project_path: str, version_id: int) -> None:
     """Удалить версию (снимок). Датасет остаётся; frozen — тоже можно, явно."""
     with db(project_path) as conn:
         cur = conn.cursor()
-        row = cur.execute("SELECT status FROM dataset_versions WHERE version_id=?",
+        row = cur.execute("SELECT status, dataset_id FROM dataset_versions WHERE version_id=?",
                           (version_id,)).fetchone()
         if not row:
             raise ValueError("Версия не найдена")
+        if _dataset_locked(cur, row["dataset_id"]):
+            raise ValueError("Датасет заперт (locked): версии удалять нельзя")
         cur.execute("DELETE FROM dataset_versions WHERE version_id=?", (version_id,))
 
 
@@ -372,3 +404,40 @@ def compare_versions(project_path: str, version_a: int, version_b: int) -> dict:
             "counts": {"added": len(added), "removed": len(removed),
                        "changed": len(changed), "unchanged": len(unchanged),
                        "conflicted": len(conflicted)}}
+
+
+def version_agreement(project_path: str, cmp: dict) -> dict:
+    """Согласие разметок двух версий: % совпавших статусов по общим ключам.
+
+    Общие ключи = без изменений + изменённые (конфликты задвоенных ID
+    исключаются, чтобы не врать). Статусы — по base-семантике.
+    """
+    from review_profile_service import code_to_base
+    mapping = code_to_base(project_path)
+    details = (cmp or {}).get("details", []) or []
+    matched = len((cmp or {}).get("unchanged", []) or []) + len(details)
+    agreed = len((cmp or {}).get("unchanged", []) or [])
+    disagreed_keys = []
+    for d in details:
+        if "status" not in (d.get("changes", []) or []):
+            agreed += 1
+            continue
+        before = mapping.get(d.get("before") or "", d.get("before") or "")
+        after = mapping.get(d.get("after") or "", d.get("after") or "")
+        if before == after:
+            agreed += 1
+        else:
+            disagreed_keys.append(d.get("key"))
+    pct = round(agreed / matched, 4) if matched else None
+    ver_changed = []
+    for d in details:
+        if "status" not in (d.get("changes", []) or []):
+            continue
+        before = mapping.get(d.get("before") or "", d.get("before") or "")
+        after = mapping.get(d.get("after") or "", d.get("after") or "")
+        if before != after:
+            ver_changed.append(d.get("key"))
+    return {"matched": matched, "agreed": agreed, "disagreed": matched - agreed,
+            "pct": pct, "disagreed_keys": disagreed_keys,
+            "verdict_changed": len(ver_changed),
+            "verdict_changed_keys": ver_changed}

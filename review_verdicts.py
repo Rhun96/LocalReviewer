@@ -436,6 +436,14 @@ class VerdictsMixin:
         if dlg.exec() == QDialog.DialogCode.Accepted and dlg.result_case_id:
             self._jump_to_case(dlg.result_case_id)
 
+    def open_consistency(self):
+        """Контроль качества: противоречия себе + QC-выборка."""
+        from consistency_dialog import ConsistencyDialog
+        from PySide6.QtWidgets import QDialog
+        dlg = ConsistencyDialog(self.project_path, self)
+        if dlg.exec() == QDialog.DialogCode.Accepted and dlg.result_case_id:
+            self._jump_to_case(dlg.result_case_id)
+
     def open_bug_report(self):
         """Полный Bug Report из текущего кейса (контекст подставляется)."""
         if not self.current_case_id:

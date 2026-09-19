@@ -66,6 +66,13 @@ class ProjectScreen(BaseScreen):
 
         file_buttons.addWidget(btn_add_file)
         file_buttons.addWidget(btn_delete_file)
+        btn_health = FPushButton("🧹 Целостность")
+        btn_health.setMinimumHeight(45)
+        btn_health.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        btn_health.setToolTip("Сироты удалённых файлов: проверка и чистка")
+        btn_health.clicked.connect(self.on_integrity)
+        apply_shadow(btn_health, color='#FFAA00')
+        file_buttons.addWidget(btn_health)
         files_layout.addLayout(file_buttons)
         files_group.setLayout(files_layout)
         apply_shadow(files_group)
@@ -286,6 +293,12 @@ class ProjectScreen(BaseScreen):
             notify(self, "success", "Удаление", "✅ Файл удалён из проекта")
         except Exception as e:
             notify(self, "error", "Ошибка", f"Не удалось удалить файл: {str(e)}")
+
+    def on_integrity(self):
+        """Целостность БД: отчёт о сиротах + чистка."""
+        from maintenance_dialog import IntegrityDialog
+        IntegrityDialog(self.project_path, self).exec()
+        self.load_project_info()
 
     def on_start_review(self):
         """Ревью с выбором датасета — через главный экран (подсветка лупы)."""

@@ -6,6 +6,9 @@ from PySide6.QtWidgets import (
 from ui_compat import (FComboBox, FPrimaryButton, FPushButton,
                        clear_in_fluent, notify)
 import annotation_io_service as aio
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class ExportAnnotationsDialog(QDialog):
@@ -174,7 +177,12 @@ class ImportAnnotationsDialog(QDialog):
         except ValueError as e:
             notify(self, "warning", "Ошибка", str(e))
             return
+        except Exception as e:
+            logger.exception("annotation apply failed")
+            notify(self, "error", "Ошибка", f"Не удалось применить:\n{e}")
+            return
         notify(self, "success", "Импорт",
                f"Применено: {res['applied']}, пропущено: {res['skipped']}, "
-               f"не найдено: {res['not_found']}, ошибок: {res['errors']}")
-        self.accept()
+               f"не найдено: {res['not_found']}, ошибок: {res['errors']}. "
+               "Метки уже в «Ревью» — обновляю предпросмотр.")
+        self._preview()
