@@ -87,6 +87,97 @@ class ReviewScreen(BaseScreen, ProfileMixin, CaseMixin, TableMixin, BulkMixin, V
             self._pending_empty_warning = False
             notify(self, "warning", "Внимание", "Нет кейсов, соответствующих фильтрам")
 
+    def snapshot_session(self) -> dict:
+        """V2.1 P0 §5: текущее место ревью (координация, без бизнес-логики)."""
+        try:
+            filt = None
+            if isinstance(getattr(self, "filters", None), dict):
+                import copy as _cp
+                filt = _cp.deepcopy(self.filters)
+            # file_id: из активного фильтра, иначе из текущего кейса
+            fid = (filt or {}).get("file_id")
+            if not fid and getattr(self, "current_case", None):
+                try:
+                    fid = self.current_case.get("file_id")
+                except Exception:
+                    fid = None
+            return {
+                "screen": "review",
+                "file_id": fid if isinstance(fid, int) else None,
+                "case_id": self.current_case_id,
+                "queue": getattr(self, "queue_mode", "normal"),
+                "filters": filt,
+                "columns": list(getattr(self, "selected_columns", []) or []),
+                "sort": getattr(self, "table_sort", "import"),
+                "page": int(getattr(self, "current_page", 0) or 0),
+                "view": int(getattr(self, "view_stack", None).currentIndex()
+                            if getattr(self, "view_stack", None) is not None else 0),
+            }
+        except Exception:
+            return {"screen": "review"}
+
+    def restore_session(self, state: dict) -> None:
+        """Применить снапшот; битые куски пропускаем, остаёмся на живом."""
+        try:
+            if not isinstance(state, dict):
+                return
+            if isinstance(state.get("columns"), list) and state["columns"]:
+                self.selected_columns = [c for c in state["columns"]
+                                         if isinstance(c, str)][:64]
+            if state.get("sort") in ("import", "unreviewed_first",
+                                     "problematic_first"):
+                self.table_sort = state["sort"]
+            if state.get("queue") in ("normal", "unreviewed", "problematic"):
+                self.queue_mode = state["queue"]
+            if isinstance(state.get("filters"), dict):
+                self.filters = dict(state["filters"])
+            elif state.get("file_id"):
+                self.filters = {"file_id": state["file_id"]}
+            try:
+                self.current_page = max(0, int(state.get("page", 0)))
+            except (TypeError, ValueError):
+                self.current_page = 0
+            self.load_case_ids()
+            cid = state.get("case_id")
+            if cid in (self.case_ids or []):
+                self.load_case(self.case_ids.index(cid))
+            elif self.case_ids:
+                self.load_case(0)
+            try:
+                if state.get("view") in (0, 1) and hasattr(self, "view_stack"):
+                    self.view_stack.setCurrentIndex(int(state["view"]))
+            except Exception:
+                pass
+            self.update_filter_indicator()
+            self.update_queue_indicator()
+            try:
+                self.load_table_data()
+            except Exception:
+                pass
+        except Exception:
+            pass
+
+    def focus_work_area(self):
+        """V2.1 P0 §6.5: фокус остаётся в рабочей области, не на кнопке."""
+        try:
+            from PySide6.QtWidgets import QApplication as _QA
+            fw = _QA.focusWidget()
+            from PySide6.QtWidgets import QLineEdit, QTextEdit, QComboBox, QSpinBox
+            if isinstance(fw, (QLineEdit, QTextEdit, QComboBox, QSpinBox)):
+                return
+            try:
+                from ui_compat import FComboBox as _FC, FLineEdit as _FL
+                from ui_compat import FTextEdit as _FT
+                if isinstance(fw, tuple(t for t in (_FL, _FT, _FC)
+                                        if isinstance(t, type))):
+                    return
+            except Exception:
+                pass
+            tgt = getattr(self, "view_stack", None) or self
+            tgt.setFocus()
+        except Exception:
+            pass
+
     def refresh(self):
         """Перезагрузка при возврате на экран (требуется сайдбару)."""
         self.settings = self.load_review_settings()

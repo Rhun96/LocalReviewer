@@ -12,12 +12,18 @@ from export_service import export_results_to_xlsx, export_report_to_xlsx
 from datetime import datetime
 from ui_base import BaseScreen
 from ui_compat import (FComboBox, FPushButton, FTable, clear_in_fluent,
-                      effective_theme, notify)
+                       effective_theme, notify, polish_table)
 from workers import run_in_background
-import matplotlib
-matplotlib.use('Agg')
-import matplotlib.pyplot as plt
 from io import BytesIO
+
+
+def _plt():
+    """Ленивый pyplot: импорт matplotlib (~0.4с) только при первом графике,
+    а не при каждом открытии проекта."""
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    return plt
 
 
 def _chart_palette() -> dict:
@@ -112,6 +118,10 @@ class ReportsScreen(BaseScreen):
         self.personal_tab = self.create_personal_tab()
         self.tabs.addTab(self.personal_tab, "🙂 Личное")
 
+        # Графики тяжёлые (~0.6с с matplotlib): рисуем только когда вкладка
+        # открыта, а не при каждом заходе в отчёты.
+        self.tabs.currentChanged.connect(self._on_tab_changed)
+
         layout.addWidget(self.tabs)
         clear_in_fluent(self.tabs)
 
@@ -181,6 +191,7 @@ class ReportsScreen(BaseScreen):
         """)
         layout.addWidget(self.overall_table)
         clear_in_fluent(self.overall_table)
+        polish_table(self.overall_table, stretch_last=True)
         widget.setLayout(layout)
         return widget
 
@@ -235,6 +246,7 @@ class ReportsScreen(BaseScreen):
         """)
         layout.addWidget(self.files_table)
         clear_in_fluent(self.files_table)
+        polish_table(self.files_table, stretch_last=True)
         widget.setLayout(layout)
         return widget
 
@@ -261,6 +273,7 @@ class ReportsScreen(BaseScreen):
         """)
         layout.addWidget(self.tags_table)
         clear_in_fluent(self.tags_table)
+        polish_table(self.tags_table, stretch_last=True)
         widget.setLayout(layout)
         return widget
 
@@ -287,6 +300,7 @@ class ReportsScreen(BaseScreen):
         """)
         layout.addWidget(self.checks_table)
         clear_in_fluent(self.checks_table)
+        polish_table(self.checks_table, stretch_last=True)
         widget.setLayout(layout)
         return widget
 
@@ -327,6 +341,13 @@ class ReportsScreen(BaseScreen):
             self.report_file_id = None
         self.load_reports()
 
+    def _on_tab_changed(self, _index: int):
+        try:
+            if self.tabs.currentWidget() is self.charts_tab:
+                self.refresh_charts()
+        except Exception:
+            pass
+
     def load_reports(self):
         try:
             self.load_overall_report()
@@ -335,7 +356,8 @@ class ReportsScreen(BaseScreen):
             self.load_checks_report()
             self.load_models_report()
             self.load_personal_report()
-            self.refresh_charts()
+            if self.tabs.currentWidget() is self.charts_tab:
+                self.refresh_charts()
         except Exception as e:
             self.show_error("Не удалось загрузить отчёты", e)
 
@@ -461,6 +483,10 @@ class ReportsScreen(BaseScreen):
         layout.addWidget(hint)
         self.models_table = FTable()
         layout.addWidget(self.models_table)
+        # Иначе остаётся библиотечный CSS (прозрачный фон и т.п.) и таблица
+        # выбивается из общего стиля.
+        clear_in_fluent(self.models_table)
+        polish_table(self.models_table, stretch_last=True)
         widget.setLayout(layout)
         return widget
 
@@ -495,6 +521,8 @@ class ReportsScreen(BaseScreen):
         layout.addWidget(hint)
         self.personal_table = FTable()
         layout.addWidget(self.personal_table)
+        clear_in_fluent(self.personal_table)
+        polish_table(self.personal_table, stretch_last=True)
         widget.setLayout(layout)
         return widget
 
@@ -504,10 +532,19 @@ class ReportsScreen(BaseScreen):
         rows = []
         rev = stats.get("review", {})
         rows.append(("Размечено кейсов", f"{rev.get('reviewed', 0)}/{rev.get('total', 0)}"))
+        # V2.1 §17: покрытие одной цифрой — понятнее графика.
+        try:
+            cov = (100.0 * rev.get("reviewed", 0) / rev["total"]
+                   if rev.get("total") else 0.0)
+        except Exception:
+            cov = 0.0
+        rows.append(("Покрытие", f"{cov:.0f}%"))
         for key, label in (("good", "Хорошо"), ("bad", "Плохо"),
                            ("uncertain", "Сомневаюсь"), ("duplicate", "Дубль"),
                            ("skip", "Пропущено")):
             rows.append((label, rev.get(key, 0)))
+        rows.append(("False positives автопроверок",
+                     stats.get("false_positives", 0)))
         rows.append(("--- Ошибки по категориям ---", ""))
         for e in stats.get("errors", [])[:10]:
             rows.append((e["category"], e["n"]))
@@ -534,8 +571,8 @@ class ReportsScreen(BaseScreen):
             eta = velo.get("eta_days")
             rows.append(("Прогноз, дней", eta if eta is not None else "—"))
             rows.append(("Готово к дате", velo.get("eta_date") or "—"))
-        rows.append(("--- Тренд (по дням) ---", ""))
-        for d in stats.get("by_day", [])[:14]:
+        rows.append(("--- Тренд (7 дней) ---", ""))
+        for d in stats.get("by_day", [])[:7]:
             rows.append((d["day"], d["n"]))
         self.personal_table.clear()
         self.personal_table.setColumnCount(2)
@@ -548,6 +585,7 @@ class ReportsScreen(BaseScreen):
 
     def _create_quality_trend_chart(self, pts):
         """Линия bad-rate по версиям датасетов."""
+        plt = _plt()
         pal = _chart_palette()
         labels = [f"{p['dataset']} v{p['version']}" for p in pts]
         rates = [p["bad_rate"] * 100 for p in pts]
@@ -610,6 +648,7 @@ class ReportsScreen(BaseScreen):
 
     def _create_pie_chart(self, report):
         """Круговая диаграмма распределения статусов с легендой."""
+        plt = _plt()
         pal = _chart_palette()
         labels = []
         sizes = []
@@ -696,6 +735,7 @@ class ReportsScreen(BaseScreen):
 
     def _create_files_bar_chart(self, files):
         """Столбчатая диаграмма по файлам."""
+        plt = _plt()
         pal = _chart_palette()
         names = [f['file_name'][:20] for f in files]
         totals = [f['cases_count'] for f in files]
@@ -745,6 +785,7 @@ class ReportsScreen(BaseScreen):
 
     def _create_tags_bar_chart(self, tags):
         """Горизонтальная диаграмма тегов."""
+        plt = _plt()
         pal = _chart_palette()
         names = [t['tag_name'] for t in tags]
         counts = [t['cases_count'] for t in tags]

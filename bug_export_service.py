@@ -103,27 +103,87 @@ def render(project_path: str, bug_id: int, fmt: str) -> str:
 
 
 def render_case(project_path: str, case_id: int, fmt: str) -> str:
-    """Контекст кейса без бага (ТЗ V2 §22): Markdown/Plain в буфер."""
+    """Контекст кейса одним действием (V2.1 §8): Markdown/Plain в буфер.
+
+    Поля: CASE ID / SOURCE ID / QUERY / MODEL RESPONSE / REFERENCE / STATUS /
+    CATEGORY / SUBCATEGORY / SEVERITY / COMMENT / AUTOCHECK RESULTS / MODEL /
+    MODEL VERSION / PROMPT VERSION / SYSTEM PROMPT VERSION.
+    Без диалогов, UTF-8, пустые — пустыми, большие поля не режем.
+    """
     if fmt not in ("markdown", "plain"):
         raise ValueError(f"Плохой формат: {fmt!r}")
     from bug_report_service import build_from_case
     pre = build_from_case(project_path, case_id)
-    pseudo = {
-        "bug_id": 0, "title": (pre.get("query") or "")[:80],
-        "status": pre.get("review_status", ""), "severity": "",
-        "description": pre.get("review_comment", ""),
-        "actual_behavior": pre.get("model_response", ""),
-        "expected_behavior": pre.get("expected_behavior", ""),
-        "model_name": pre.get("model_name", ""),
-        "model_version": pre.get("model_version", ""),
-        "prompt_version": pre.get("prompt_version", ""),
-        "system_prompt_version": pre.get("system_prompt_version", ""),
-        "category_name": pre.get("category_name"),
-        "subcategory_name": pre.get("subcategory_name"),
-        "external_tracker": "", "external_id": "", "external_url": "",
-        "cases": [{"case_id": case_id,
-                   "source_id": pre.get("source_id", ""),
-                   "primary_text": pre.get("query", "")}],
-    }
-    text = FORMATTERS[fmt].format(pseudo)
-    return text.replace("Баг #0: ", "Кейс: ").replace("# Bug #0: ", "# Кейс: ")
+    # Статус/коммент/категория/тяжесть — из разметки, не из pseudo-бага.
+    status = pre.get("review_status", "") or ""
+    comment = pre.get("review_comment", "") or ""
+    category = pre.get("category_name") or ""
+    subcategory = pre.get("subcategory_name") or ""
+    case_sev = ""
+    try:
+        from database import db as _db
+        with _db(project_path) as _conn:
+            _err = _conn.execute(
+                "SELECT severity FROM case_errors WHERE case_id=?",
+                (case_id,)).fetchone()
+            if _err and _err["severity"]:
+                case_sev = _err["severity"]
+    except Exception:
+        pass
+    checks_lines: list = []
+    try:
+        from autocheck_service import check_case as _cc, get_check_settings as _gcs
+        try:
+            _settings = _gcs(project_path)
+        except Exception:
+            _settings = None
+        for code, name, details in _cc({"primary_text": pre.get("query", ""),
+                                        "response_text": pre.get("model_response", "")},
+                                       _settings):
+            checks_lines.append(f"{code}: {name}" + (f" ({details})" if details else ""))
+    except Exception:
+        pass
+    if fmt == "markdown":
+        parts = [f"# Кейс #{case_id}", ""]
+        rows = [
+            ("CASE ID", str(case_id)),
+            ("SOURCE ID", pre.get("source_id", "") or ""),
+            ("QUERY", pre.get("query", "") or ""),
+            ("MODEL RESPONSE", pre.get("model_response", "") or ""),
+            ("REFERENCE", pre.get("reference", "") or ""),
+            ("STATUS", status),
+            ("CATEGORY", category),
+            ("SUBCATEGORY", subcategory),
+            ("SEVERITY", case_sev),
+            ("COMMENT", comment),
+            ("AUTOCHECK RESULTS",
+             "; ".join(checks_lines) if checks_lines else "no issues"),
+            ("MODEL", pre.get("model_name", "") or ""),
+            ("MODEL VERSION", pre.get("model_version", "") or ""),
+            ("PROMPT VERSION", pre.get("prompt_version", "") or ""),
+            ("SYSTEM PROMPT VERSION", pre.get("system_prompt_version", "") or ""),
+        ]
+        for k, v in rows:
+            parts.append(f"- **{k}:** {v}" if v else f"- **{k}:** —")
+        return "\n".join(parts)
+    rows = [
+        ("CASE ID", str(case_id)),
+        ("SOURCE ID", pre.get("source_id", "") or ""),
+        ("QUERY", pre.get("query", "") or ""),
+        ("MODEL RESPONSE", pre.get("model_response", "") or ""),
+        ("REFERENCE", pre.get("reference", "") or ""),
+        ("STATUS", status),
+        ("CATEGORY", category),
+        ("SUBCATEGORY", subcategory),
+        ("SEVERITY", case_sev),
+        ("COMMENT", comment),
+        ("AUTOCHECK RESULTS",
+         "; ".join(checks_lines) if checks_lines else "no issues"),
+        ("MODEL", pre.get("model_name", "") or ""),
+        ("MODEL VERSION", pre.get("model_version", "") or ""),
+        ("PROMPT VERSION", pre.get("prompt_version", "") or ""),
+        ("SYSTEM PROMPT VERSION", pre.get("system_prompt_version", "") or ""),
+    ]
+    out = [f"Кейс #{case_id}", ""]
+    out.extend(f"{k}: {v}" for k, v in rows)
+    return "\n".join(out)

@@ -128,6 +128,29 @@ class SettingsScreen(BaseScreen):
         ui_group.setLayout(ui_layout)
         layout.addWidget(ui_group)
 
+        # Рабочее место V2.1 P0: восстановление сессии (глобально, QSettings).
+        session_group = QGroupBox("Рабочее место")
+        session_layout = QFormLayout()
+        self.restore_checkbox = FCheckBox(
+            "Восстанавливать последнее рабочее состояние")
+        self.restore_checkbox.setChecked(True)
+        self.restore_checkbox.setToolTip(
+            "Проект, экран, кейс, фильтр, очередь, столбцы, сортировка, страница")
+        try:
+            from session_service import is_restore_enabled
+            self.restore_checkbox.setChecked(bool(is_restore_enabled()))
+        except Exception:
+            pass
+        self.restore_checkbox.checkStateChanged.connect(self.on_restore_toggled)
+        session_layout.addRow(self.restore_checkbox)
+        self.btn_clean_session = FPushButton("Начать с чистого состояния")
+        self.btn_clean_session.setToolTip(
+            "Сбрасывает только сохранённую сессию, не данные проекта")
+        self.btn_clean_session.clicked.connect(self.on_clean_session)
+        session_layout.addRow(self.btn_clean_session)
+        session_group.setLayout(session_layout)
+        layout.addWidget(session_group)
+
         # Настройки автопроверок
         checks_group = QGroupBox("Автопроверки")
         checks_layout = QFormLayout()
@@ -363,6 +386,29 @@ class SettingsScreen(BaseScreen):
 
     def refresh(self):
         self.load_settings()
+        try:
+            from session_service import is_restore_enabled
+            self.restore_checkbox.setChecked(bool(is_restore_enabled()))
+        except Exception:
+            pass
+
+    def on_restore_toggled(self, *_a):
+        try:
+            from session_service import set_restore_enabled
+            set_restore_enabled(bool(self.restore_checkbox.isChecked()))
+        except Exception:
+            pass
+
+    def on_clean_session(self):
+        """'Начать с чистого': только сессия, данные целы."""
+        try:
+            from session_service import clear_project_session, clear_session
+            clear_project_session(self.project_path)
+            clear_session()
+            notify(self, "success", "Сессия",
+                   "Сохранённое рабочее состояние сброшено. Данные проекта целы.")
+        except Exception as e:
+            notify(self, "error", "Ошибка", str(e))
 
     def open_taxonomy(self):
         from taxonomy_editor import TaxonomyDialog

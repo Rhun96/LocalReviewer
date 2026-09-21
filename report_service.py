@@ -208,10 +208,16 @@ def get_personal_stats(project_path: str) -> dict:
             """).fetchone()
             regs = dict(r)
             regs["passed"] = regs.get("passed") or 0
+        try:
+            fp = cur.execute("SELECT COUNT(*) AS n FROM case_check_verdicts "
+                             "WHERE verdict='false_positive'").fetchone()["n"]
+        except Exception:
+            fp = 0
     buckets = {k: overall.get(k, 0) for k in
                ("total", "reviewed", "good", "bad", "uncertain", "duplicate", "skip")}
     return {"review": buckets, "by_day": by_day, "errors": errors,
-            "bugs": bugs, "regressions": regs, "base_map_known": bool(mapping)}
+            "bugs": bugs, "regressions": regs, "base_map_known": bool(mapping),
+            "false_positives": fp}
 
 
 def _has_table(cursor, name: str) -> bool:

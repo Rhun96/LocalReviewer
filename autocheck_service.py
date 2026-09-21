@@ -443,6 +443,28 @@ def get_case_checks(project_path: str, case_id: int) -> list:
         return out
 
 
+def ensure_case_check(project_path: str, case_id: int, code: str,
+                      name: str, details: str | None = None) -> None:
+    """Гарантирует строку case_checks для вердикта без полного пересчёта.
+
+    Живые проверки кейса видны сразу, а в БД попадают только по
+    «Пересчитать проверки». Вердикт на несохранённую сработку сначала
+    фиксирует саму сработку (иначе precision в отчётах её не увидит),
+    затем пишется как обычно через set_check_verdict.
+    """
+    with db(project_path) as conn:
+        cur = conn.cursor()
+        hit = cur.execute("SELECT 1 FROM case_checks WHERE case_id=? AND check_code=?",
+                          (case_id, code)).fetchone()
+        if hit:
+            return
+        cur.execute("""
+            INSERT INTO case_checks
+                (case_id, check_code, check_name, details, severity, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (case_id, code, name, details or "", rule_severity(code), utcnow()))
+
+
 VERDICTS = ("confirmed", "false_positive")
 
 

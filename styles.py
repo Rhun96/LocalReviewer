@@ -52,6 +52,21 @@ def apply_shadow(widget, color='#00FF41', blur=25, offset=4, alpha=50):
     widget._shadows.append(shadow)
     return shadow
 
+# === Дизайн-токены 0.6.0: один смысл — один размер ===
+# Ритм отступов 4/8/16/24, три кегля, два радиуса. Новые стили — только
+# через токены, захардкоженных px по коду не разбрасываем.
+UI_TOKENS = {
+    "space_xs": 4,
+    "space_s": 8,
+    "space_m": 16,
+    "space_l": 24,
+    "font_title": 15,
+    "font_body": 13,
+    "font_small": 11,
+    "radius_s": 6,
+    "radius_m": 8,
+}
+
 # Глобальный стиль приложения
 APP_STYLE = f"""
 /* === ОБЩИЕ НАСТРОЙКИ === */
@@ -579,14 +594,16 @@ QCheckBox, CheckBox {{
 QGroupBox {{
     background-color: {bg_card};
     border: 1px solid {border};
-    border-radius: 8px;
-    margin-top: 12px;
-    padding: 16px 12px 12px 12px;
+    border-radius: {UI_TOKENS['radius_m']}px;
+    margin-top: {UI_TOKENS['space_m']}px;
+    padding: {UI_TOKENS['space_m']}px 12px 12px 12px;
     font-weight: bold;
+    font-size: {UI_TOKENS['font_body']}px;
     color: {text};
 }}
 QGroupBox::title {{
     subcontrol-origin: margin;
+    subcontrol-position: top left;
     left: 10px;
     padding: 0 4px;
     color: {text};
@@ -599,10 +616,13 @@ QTableWidget, TableWidget {{
     selection-background-color: {accent_soft};
     selection-color: {text};
     border: 1px solid {border};
-    border-radius: 6px;
+    border-radius: {UI_TOKENS['radius_m']}px;
 }}
 QTableWidget::item, TableWidget::item {{
-    padding: 4px;
+    padding: 2px 6px;
+}}
+QTableWidget::item:hover, TableWidget::item:hover {{
+    background-color: {header_bg};
 }}
 QHeaderView {{
     background-color: {header_bg};
@@ -612,9 +632,10 @@ QHeaderView::section {{
     color: {text};
     border: none;
     border-right: 1px solid {border};
-    border-bottom: 1px solid {border};
-    padding: 6px;
+    border-bottom: 2px solid {accent};
+    padding: 6px 8px;
     font-weight: bold;
+    font-size: 12px;
 }}
 /* Квадрат-заглушка в углу таблицы (между номерами строк и заголовками):
    без этого в тёмной теме там белое пятно. */

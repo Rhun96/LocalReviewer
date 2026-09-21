@@ -196,9 +196,10 @@ def test_case_context_and_personal_stats():
     bulk_set_status(p, [ids[0]], "bad")
     bugs.create_bug(p, "t", [ids[0]], severity="High")
     md = bex.render_case(p, ids[0], "markdown")
-    assert "Кейс:" in md and "можно вернуть билет" in md
+    assert "CASE ID" in md and "можно вернуть билет" in md
+    assert "AUTOCHECK RESULTS" in md and "STATUS" in md
     plain = bex.render_case(p, ids[0], "plain")
-    assert "Кейс:" in plain
+    assert "CASE ID" in plain and "можно вернуть билет" in plain
     with pytest.raises(ValueError):
         bex.render_case(p, ids[0], "jira")
     with pytest.raises(ValueError):

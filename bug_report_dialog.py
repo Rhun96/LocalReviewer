@@ -19,6 +19,7 @@ class BugReportDialog(QDialog):
         self.prefill = dict(prefill or {})
         self.bug_id = bug_id
         self.result_id = None
+        self.result_case_id = None
         self._linked: list = []
         self.setWindowTitle("Bug Report" if bug_id is None else f"Баг #{bug_id}")
         self.setMinimumSize(640, 620)
@@ -90,17 +91,23 @@ class BugReportDialog(QDialog):
         self.internal_edit = FLineEdit()
         self.internal_edit.setPlaceholderText("Внутренний комментарий (не для разработчиков)")
         layout.addWidget(self.internal_edit)
-        layout.addWidget(QLabel("Связанные кейсы:"))
+        layout.addWidget(QLabel("Связанные кейсы (двойной клик — открыть):"))
         self.cases_list = QListWidget()
         self.cases_list.setMaximumHeight(110)
+        self.cases_list.itemDoubleClicked.connect(
+            lambda _i: self._open_linked_case())
         layout.addWidget(self.cases_list)
         link_row = QHBoxLayout()
         btn_add = FPushButton("＋ Кейс по ID")
         btn_add.clicked.connect(self._add_case)
         btn_del = FPushButton("－ Убрать")
         btn_del.clicked.connect(self._del_case)
+        btn_goto = FPushButton("➡️ Открыть кейс")
+        btn_goto.setToolTip("Сохранить баг и перейти к кейсу в ревью")
+        btn_goto.clicked.connect(self._open_linked_case)
         link_row.addWidget(btn_add)
         link_row.addWidget(btn_del)
+        link_row.addWidget(btn_goto)
         link_row.addStretch()
         layout.addLayout(link_row)
         host.setLayout(layout)
@@ -308,6 +315,37 @@ class BugReportDialog(QDialog):
         QGuiApplication.clipboard().setText(text)
         notify(self, "success", "Скопировано", f"{label} — в буфере обмена")
 
+    def _open_linked_case(self):
+        """V2.1 §10: сохранить баг и перейти к кейсу (не теряя правки)."""
+        item = self.cases_list.currentItem()
+        if item is None:
+            notify(self, "warning", "Внимание", "Выбери кейс в списке")
+            return
+        cid = self._linked[self.cases_list.currentRow()] \
+            if 0 <= self.cases_list.currentRow() < len(self._linked) else None
+        if not cid:
+            return
+        data = self._collect()
+        if not data["title"]:
+            notify(self, "warning", "Ошибка",
+                   "Заголовок обязателен — без него баг не сохранить")
+            return
+        try:
+            if self.bug_id is None:
+                self.result_id = bugs.create_bug(
+                    self.project_path, data.pop("title"), self._linked, **data)
+                self.bug_id = self.result_id
+            else:
+                data.pop("title", None)
+                bugs.update_bug(self.project_path, self.bug_id, title=
+                                self.title_edit.text().strip(), **data)
+                self.result_id = self.bug_id
+        except ValueError as e:
+            notify(self, "warning", "Ошибка", str(e))
+            return
+        self.result_case_id = cid
+        self.accept()
+
     def _save(self):
         data = self._collect()
         if not data["title"]:
@@ -353,7 +391,27 @@ class QuickBugDialog(QDialog):
         self.sev_combo = FComboBox()
         for s in bugs.SEVERITIES:
             self.sev_combo.addItem(bugs.BUG_SEVERITY_NAMES.get(s, s), s)
-        self.sev_combo.setCurrentIndex(1)
+        # V2.1 §9: severity по умолчанию — из тяжести кейса, а не Medium.
+        _sev_map = {"low": "Low", "medium": "Medium",
+                    "high": "High", "critical": "Critical"}
+        _default = "Medium"
+        try:
+            from database import db as _db
+            _cid = (prefill or {}).get("case_id")
+            if _cid:
+                with _db(project_path) as _conn:
+                    _row = _conn.execute(
+                        "SELECT severity FROM case_errors WHERE case_id=?",
+                        (_cid,)).fetchone()
+                    if _row and _row["severity"]:
+                        _default = _sev_map.get(str(_row["severity"]).lower(),
+                                                "Medium")
+        except Exception:
+            pass
+        try:
+            self.sev_combo.setCurrentIndex(list(bugs.SEVERITIES).index(_default))
+        except ValueError:
+            self.sev_combo.setCurrentIndex(1)
         layout.addWidget(self.sev_combo)
         btns = QHBoxLayout()
         ok = FPrimaryButton("🐞 Создать")

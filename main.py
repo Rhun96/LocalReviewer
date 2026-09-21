@@ -58,7 +58,62 @@ class StartScreen(QWidget):
         layout.addWidget(btn_open, alignment=Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(btn_exit, alignment=Qt.AlignmentFlag.AlignCenter)
 
+        # V2.1 P0 §18: последние проекты (не искать папку каждый раз).
+        from PySide6.QtWidgets import QLabel as _QL
+        self.recent_label = _QL("")
+        self.recent_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.recent_label.setWordWrap(True)
+        layout.addWidget(self.recent_label)
+        self.recent_box = QWidget()
+        self.recent_layout = QVBoxLayout()
+        self.recent_layout.setSpacing(6)
+        self.recent_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.recent_box.setLayout(self.recent_layout)
+        layout.addWidget(self.recent_box, alignment=Qt.AlignmentFlag.AlignCenter)
+
         self.setLayout(layout)
+        self.refresh_recent()
+
+    def refresh_recent(self):
+        try:
+            from session_service import get_recent_projects
+            items = get_recent_projects()
+        except Exception:
+            items = []
+        # чистим старые кнопки
+        while self.recent_layout.count():
+            it = self.recent_layout.takeAt(0)
+            if it.widget():
+                it.widget().deleteLater()
+        if not items:
+            self.recent_label.setText("")
+            return
+        self.recent_label.setText("Недавние проекты:")
+        for it in items[:5]:
+            path, ok = it["path"], it["available"]
+            name = Path(path).name or path
+            btn = FPushButton(f"{name}" + ("" if ok else " (папка недоступна)"))
+            btn.setMinimumWidth(280)
+            btn.setToolTip(path)
+            btn.setEnabled(ok)
+            btn.clicked.connect(lambda _c, p=path: self._open_recent(p))
+            self.recent_layout.addWidget(btn, alignment=Qt.AlignmentFlag.AlignCenter)
+
+    def _open_recent(self, path):
+        from pathlib import Path as _P
+        if not (_P(path) / "project.sqlite").exists():
+            notify(self, "warning", "Папка недоступна",
+                   f"В папке нет базы:\n{path}\nЗапись оставлена в списке.")
+            self.refresh_recent()
+            return
+        self.main_window.open_project(path)
+
+    def showEvent(self, event):
+        try:
+            self.refresh_recent()
+        except Exception:
+            pass
+        super().showEvent(event)
 
     def on_create_project(self):
         folder = QFileDialog.getExistingDirectory(
@@ -231,6 +286,7 @@ class MainWindow(_BaseWindow):
             self.stack.setCurrentWidget(self.start_screen)
 
         self.project_window = None
+        self.current_project_path = None
 
     def _nav_icon(self, name: str):
         return getattr(self._FIF, name)
@@ -268,8 +324,20 @@ class MainWindow(_BaseWindow):
                    "Перед миграцией создан бэкап в папке backups/.\n"
                    "Подробности — в logs/localreviewer.log.")
             return
+        self._save_session(silent=True)
         self._close_project()
         self.project_window = ProjectWindow(folder, self)
+        self.current_project_path = str(folder)
+        try:
+            from session_service import add_recent_project
+            add_recent_project(str(folder))
+        except Exception:
+            pass
+        try:
+            from saved_filter_service import ensure_preset_views
+            ensure_preset_views(str(folder))
+        except Exception:
+            pass
         if FLUENT:
             for key, icon_name, text in self.NAV_ITEMS:
                 screen = self.project_window.screens[key]
@@ -279,10 +347,16 @@ class MainWindow(_BaseWindow):
         else:
             self.stack.addWidget(self.project_window)
             self.stack.setCurrentWidget(self.project_window)
+        self._restore_session()
 
     def _close_project(self):
         if not self.project_window:
+            self.current_project_path = None
             return
+        try:
+            self._save_session(silent=True)
+        except Exception:
+            pass
         if FLUENT:
             for key, _icon_name, _text in self.NAV_ITEMS:
                 screen = self.project_window.screens.get(key)
@@ -298,6 +372,7 @@ class MainWindow(_BaseWindow):
             self.stack.removeWidget(self.project_window)
             self.project_window.deleteLater()
         self.project_window = None
+        self.current_project_path = None
 
     def go_home(self):
         """Возврат на стартовый экран."""
@@ -307,11 +382,13 @@ class MainWindow(_BaseWindow):
         else:
             self.stack.setCurrentWidget(self.start_screen)
 
-    def show_screen(self, key, filters=None):
+    def show_screen(self, key, filters=None, fresh=True):
         """Показать экран проекта; для ревью можно передать фильтры.
 
         Единая точка навигации: подсветка в меню всегда соответствует контенту.
         Строгий режим «Плохо» блокирует уход с недозаполненного кейса.
+        fresh=False — без сброса вида (для восстановления сессии: состояние
+        накатит restore_session одним проходом вместо тройной загрузки).
         """
         pw = self.project_window
         if not pw or key not in pw.screens:
@@ -338,28 +415,37 @@ class MainWindow(_BaseWindow):
         screen = pw.screens[key]
         if filters is not None and hasattr(screen, "filters"):
             screen.filters = filters
-        if hasattr(screen, "current_page"):
-            screen.current_page = 0
-        if hasattr(screen, "current_index"):
-            screen.current_index = 0
-        if hasattr(screen, "bulk_selected"):
-            try:
-                screen.bulk_selected.clear()
-            except Exception:
-                pass
-        if hasattr(screen, "load_case_ids"):
-            try:
-                screen.load_case_ids()
-            except Exception:
-                pass
+        if fresh:
+            if hasattr(screen, "current_page"):
+                screen.current_page = 0
+            if hasattr(screen, "current_index"):
+                screen.current_index = 0
+            if hasattr(screen, "bulk_selected"):
+                try:
+                    screen.bulk_selected.clear()
+                except Exception:
+                    pass
+            if hasattr(screen, "load_case_ids"):
+                try:
+                    screen.load_case_ids()
+                except Exception:
+                    pass
+        # Экраны только что построены со свежими данными; при restore
+        # (fresh=False) повторный refresh — лишняя загрузка, пропускаем
+        # (включая refresh из currentChanged-сигнала).
+        if not fresh:
+            self._skip_refresh_once = True
         if FLUENT:
             if self.stackedWidget.currentWidget() is not screen:
                 self.switchTo(screen)
-            else:
+                if fresh:
+                    self._refresh_widget(screen)
+            elif fresh:
                 self._refresh_widget(screen)
         else:
             pw.stack.setCurrentWidget(screen)
-            self._refresh_widget(screen)
+            if fresh:
+                self._refresh_widget(screen)
 
     def _refresh_widget(self, widget):
         refresh = getattr(widget, "refresh", None)
@@ -369,19 +455,84 @@ class MainWindow(_BaseWindow):
             except Exception:
                 pass
 
-    def closeEvent(self, event):
-        """При закрытии окна сохраняем черновик комментария (silent)."""
+    def _save_session(self, silent=True):
+        """V2.1 P0 §5: снапшот рабочего места (черновик + sess_*-ключи)."""
         try:
             pw = self.project_window
-            if pw is not None:
-                screen = pw.screens.get("review")
-                if screen is not None and getattr(screen, "current_case_id", None):
-                    screen.save_comment(silent=True)
+            if pw is None or not self.current_project_path:
+                return
+            from session_service import is_restore_enabled, save_project_session
+            if not is_restore_enabled():
+                return
+            rev = pw.screens.get("review")
+            if rev is not None and getattr(rev, "current_case_id", None):
+                try:
+                    rev.save_comment(silent=True)
+                except Exception:
+                    pass
+                try:
+                    save_project_session(self.current_project_path,
+                                         rev.snapshot_session())
+                except Exception:
+                    pass
+            # активный экран запоминаем отдельно (review уже внутри snapshot)
+            try:
+                cur = None
+                if FLUENT:
+                    cur = self.stackedWidget.currentWidget()
+                else:
+                    cur = pw.stack.currentWidget()
+                for key, scr in pw.screens.items():
+                    if scr is cur and key != "review":
+                        save_project_session(self.current_project_path,
+                                             {"screen": key})
+                        break
+            except Exception:
+                pass
+        except Exception:
+            if not silent:
+                raise
+
+    def _restore_session(self):
+        """Восстановить последнее место одним проходом; битое — молча пропуск."""
+        try:
+            from session_service import is_restore_enabled, load_project_session
+            if not is_restore_enabled():
+                return
+            pw = self.project_window
+            if pw is None or not self.current_project_path:
+                return
+            state = load_project_session(self.current_project_path)
+            if not state:
+                return
+            screen = state.get("screen", "project")
+            if screen not in pw.screens or screen == "project":
+                return
+            try:
+                if screen == "review":
+                    # fresh=False: без сброса и предзагрузки, restore сам
+                    # один раз загрузит очередь + кейс + таблицу.
+                    self.show_screen(screen, fresh=False)
+                    pw.screens["review"].restore_session(state)
+                else:
+                    self.show_screen(screen)
+            except Exception:
+                pass
+        except Exception:
+            pass
+
+    def closeEvent(self, event):
+        """При закрытии: черновик + снапшот сессии (данные не трогаем)."""
+        try:
+            self._save_session(silent=True)
         except Exception:
             pass
         super().closeEvent(event)
 
     def _on_page_changed(self, _index: int):
+        if getattr(self, "_skip_refresh_once", False):
+            self._skip_refresh_once = False
+            return
         self._refresh_widget(self.stackedWidget.currentWidget())
 
 
@@ -403,6 +554,23 @@ def main():
             break
     window = MainWindow()
     window.show()
+    # V2.1 P0 §5.3: быстрый возврат туда, где остановился. Отложенно —
+    # окно сначала отрисовывается, тяжёлое открытие не держит старт.
+    try:
+        from PySide6.QtCore import QTimer as _QT
+
+        def _auto_open():
+            try:
+                from session_service import get_last_project, is_restore_enabled
+                if is_restore_enabled():
+                    last = get_last_project()
+                    if last:
+                        window.open_project(last)
+            except Exception:
+                pass
+        _QT.singleShot(0, _auto_open)
+    except Exception:
+        pass
     sys.exit(app.exec())
 
 

@@ -88,3 +88,22 @@ TABLE_PREVIEW_LIMIT = 100
 HISTORY_LIMIT = 500
 MAX_EXPORT_IN_CHUNK = 500
 MAX_BACKUPS_KEEP = 20
+
+# V2.1 §15: типы regression assertions (без LLM, только формальные условия).
+ASSERTION_TYPES = [
+    ("not_empty", "Непустой ответ"),
+    ("min_length", "Мин. длина"),
+    ("max_length", "Макс. длина"),
+    ("contains", "Содержит текст"),
+    ("not_contains", "Не содержит текст"),
+    ("regex", "Регулярное выражение"),
+    ("exact_match", "Точное совпадение"),
+    ("contains_url", "Содержит URL"),
+    ("contains_email", "Содержит email"),
+    ("contains_phone", "Содержит телефон"),
+    ("contains_keyword", "Содержит ключевое слово"),
+    ("no_service_text", "Без служебного текста"),
+]
+
+ASSERTION_SEVERITIES = ("critical", "warning", "info")
+ASSERTION_RESULTS = ("PASS", "FAIL", "SKIPPED")

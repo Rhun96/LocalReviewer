@@ -2,7 +2,7 @@
 
 
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel,
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QMenu,
     QTextEdit, QScrollArea, QGroupBox, QFrame,
     QGridLayout, QSizePolicy, QDialog,
 )
@@ -57,6 +57,14 @@ class CaseMixin:
         case_wrap.setLayout(case_wrap_layout)
         layout.addWidget(case_wrap)
 
+        # Подсветка фрагментов — через правое меню панели ответа
+        # (выдели мышью → правая кнопка → цвет), отдельных кнопок нет.
+        self.answer_browser = None
+        # Последнее выделение кейса: правый клик мимо текста схлопывает
+        # выделение (стиль Windows), а меню должно бить по тому, что только
+        # что выделили, а не серить пунктами. (case_id, start, end).
+        self._last_answer_sel = None
+
         # === 2. Навигация (сразу после текста) ===
         nav_group = QGroupBox("🧭 Навигация")
         nav_layout = QHBoxLayout()
@@ -96,6 +104,31 @@ class CaseMixin:
             nav_layout.setStretch(_i, 1)
         nav_group.setLayout(nav_layout)
         layout.addWidget(nav_group)
+
+        # V2.1 §14: тихая подсказка «нет Bug Report» (не модалка, не авто-баг).
+        self.nobug_widget = QWidget()
+        self.nobug_widget.setObjectName("nobugHint")
+        self.nobug_widget.setStyleSheet(
+            "#nobugHint { border: 1px solid #FFAA00; border-radius: 6px; "
+            "background-color: rgba(255,170,0,0.08); }")
+        _nb_lay = QHBoxLayout()
+        _nb_lay.setContentsMargins(0, 0, 0, 0)
+        self.nobug_label = QLabel("Для этого кейса ещё не создан Bug Report")
+        self.nobug_label.setWordWrap(True)
+        _nb_lay.addWidget(self.nobug_label, 3)
+        _nb_btn = FPushButton("Создать баг")
+        _nb_btn.setMinimumHeight(28)
+        _nb_btn.clicked.connect(self.open_quick_bug)
+        _nb_lay.addWidget(_nb_btn)
+        _nb_hide = FPushButton("✕")
+        _nb_hide.setMaximumWidth(36)
+        _nb_hide.setToolTip("Скрыть до смены кейса")
+        _nb_hide.clicked.connect(self._hide_nobug_hint)
+        _nb_lay.addWidget(_nb_hide)
+        self.nobug_widget.setLayout(_nb_lay)
+        self.nobug_widget.setVisible(False)
+        self._nobug_hidden_for = None
+        layout.addWidget(self.nobug_widget)
 
         # === 3. Автопроверки ===
         self.checks_group = QGroupBox("⚠️ Автопроверки")
@@ -192,34 +225,29 @@ class CaseMixin:
         self.btn_toggle_tags.clicked.connect(self.toggle_tags)
         tags_row = QHBoxLayout()
         tags_row.addWidget(self.btn_toggle_tags)
-        self.btn_taxonomy = FPushButton("⚠ Таксономия…")
-        self.btn_taxonomy.setMinimumHeight(30)
-        self.btn_taxonomy.setToolTip("Редактор категорий и подкатегорий ошибок")
-        self.btn_taxonomy.clicked.connect(self.open_taxonomy_editor)
-        tags_row.addWidget(self.btn_taxonomy)
-        self.btn_new_tag = FPushButton("＋ Тег")
-        self.btn_new_tag.setMinimumHeight(30)
-        self.btn_new_tag.setToolTip("Создать свой тег")
-        self.btn_new_tag.clicked.connect(self.on_create_tag)
-        tags_row.addWidget(self.btn_new_tag)
-        self.btn_del_tag = FPushButton("－ Тег")
-        self.btn_del_tag.setMinimumHeight(30)
-        self.btn_del_tag.setToolTip("Удалить неиспользуемый тег")
-        self.btn_del_tag.clicked.connect(self.on_delete_tag)
-        tags_row.addWidget(self.btn_del_tag)
+        self.btn_more = FPushButton("⋯ Ещё")
+        self.btn_more.setMinimumHeight(30)
+        self.btn_more.setToolTip("Редкие инструменты: таксономия, теги, контроль")
+        self.btn_more.clicked.connect(self.open_more_menu)
+        tags_row.addWidget(self.btn_more)
         self.btn_similar = FPushButton("🔍 Похожие")
         self.btn_similar.setMinimumHeight(30)
         self.btn_similar.setToolTip("Похожие кейсы (TF-IDF) — только контекст")
         self.btn_similar.clicked.connect(self.open_similar)
         tags_row.addWidget(self.btn_similar)
-        self.btn_consistency = FPushButton("⚖️ Контроль")
-        self.btn_consistency.setMinimumHeight(30)
-        self.btn_consistency.setToolTip("Противоречия себе и QC-выборка")
-        self.btn_consistency.clicked.connect(self.open_consistency)
-        tags_row.addWidget(self.btn_consistency)
+        self.btn_history = FPushButton("🕘 История")
+        self.btn_history.setMinimumHeight(30)
+        self.btn_history.setToolTip("История кейса (H)")
+        self.btn_history.clicked.connect(self.open_history)
+        tags_row.addWidget(self.btn_history)
+        self.btn_compare = FPushButton("⇄ Сравнить")
+        self.btn_compare.setMinimumHeight(30)
+        self.btn_compare.setToolTip("Ответы прогонов по кейсу рядом")
+        self.btn_compare.clicked.connect(self.open_compare)
+        tags_row.addWidget(self.btn_compare)
         self.btn_bug = FPushButton("🐞 Баг")
         self.btn_bug.setMinimumHeight(30)
-        self.btn_bug.setToolTip("Создать Bug Report из кейса")
+        self.btn_bug.setToolTip("Создать Bug Report из кейса (B)")
         self.btn_bug.clicked.connect(self.open_bug_report)
         tags_row.addWidget(self.btn_bug)
         self.btn_quick_bug = FPushButton("⚡ Быстрый баг")
@@ -234,7 +262,8 @@ class CaseMixin:
         tags_row.addWidget(self.btn_case_bugs)
         self.btn_context = FPushButton("📤 Контекст")
         self.btn_context.setMinimumHeight(30)
-        self.btn_context.setToolTip("Контекст кейса в буфер (Markdown/Plain)")
+        self.btn_context.setToolTip(
+            "Копировать контекст кейса: клик — Markdown, Shift+клик — Plain")
         self.btn_context.clicked.connect(self.copy_case_context)
         tags_row.addWidget(self.btn_context)
         layout.addLayout(tags_row)
@@ -248,15 +277,160 @@ class CaseMixin:
         widget.setLayout(layout)
         return widget
 
+    def open_more_menu(self):
+        """Редкие инструменты кейса — одним меню вместо ряда кнопок."""
+        # Смайлы можно (проверено: кривизну давали тултипы, их нет).
+        menu = QMenu(self)
+        a_tax = menu.addAction("⚠ Таксономия…")
+        a_tax.triggered.connect(self.open_taxonomy_editor)
+        a_add = menu.addAction("＋ Новый тег")
+        a_add.triggered.connect(self.on_create_tag)
+        a_del = menu.addAction("－ Удалить тег")
+        a_del.triggered.connect(self.on_delete_tag)
+        menu.addSeparator()
+        a_qc = menu.addAction("⚖️ Контроль качества")
+        a_qc.triggered.connect(self.open_consistency)
+        anchor = getattr(self, "btn_more", None) or self
+        try:
+            menu.exec(anchor.mapToGlobal(anchor.rect().bottomLeft()))
+        except Exception:
+            menu.exec()
+
+    def _selection_range_silent(self):
+        """Диапазон выделения в координатах исходника или None (молча)."""
+        browser = getattr(self, "answer_browser", None)
+        if browser is None or not self.current_case_id:
+            return None
+        try:
+            cursor = browser.textCursor()
+            if not cursor.hasSelection():
+                return None
+            text = self.current_case.get("response_text") or ""
+            from highlight_service import (build_doc_map as _map,
+                                           doc_range_to_src as _conv)
+            return _conv(_map(text), len(text),
+                         cursor.selectionStart(), cursor.selectionEnd())
+        except Exception:
+            return None
+
+    def _remember_answer_sel(self):
+        """Запомнить живое выделение (case_id + диапазон исходника)."""
+        try:
+            browser = getattr(self, "answer_browser", None)
+            if browser is None or not self.current_case_id:
+                return
+            cursor = browser.textCursor()
+            if not cursor.hasSelection():
+                return
+            text = self.current_case.get("response_text") or ""
+            from highlight_service import (build_doc_map as _map,
+                                           doc_range_to_src as _conv)
+            rng = _conv(_map(text), len(text),
+                        cursor.selectionStart(), cursor.selectionEnd())
+            if rng is not None:
+                self._last_answer_sel = (self.current_case_id,) + rng
+        except Exception:
+            pass
+
+    def _resolve_menu_range(self, pos):
+        """Диапазон для меню: живое → последнее кейса → слово под курсором."""
+        sel = self._selection_range_silent()
+        if sel is not None:
+            return sel
+        try:
+            last = getattr(self, "_last_answer_sel", None)
+            text = (self.current_case.get("response_text") or ""
+                    if getattr(self, "current_case", None) else "")
+            if (last is not None and last[0] == self.current_case_id
+                    and 0 <= last[1] < last[2] <= len(text)):
+                return (last[1], last[2])
+        except Exception:
+            pass
+        try:
+            browser = getattr(self, "answer_browser", None)
+            if browser is not None and self.current_case_id:
+                cursor = browser.cursorForPosition(pos)
+                cursor.select(cursor.SelectionType.WordUnderCursor)
+                if cursor.hasSelection():
+                    browser.setTextCursor(cursor)
+                    return self._selection_range_silent()
+        except Exception:
+            pass
+        return None
+
+    def _answer_menu(self, pos):
+        """Правое меню панели ответа: покрасить выделение / снять."""
+        browser = getattr(self, "answer_browser", None)
+        if browser is None or not self.current_case_id:
+            return
+        if not getattr(self, "_answer_paintable", True):
+            notify(self, "warning", "Подсветка",
+                   "Несколько колонок ответа — красить нечего.")
+            return
+        # Диапазон фиксируем ДО открытия меню: живое → последнее кейса →
+        # слово под курсором. Серых пунктов «просто так» больше нет: если
+        # пункт активен — действие ударит ровно по этому диапазону.
+        sel = self._resolve_menu_range(pos)
+        has_sel = sel is not None
+        menu = QMenu(browser)
+        _a_g, _a_r, _a_y, _a_un = self._wire_answer_actions(menu, sel)
+        for _a in (_a_g, _a_r, _a_y, _a_un):
+            _a.setEnabled(has_sel)
+        menu.addSeparator()
+        a_all = menu.addAction("✕ Снять всё с кейса")
+        a_all.triggered.connect(self.clear_paint)
+        try:
+            menu.exec(browser.mapToGlobal(pos))
+        except Exception:
+            menu.exec()
+
+    def _wire_answer_actions(self, menu, sel):
+        """Пункты меню подсветки с готовым диапазоном (тестируемо отдельно).
+
+        Важно: triggered шлёт флаг checked первым аргументом — лямбда без
+        `_checked` первым съедала сохранённый диапазон в `s` (баг
+        «cannot unpack non-iterable bool»).
+        """
+        a_g = menu.addAction("🟩 Хорошо")
+        a_r = menu.addAction("🟥 Косяк")
+        a_y = menu.addAction("🟨 Важно")
+        a_un = menu.addAction("🧽 Снять с выделенного")
+        a_g.triggered.connect(
+            lambda _checked=False, s=sel: self.paint_selection("green", s))
+        a_r.triggered.connect(
+            lambda _checked=False, s=sel: self.paint_selection("red", s))
+        a_y.triggered.connect(
+            lambda _checked=False, s=sel: self.paint_selection("yellow", s))
+        a_un.triggered.connect(
+            lambda _checked=False, s=sel: self.unpaint_selection(s))
+        return a_g, a_r, a_y, a_un
+
     def open_history(self):
-        """Переход к истории (H)."""
+        """Переход к истории (H) — сразу с фильтром по текущему кейсу."""
         mw = getattr(getattr(self, "parent_window", None), "main_window", None)
         if mw is not None and hasattr(mw, "show_screen"):
             mw.show_screen("history")
+            try:
+                hs = mw.project_window.screens.get("history")
+                if hs is not None and self.current_case is not None:
+                    key = (self.current_case.get("source_id")
+                           or str(self.current_case_id))
+                    if hasattr(hs, "case_filter"):
+                        hs.case_filter.setText(str(key))
+                        hs.load_history()
+            except Exception:
+                pass
 
     def load_case(self, index: int):
         if index < 0 or index >= len(self.case_ids):
             return
+        # Скрытие хинта «нет бага» живёт только в пределах кейса:
+        # на новом кейсе решение показываем заново.
+        try:
+            if self.case_ids[index] != getattr(self, "current_case_id", None):
+                self._nobug_hidden_for = None
+        except Exception:
+            pass
         # Строгий режим: не даём тихо сменить кейс и сбросить pending.
         # load_case вызывается только после _bad_can_leave, но bulk/_done и
         # программные переходы могли прийти в обход — проверяем здесь тоже.
@@ -355,13 +529,15 @@ class CaseMixin:
         def _box(title: str):
             # Панель + обычный заголовок вместо вложенного QGroupBox:
             # вложенные группы криво рисуют заголовки.
+            from styles import UI_TOKENS as _T
             panel = QFrame()
             panel.setObjectName("caseBox")
             panel.setStyleSheet(
-                "#caseBox { border: 1px solid #3a3a3a; border-radius: 8px; }")
+                "#caseBox { border: 1px solid #3a3a3a; "
+                f"border-radius: {_T['radius_m']}px; }}")
             lay = QVBoxLayout()
-            lay.setSpacing(6)
-            lay.setContentsMargins(10, 10, 10, 10)
+            lay.setSpacing(_T['space_s'])
+            lay.setContentsMargins(12, 12, 12, 12)
             lay.addWidget(_header(title))
             panel.setLayout(lay)
             return panel, lay
@@ -405,16 +581,17 @@ class CaseMixin:
             lay.addWidget(_text_widget(topic))
             self.case_layout.addWidget(box, 1)
 
-        # 2. Текст (запрос): подпись колонки — только если их несколько.
-        box, lay = _box("📝 Текст")
+        # 2. Текст (запрос): один смысл — один заголовок.
+        # Имя колонки живёт в заголовке панели, внутри — только если их много.
+        text_title = ("📝 Текст" if len(text_cols) != 1
+                      else f"📝 Текст · {text_cols[0]}")
+        box, lay = _box(text_title)
         if text_cols:
             for col_name in text_cols:
                 if len(text_cols) > 1:
                     lay.addWidget(_header(f"📌 {col_name}:"))
                 lay.addWidget(_text_widget(raw_data.get(col_name, '')))
         else:
-            # Одна колонка Запроса без Темы — показываем как есть.
-            lay.addWidget(_header("📌 Запрос:"))
             lay.addWidget(_text_widget(self.current_case.get('primary_text')))
         source = (metadata.get('source') or '').strip()
         if source and not topic:
@@ -430,18 +607,147 @@ class CaseMixin:
             lay.addWidget(src_text)
         self.case_layout.addWidget(box, 2)
 
-        # 3. Ответ (шире остальных, чтобы меньше скроллить)
-        box, lay = _box("💬 Ответ")
-        if response_cols:
+        # 3. Ответ (шире остальных, чтобы меньше скроллить).
+        # Одиночный ответ — рич-панель с подсветкой фрагментов;
+        # несколько колонок — как раньше labels, красить тут нечего.
+        from PySide6.QtWidgets import QTextBrowser as _QTB
+        ans_title = ("💬 Ответ" if len(response_cols) != 1
+                     else f"💬 Ответ · {response_cols[0]}")
+        box, lay = _box(ans_title)
+        # Одна колонка = канонический ответ, красить можно; несколько —
+        # labels, меню подсветки недоступно (смещения неоднозначны).
+        multi = len(response_cols) > 1
+        self._answer_paintable = not multi
+        if multi:
             for col_name in response_cols:
-                if len(response_cols) > 1:
-                    lay.addWidget(_header(f"💬 {col_name}:"))
+                lay.addWidget(_header(f"💬 {col_name}:"))
                 lay.addWidget(_text_widget(raw_data.get(col_name, '')))
+            self.answer_browser = None
         else:
-            lay.addWidget(_text_widget(self.current_case.get('response_text')))
+            try:
+                browser = _QTB()
+                browser.setReadOnly(True)
+                browser.setOpenLinks(False)
+                browser.setStyleSheet("font-size: 14px; padding: 6px;")
+                browser.setToolTip("Выдели фрагмент → правая кнопка: "
+                                   "покрасить / снять подсветку")
+                browser.setContextMenuPolicy(
+                    Qt.ContextMenuPolicy.CustomContextMenu)
+                browser.customContextMenuRequested.connect(
+                    self._answer_menu)
+                try:
+                    browser.selectionChanged.connect(
+                        self._remember_answer_sel)
+                except Exception:
+                    pass
+                lay.addWidget(browser)
+                self.answer_browser = browser
+                self._render_answer()
+            except Exception:
+                self.answer_browser = None
+                lay.addWidget(_text_widget(
+                    self.current_case.get('response_text')))
         self.case_layout.addWidget(box, 4)
 
         self.case_layout.addStretch(0)
+
+    def _render_answer(self):
+        """Перерисовать панель ответа с подсветками."""
+        browser = getattr(self, "answer_browser", None)
+        if browser is None or not self.current_case_id:
+            return
+        try:
+            import highlight_service as hl
+            browser.setHtml(hl.render_answer_html(
+                self.project_path, self.current_case_id))
+            try:
+                h = int(browser.document().size().height()) + 12
+                browser.setFixedHeight(max(60, min(h, 600)))
+            except Exception:
+                pass
+        except Exception as e:
+            logger.warning("answer render failed: %s", e)
+
+    def _answer_selection(self):
+        """(start, end) выделения в ответе или None (с подсказкой)."""
+        browser = getattr(self, "answer_browser", None)
+        if browser is None or not self.current_case_id:
+            return None
+        cursor = browser.textCursor()
+        if not cursor.hasSelection():
+            notify(self, "warning", "Подсветка",
+                   "Выдели фрагмент текста в ответе мышью.")
+            return None
+        text = self.current_case.get("response_text") or ""
+        try:
+            from highlight_service import (build_doc_map as _map,
+                                           doc_range_to_src as _conv)
+            rng = _conv(_map(text), len(text),
+                        cursor.selectionStart(), cursor.selectionEnd())
+        except Exception:
+            rng = None
+        if rng is None:
+            notify(self, "warning", "Подсветка", "Пустое выделение.")
+            return None
+        return rng
+
+    def paint_selection(self, color: str, sel=None):
+        """Покрасить выделенный в ответе фрагмент.
+
+        sel — готовый диапазон (из меню, зафиксирован до exec); иначе читаем
+        живой курсор с подсказками.
+        """
+        if not self.current_case_id:
+            return
+        try:
+            if sel is None:
+                sel = self._answer_selection()
+                if sel is None:
+                    return
+            s, e = sel
+            import highlight_service as hl
+            hl.add_highlight(self.project_path, self.current_case_id,
+                             s, e, color)
+            self._render_answer()
+        except ValueError as e:
+            notify(self, "warning", "Подсветка", str(e))
+        except Exception as e:
+            self.show_error("Не удалось покрасить фрагмент", e)
+
+    def unpaint_selection(self, sel=None):
+        """Снять подсветку только с выделенного (края обрезаются, не стираются)."""
+        if not self.current_case_id:
+            return
+        try:
+            if sel is None:
+                sel = self._answer_selection()
+                if sel is None:
+                    return
+            s, e = sel
+            import highlight_service as hl
+            n = hl.remove_range(self.project_path, self.current_case_id, s, e)
+            self._render_answer()
+            notify(self, "success" if n else "warning", "Подсветка",
+                   f"Снято с фрагмента: {n}" if n else
+                   f"Под выделением {s}–{e} подсветок нет.")
+        except ValueError as e:
+            notify(self, "warning", "Подсветка", str(e))
+        except Exception as e:
+            self.show_error("Не удалось снять подсветку", e)
+
+    def clear_paint(self):
+        """Снять все подсветки кейса."""
+        if not self.current_case_id:
+            return
+        try:
+            import highlight_service as hl
+            n = hl.clear_highlights(self.project_path, self.current_case_id)
+            self._render_answer()
+            if n:
+                notify(self, "success", "Подсветка",
+                       f"Снято фрагментов: {n}")
+        except Exception as e:
+            self.show_error("Не удалось снять подсветку", e)
 
     def update_info_label(self):
         if not self.current_case:
@@ -468,6 +774,30 @@ class CaseMixin:
             from bug_report_service import bugs_for_case
             n = len(bugs_for_case(self.project_path, self.current_case_id))
             self.btn_case_bugs.setText(f"🐞 Баги ({n})")
+        except Exception:
+            n = 0
+        self._refresh_nobug_hint(base, n)
+
+    def _hide_nobug_hint(self):
+        self._nobug_hidden_for = self.current_case_id
+        try:
+            self.nobug_widget.setVisible(False)
+        except Exception:
+            pass
+
+    def _refresh_nobug_hint(self, base: str, bug_count: int) -> None:
+        """V2.1 §14: только Bad + причина + high/critical + нет бага."""
+        try:
+            show = (
+                base == "bad"
+                and bug_count == 0
+                and getattr(self, "current_error", None)
+                and (self.current_error or {}).get("category_id")
+                and str((self.current_error or {}).get("severity", "")).lower()
+                in ("high", "critical")
+                and self._nobug_hidden_for != self.current_case_id
+            )
+            self.nobug_widget.setVisible(bool(show))
         except Exception:
             pass
 
@@ -822,9 +1152,29 @@ class CaseMixin:
                     # Разовый вопрос без блокировки.
                     if self._ask_error_cause():
                         self._bad_cause_done = True
+            # Свежая разметка — свежее решение по хинту (снятое ✕ не тянем).
+            self._nobug_hidden_for = None
             self.update_info_label()
             self.update_queue_indicator()
             self.save_indicator.setText(f"💾 Статус сохранён: {status}")
+            # V2.1 §14: автопереход увёл бы с кейса до того, как увидят
+            # инлайн-подсказку, — дублируем её инфобаром (5 сек, без модалки).
+            # Только на переходе в Bad (повторные сохранения не спамят).
+            if (is_bad and getattr(self, "_bad_cause_done", False)
+                    and self._status_base(old_status) != "bad"):
+                try:
+                    _sev = str((getattr(self, "current_error", None) or {})
+                               .get("severity", "")).lower()
+                    if _sev in ("high", "critical"):
+                        from bug_report_service import bugs_for_case as _bfc
+                        if not _bfc(self.project_path, self.current_case_id):
+                            notify(self, "warning", "Нет Bug Report",
+                                   "Кейс — «Плохо» "
+                                   f"({ 'критическая' if _sev == 'critical' else 'высокая'} "
+                                   "тяжесть), баг не создан. "
+                                   "Кнопка «⚡ Быстрый баг» — в карточке кейса.")
+                except Exception:
+                    pass
             if self.settings.get('auto_next_case', True):
                 self.next_case()
         except Exception as e:

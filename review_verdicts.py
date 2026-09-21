@@ -61,7 +61,12 @@ class VerdictsMixin:
         self._refresh_verdicts()
 
     def _refresh_verdicts(self):
-        """Кнопки вердиктов по срабатываниям из БД (ТЗ §75): ✓ / ✗."""
+        """Кнопки вердиктов по срабатываниям (ТЗ §75): ✓ подтвердить / ✗ ложное.
+
+        Берём из БД (после «Пересчитать проверки»); если там пусто —
+        показываем живые проверки кейса, вердикт тогда сначала фиксирует
+        саму сработку. Повторный клик снимает вердикт.
+        """
         while self.verdicts_layout.count():
             item = self.verdicts_layout.takeAt(0)
             if item.widget():
@@ -77,18 +82,37 @@ class VerdictsMixin:
             logger.warning("verdicts load failed: %s", e)
             self.verdicts_widget.setVisible(False)
             return
-        if not stored:
+        rows = [{"check_code": c.get("check_code", ""),
+                 "check_name": c.get("check_name", c.get("check_code", "")),
+                 "details": c.get("details", ""), "live": False}
+                for c in stored]
+        if not rows and self.current_case:
+            try:
+                live = check_case(self.current_case, get_check_settings(
+                    self.project_path))
+            except Exception:
+                live = []
+            rows = [{"check_code": c[0], "check_name": c[1],
+                     "details": c[2] if len(c) > 2 else "", "live": True}
+                    for c in live]
+        if not rows:
             self.verdicts_widget.setVisible(False)
             return
-        for row, chk in enumerate(stored):
+        for row, chk in enumerate(rows):
             code = chk.get("check_code", "")
             name = chk.get("check_name", code)
             cur = verdicts.get(code)
-            lbl = QLabel(f"{'✅' if cur == 'confirmed' else '❌' if cur else '⚪'} {name}")
+            mark = ('✅' if cur == 'confirmed'
+                    else '❌' if cur == 'false_positive' else '⚪')
+            tail = " (ещё не в базе)" if chk.get("live") and not cur else ""
+            lbl = QLabel(f"{mark} {name}{tail}")
             lbl.setStyleSheet("font-size: 11px;")
+            if chk.get("details"):
+                lbl.setToolTip(str(chk["details"]))
             btn_ok = FPushButton("✓")
             btn_ok.setMaximumWidth(36)
-            btn_ok.setToolTip("Подтвердить: правило сработало верно")
+            btn_ok.setToolTip("Подтвердить: правило сработало верно "
+                              "(повторно — снять)")
             btn_ok.setCheckable(True)
             btn_ok.setChecked(cur == "confirmed")
             self._style_tag_btn(btn_ok, cur == "confirmed")
@@ -97,7 +121,8 @@ class VerdictsMixin:
                     c, None if v == "confirmed" else "confirmed"))
             btn_no = FPushButton("✗")
             btn_no.setMaximumWidth(36)
-            btn_no.setToolTip("Ложное: правило сработало зря")
+            btn_no.setToolTip("Ложное: правило сработало зря "
+                              "(повторно — снять)")
             btn_no.setCheckable(True)
             btn_no.setChecked(cur == "false_positive")
             self._style_tag_btn(btn_no, cur == "false_positive")
@@ -113,7 +138,18 @@ class VerdictsMixin:
         if not self.current_case_id:
             return
         try:
-            from autocheck_service import set_check_verdict
+            from autocheck_service import (
+                ensure_case_check, get_case_checks, set_check_verdict)
+            if not any(c.get("check_code") == check_code for c in
+                       get_case_checks(self.project_path, self.current_case_id)):
+                from autocheck_service import check_case, get_check_settings
+                for c in check_case(self.current_case or {},
+                                    get_check_settings(self.project_path)):
+                    if c[0] == check_code:
+                        ensure_case_check(
+                            self.project_path, self.current_case_id,
+                            c[0], c[1], c[2] if len(c) > 2 else "")
+                        break
             set_check_verdict(self.project_path, self.current_case_id,
                               check_code, verdict)
         except Exception as e:
@@ -505,21 +541,62 @@ class VerdictsMixin:
         dlg = BugReportDialog(self.project_path, None, bug_id, self)
         dlg.exec()
         self.update_info_label()
+        cid = getattr(dlg, "result_case_id", None)
+        if cid and cid in (self.case_ids or []):
+            try:
+                self.load_case(self.case_ids.index(cid))
+            except Exception:
+                pass
 
     def copy_case_context(self):
-        """Контекст кейса в буфер без создания бага (§22)."""
+        """V2.1 §8: одно действие — Markdown в буфер; Shift+клик — Plain."""
         if not self.current_case_id:
             return
-        menu = QMenu(self)
-        for fmt, label in (("markdown", "Markdown"), ("plain", "Plain Text")):
-            action = menu.addAction(label)
-            action.triggered.connect(
-                lambda _c, f=fmt, name=label: self._do_copy_context(f, name))
-        anchor = getattr(self, "btn_context", None) or self
         try:
-            menu.exec(anchor.mapToGlobal(anchor.rect().bottomLeft()))
+            from PySide6.QtCore import Qt as _Qt
+            from PySide6.QtWidgets import QApplication as _QA
+            mods = _QA.keyboardModifiers()
+            fmt = "plain" if (mods & _Qt.KeyboardModifier.ShiftModifier) else "markdown"
         except Exception:
-            menu.exec()
+            fmt = "markdown"
+        self._do_copy_context(fmt, "Plain Text" if fmt == "plain" else "Markdown")
+
+    def open_compare(self):
+        """V2.1 §7 'Сравнить': ответы прогонов по текущему кейсу рядом."""
+        if not self.current_case_id:
+            return
+        cid = self.current_case_id
+        try:
+            from database import db as _db
+            with _db(self.project_path) as _conn:
+                runs = [dict(r) for r in _conn.execute(
+                    "SELECT DISTINCT a.run_id, r.name FROM run_answers a "
+                    "JOIN model_runs r ON r.run_id = a.run_id "
+                    "WHERE a.case_id = ? ORDER BY a.run_id DESC LIMIT 2",
+                    (cid,)).fetchall()]
+        except Exception as e:
+            self.show_error("Не удалось найти прогоны", e)
+            return
+        if len(runs) < 2:
+            notify(self, "warning", "Сравнение",
+                   "Нужно минимум 2 прогона с этим кейсом. "
+                   "Открой «Прогоны» и импортируй ответы.")
+            try:
+                mw = getattr(getattr(self, "parent_window", None),
+                             "main_window", None)
+                if mw is not None and hasattr(mw, "show_screen"):
+                    mw.show_screen("runs")
+            except Exception:
+                pass
+            return
+        try:
+            from compare_dialog import CompareDialog
+            dlg = CompareDialog(self.project_path, runs[1]["run_id"],
+                                runs[0]["run_id"], self)
+            dlg.exec()
+        except Exception as e:
+            self.show_error("Не удалось открыть сравнение", e)
+        # остаёмся на том же кейсе: контекст не разрушен
 
     def _do_copy_context(self, fmt: str, label: str):
         from PySide6.QtGui import QGuiApplication

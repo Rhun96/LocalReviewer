@@ -107,6 +107,28 @@ def clear_in_fluent(*widgets) -> None:
                 pass
 
 
+def polish_table(table, stretch_last: bool = False) -> None:
+    """Единый приличный вид таблицы: без номерного столбца слева, зебра,
+    последний столбец тянется на пустое место (иначе справа тёмная пустота).
+
+    Только оформление: данные, сортировки и скроллы не трогает. Номер строки
+    и так есть колонкой («Строка»/«ID») там, где нужен.
+    """
+    try:
+        vh = table.verticalHeader()
+        vh.setVisible(False)
+    except Exception:
+        pass
+    try:
+        table.setAlternatingRowColors(True)
+    except Exception:
+        pass
+    try:
+        table.horizontalHeader().setStretchLastSection(bool(stretch_last))
+    except Exception:
+        pass
+
+
 def maybe_style(widget, qss: str) -> None:
     """Декоративный тёмный QSS — только в классическом режиме.
 

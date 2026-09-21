@@ -58,3 +58,62 @@ def delete_saved_filter(project_path: str, filter_id: int) -> bool:
         cur = conn.cursor()
         cur.execute("DELETE FROM saved_filters WHERE filter_id=?", (filter_id,))
         return cur.rowcount > 0
+
+
+PRESET_VIEWS = (
+    # V2.1 §13: готовые представления = обычные сохранённые фильтры + вид.
+    # «Регрессия» отдельным пресетом не нужна: regression_results и так
+    # сортируются REGRESSION первым (см. list_regression_results).
+    ("Обычное ревью",
+     {"filters": {"statuses": ["unreviewed"]},
+      "queue_mode": "normal", "sort": "import"}),
+    ("Разбор проблем",
+     {"filters": {"statuses": ["unreviewed"]},
+      "queue_mode": "problematic", "sort": "problematic_first"}),
+    ("Баги",
+     {"filters": {"statuses": ["bad"]},
+      "queue_mode": "normal", "sort": "import"}),
+)
+
+
+_SEED_MARK = "presets_seeded_v1"
+
+
+def ensure_preset_views(project_path: str) -> int:
+    """Seed §13-пресетов один раз на проект (маркер в settings).
+
+    Маркер вместо сверки имён: удалённый пользователем пресет не воскресает
+    при каждом открытии, повторных чтений/записей тоже нет.
+    """
+    from database import db, utcnow
+    try:
+        with db(project_path) as conn:
+            if conn.execute("SELECT 1 FROM settings WHERE key=?",
+                            (_SEED_MARK,)).fetchone():
+                return 0
+    except Exception as e:
+        logger.warning("preset views marker check failed: %s", e)
+        return 0
+    created = 0
+    try:
+        existing = {f["name"] for f in list_saved_filters(project_path)}
+    except Exception as e:
+        logger.warning("preset views list failed: %s", e)
+        return 0
+    for name, payload in PRESET_VIEWS:
+        if name in existing:
+            continue
+        try:
+            save_filter(project_path, name, payload)
+            created += 1
+        except Exception as e:
+            logger.warning("preset view %r failed: %s", name, e)
+    try:
+        with db(project_path) as conn:
+            conn.execute("INSERT OR IGNORE INTO settings (key, value, updated_at)"
+                         " VALUES (?, '1', ?)", (_SEED_MARK, utcnow()))
+    except Exception as e:
+        logger.warning("preset views marker save failed: %s", e)
+    if created:
+        logger.info("seeded %s preset views", created)
+    return created

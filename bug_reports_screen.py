@@ -6,7 +6,7 @@ from PySide6.QtCore import Qt
 from database import db
 from ui_base import BaseScreen
 from ui_compat import (FComboBox, FLineEdit, FPushButton, FPrimaryButton,
-                       clear_in_fluent, confirm, notify)
+                       clear_in_fluent, confirm, notify, polish_table)
 import bug_report_service as bugs
 
 
@@ -61,6 +61,7 @@ class BugReportsScreen(BaseScreen):
         layout.addWidget(self.table, 2)
         try:
             clear_in_fluent(self.table)
+            polish_table(self.table, stretch_last=True)
         except Exception:
             pass
 
@@ -147,6 +148,18 @@ class BugReportsScreen(BaseScreen):
         dlg = BugReportDialog(self.project_path, None, bid, self)
         dlg.exec()
         self.refresh()
+        cid = getattr(dlg, "result_case_id", None)
+        if cid:
+            try:
+                mw = getattr(getattr(self, "parent_window", None),
+                             "main_window", None)
+                if mw is not None and hasattr(mw, "show_screen"):
+                    mw.show_screen("review")
+                    scr = mw.project_window.screens.get("review")
+                    if scr is not None and cid in (scr.case_ids or []):
+                        scr.load_case(scr.case_ids.index(cid))
+            except Exception:
+                pass
 
     def _delete_bug(self):
         bid = self._selected_id()

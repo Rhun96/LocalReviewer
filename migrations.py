@@ -694,3 +694,50 @@ def migrate_to_v16(cursor) -> None:
     if "locked" not in cols:
         cursor.execute("ALTER TABLE datasets ADD COLUMN locked INTEGER DEFAULT 0")
     logger.info("migrated to v16 (dataset locked flag)")
+
+
+def migrate_to_v17(cursor) -> None:
+    """Regression assertions V2.1 §15: формальные проверки ответа без LLM.
+
+    Только CREATE TABLE + INDEX. Результаты НЕ храним — считаются на лету
+    (иначе таблица результатов протухает при каждом новом прогоне).
+    """
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS assertions (
+            assert_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            atype TEXT NOT NULL,
+            params_json TEXT,
+            enabled INTEGER DEFAULT 1,
+            severity TEXT NOT NULL DEFAULT 'warning'
+                CHECK (severity IN ('critical','warning','info')),
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_assertions_enabled "
+                   "ON assertions(enabled)")
+    logger.info("migrated to v17 (regression assertions)")
+
+
+def migrate_to_v18(cursor) -> None:
+    """Подсветка фрагментов ответа (зелёный/красный/жёлтый).
+
+    Только CREATE TABLE + INDEX. Сами подсветки — смещения в тексте ответа;
+    при смене текста ответа протухшие чистим по text_hash при чтении.
+    """
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS case_highlights (
+            highlight_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            case_id INTEGER NOT NULL,
+            start_offset INTEGER NOT NULL,
+            end_offset INTEGER NOT NULL,
+            color TEXT NOT NULL CHECK (color IN ('green','red','yellow')),
+            text_hash TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (case_id) REFERENCES cases(case_id) ON DELETE CASCADE
+        )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_highlights_case "
+                   "ON case_highlights(case_id)")
+    logger.info("migrated to v18 (answer highlights)")

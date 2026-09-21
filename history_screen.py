@@ -5,7 +5,8 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, Signal
 from database import db
 from ui_base import BaseScreen
-from ui_compat import FComboBox, FPushButton, clear_in_fluent, notify
+from ui_compat import (FComboBox, FPushButton, clear_in_fluent, notify,
+                        polish_table)
 import history_service as hs
 
 
@@ -111,6 +112,7 @@ class HistoryScreen(BaseScreen):
         """)
         layout.addWidget(self.history_table)
         clear_in_fluent(self.history_table)
+        polish_table(self.history_table, stretch_last=True)
 
         # Кнопки
         buttons_layout = QHBoxLayout()

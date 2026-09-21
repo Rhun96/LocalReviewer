@@ -172,8 +172,19 @@ class ProfileMixin:
             code = spec.get("code")
             if hotkey and code:
                 _add(hotkey, lambda s=code: self.set_status(s))
-        _add("Right", self.next_case)
-        _add("Left", self.prev_case)
+        def _nav(fn):
+            def _go():
+                if not self._shortcuts_allowed():
+                    return
+                fn()
+                try:
+                    self.focus_work_area()
+                except Exception:
+                    pass
+            return _go
+
+        _add("Right", _nav(self.next_case))
+        _add("Left", _nav(self.prev_case))
         # Ctrl+Z — отмена одиночного действия; в полях ввода работает
         # нативный undo текста (guarded пропускает), вне полей — наш.
         _add("Ctrl+Z", self.undo_single)
@@ -187,10 +198,17 @@ class ProfileMixin:
             _add("S", self.open_similar)
         _add("Ctrl+A", self.on_bulk_select_all)
         _add("Ctrl+Shift+A", self.on_bulk_clear)
-        sc_save = QShortcut(QKeySequence("Ctrl+Return"), self)
-        sc_save.setContext(Qt.ShortcutContext.WindowShortcut)
-        sc_save.activated.connect(self.save_marks_hotkey)
-        self._shortcuts.append(sc_save)
+        # Ctrl+Enter: в Qt Return (основной) и Enter (кейпад) — разные
+        # клавиши, вешаем оба. Без guarded: сохранение должно работать
+        # и внутри полей ввода.
+        for _key in ("Ctrl+Return", "Ctrl+Enter"):
+            try:
+                sc_save = QShortcut(QKeySequence(_key), self)
+                sc_save.setContext(Qt.ShortcutContext.WindowShortcut)
+                sc_save.activated.connect(self.save_marks_hotkey)
+                self._shortcuts.append(sc_save)
+            except Exception:
+                pass
 
     def save_marks_hotkey(self):
         """Ctrl+Enter: сохранить разметку (черновик комментария). Везде."""
@@ -199,5 +217,9 @@ class ProfileMixin:
         self.save_comment(silent=True)
         try:
             self.save_indicator.setText("💾 Сохранено (Ctrl+Enter)")
+        except Exception:
+            pass
+        try:
+            self.focus_work_area()
         except Exception:
             pass

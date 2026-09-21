@@ -12,7 +12,7 @@ from filter_dialog import FilterDialog
 from filter_service import get_filtered_case_ids, get_all_case_ids
 from ui_compat import (
     FCheckBox, FComboBox, FPushButton, FTable, clear_in_fluent,
-    confirm, notify,
+    confirm, notify, polish_table,
 )
 import json
 import logging
@@ -340,6 +340,9 @@ class TableMixin:
         self.cases_table.doubleClicked.connect(self.on_table_double_click)
         layout.addWidget(self.cases_table)
         clear_in_fluent(self.cases_table)
+        # Без stretch: у таблицы всегда горизонтальный скролл, колонки шире
+        # вида — тянуть последнюю некуда.
+        polish_table(self.cases_table)
 
         # Пагинация
         page_layout = QHBoxLayout()
