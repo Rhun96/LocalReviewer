@@ -40,7 +40,7 @@ class DatasetSelectDialog(QDialog):
                 background-color: #0D150D;
                 border: 2px solid #00441A;
                 border-radius: 8px;
-                color: #00FF41;
+                color: #e8e8e8;
                 font-size: 14px;
             }
             QListWidget::item {
@@ -87,7 +87,7 @@ class DatasetSelectDialog(QDialog):
             btn_ok.setStyleSheet("""
                 QPushButton {
                     background-color: #0D150D;
-                    color: #00FF41;
+                    color: #e8e8e8;
                     border: 2px solid #00FF41;
                     border-radius: 8px;
                     padding: 10px 20px;

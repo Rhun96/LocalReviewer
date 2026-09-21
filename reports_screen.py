@@ -79,7 +79,7 @@ class ReportsScreen(BaseScreen):
             }
             QTabBar::tab {
                 background-color: #001A0A;
-                color: #00FF41;
+                color: #e8e8e8;
                 border: 1px solid #00FF41;
                 padding: 10px 20px;
                 font-size: 14px;
@@ -176,14 +176,14 @@ class ReportsScreen(BaseScreen):
             QTableWidget {
                 background-color: #001A0A;
                 border: 1px solid #00FF41;
-                color: #00FF41;
+                color: #e8e8e8;
                 font-size: 14px;
                 gridline-color: #003315;
             }
             QTableWidget::item { padding: 8px; }
             QHeaderView::section {
                 background-color: #003315;
-                color: #00FF41;
+                color: #e8e8e8;
                 border: 1px solid #00FF41;
                 padding: 8px;
                 font-weight: bold;
@@ -231,14 +231,14 @@ class ReportsScreen(BaseScreen):
             QTableWidget {
                 background-color: #001A0A;
                 border: 1px solid #00FF41;
-                color: #00FF41;
+                color: #e8e8e8;
                 font-size: 14px;
                 gridline-color: #003315;
             }
             QTableWidget::item { padding: 8px; }
             QHeaderView::section {
                 background-color: #003315;
-                color: #00FF41;
+                color: #e8e8e8;
                 border: 1px solid #00FF41;
                 padding: 8px;
                 font-weight: bold;
@@ -258,14 +258,14 @@ class ReportsScreen(BaseScreen):
             QTableWidget {
                 background-color: #001A0A;
                 border: 1px solid #00FF41;
-                color: #00FF41;
+                color: #e8e8e8;
                 font-size: 14px;
                 gridline-color: #003315;
             }
             QTableWidget::item { padding: 8px; }
             QHeaderView::section {
                 background-color: #003315;
-                color: #00FF41;
+                color: #e8e8e8;
                 border: 1px solid #00FF41;
                 padding: 8px;
                 font-weight: bold;
@@ -285,14 +285,14 @@ class ReportsScreen(BaseScreen):
             QTableWidget {
                 background-color: #001A0A;
                 border: 1px solid #00FF41;
-                color: #00FF41;
+                color: #e8e8e8;
                 font-size: 14px;
                 gridline-color: #003315;
             }
             QTableWidget::item { padding: 8px; }
             QHeaderView::section {
                 background-color: #003315;
-                color: #00FF41;
+                color: #e8e8e8;
                 border: 1px solid #00FF41;
                 padding: 8px;
                 font-weight: bold;

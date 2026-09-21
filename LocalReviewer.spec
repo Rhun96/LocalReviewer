@@ -1,15 +1,10 @@
 # -*- mode: python ; coding: utf-8 -*-
-from PyInstaller.utils.hooks import collect_all
-
-# Fluent тащим целиком (код + ресурсы qss/иконки + подмодули): иначе в exe
-# тихий fallback в классику (проверено: бандл без qfluentwidgets).
-_qf_datas, _qf_binaries, _qf_hidden = collect_all('qfluentwidgets')
 
 a = Analysis(
     ['main.py'],
     pathex=[],
-    binaries=_qf_binaries,
-    datas=_qf_datas,
+    binaries=[],
+    datas=[],
     hiddenimports=[
         'PySide6.QtCore',
         'PySide6.QtGui',
@@ -22,7 +17,6 @@ a = Analysis(
         'matplotlib',
         'matplotlib.backends.backend_agg',
         'qfluentwidgets',
-        *_qf_hidden,
     ],
     hookspath=[],
     hooksconfig={},

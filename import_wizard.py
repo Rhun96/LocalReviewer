@@ -172,14 +172,14 @@ class ImportWizard(QWidget):
                 background-color: #0D150D;
                 border: 2px solid #00441A;
                 border-radius: 8px;
-                color: #00FF41;
+                color: #e8e8e8;
                 font-size: 11px;
                 gridline-color: #00441A;
             }
             QTableWidget::item { padding: 5px; }
             QHeaderView::section {
                 background-color: #1A3A1A;
-                color: #00FF41;
+                color: #e8e8e8;
                 border: 1px solid #007722;
                 padding: 6px;
                 font-weight: bold;
@@ -265,7 +265,7 @@ class ImportWizard(QWidget):
         btn_import = FPrimaryButton("🚀 Начать импорт")
         btn_import.setMinimumHeight(40)
         btn_import.setStyleSheet("""
-            QPushButton { border-color: #00FF41; color: #00FF41; font-weight: bold; }
+            QPushButton { border-color: #00FF41; color: #e8e8e8; font-weight: bold; }
             QPushButton:hover { background-color: #003315; }
         """)
         btn_import.clicked.connect(self.on_import)

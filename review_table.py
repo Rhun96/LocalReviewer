@@ -313,7 +313,7 @@ class TableMixin:
                 background-color: #0D150D;
                 border: 2px solid #00441A;
                 border-radius: 8px;
-                color: #00FF41;
+                color: #e8e8e8;
                 font-size: 11px;
                 gridline-color: #00441A;
             }
@@ -325,7 +325,7 @@ class TableMixin:
             }
             QHeaderView::section {
                 background-color: #1A3A1A;
-                color: #00FF41;
+                color: #e8e8e8;
                 border: 1px solid #007722;
                 padding: 8px;
                 font-weight: bold;

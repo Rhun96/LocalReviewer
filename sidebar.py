@@ -32,7 +32,7 @@ class Sidebar(QWidget):
         self.logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
         if not FLUENT:
             self.logo.setStyleSheet("""
-                color: #00FF41;
+                color: #e8e8e8;
                 font-size: 14px;
                 font-weight: 900;
                 letter-spacing: 2px;
@@ -132,7 +132,7 @@ class Sidebar(QWidget):
             return """
                 QPushButton {
                     background-color: #1A3A1A;
-                    color: #00FF41;
+                    color: #e8e8e8;
                     border: 1px solid #00FF41;
                     border-radius: 6px;
                     padding: 6px 12px;

@@ -19,6 +19,9 @@ COLORS = {
     'bg_active': '#1A3A1A',
     'bg_sidebar': '#050A05',
     'green_bright': '#00FF41',
+    # Белый текст классики (0.6.1): зелёным остаются только рамки,
+    # подсветки и семантика (статусы/severity). Один токен — смена в 1 месте.
+    'text_bright': '#e8e8e8',
     'green_main': '#00DD38',
     'green_dark': '#00AA2A',
     'green_dim': '#007722',
@@ -75,21 +78,21 @@ QMainWindow {{
 }}
 QWidget {{
     background-color: {COLORS['bg_dark']};
-    color: {COLORS['green_bright']};
+    color: {COLORS['text_bright']};
     font-family: 'Cascadia Code', 'Consolas', 'Courier New', monospace;
     font-size: 13px;
 }}
 
 /* === ЗАГОЛОВКИ === */
 QLabel {{
-    color: {COLORS['green_bright']};
+    color: {COLORS['text_bright']};
     font-size: 13px;
     background: transparent;
 }}
 QLabel#title {{
     font-size: 32px;
     font-weight: 900;
-    color: {COLORS['green_bright']};
+    color: {COLORS['text_bright']};
     padding: 15px;
     letter-spacing: 3px;
 }}
@@ -107,7 +110,7 @@ QPushButton {{
         stop:0 {COLORS['bg_hover']},
         stop:1 {COLORS['bg_card']}
     );
-    color: {COLORS['green_bright']};
+    color: {COLORS['text_bright']};
     border: 2px solid {COLORS['green_dark']};
     border-radius: 8px;
     padding: 8px 10px;
@@ -124,7 +127,7 @@ QPushButton:hover {{
         stop:1 {COLORS['bg_hover']}
     );
     border-color: {COLORS['green_bright']};
-    color: {COLORS['green_bright']};
+    color: {COLORS['text_bright']};
 }}
 QPushButton:pressed {{
     background-color: {COLORS['green_bright']};
@@ -165,7 +168,7 @@ QGroupBox::title {{
     background-color: {COLORS['bg_active']};
     border: 2px solid {COLORS['green_dark']};
     border-radius: 6px;
-    color: {COLORS['green_bright']};
+    color: {COLORS['text_bright']};
     left: 15px;
     font-size: 13px;
 }}
@@ -175,7 +178,7 @@ QLineEdit, QTextEdit, QPlainTextEdit {{
     background-color: {COLORS['bg_input']};
     border: 2px solid {COLORS['green_dim']};
     border-radius: 6px;
-    color: {COLORS['green_bright']};
+    color: {COLORS['text_bright']};
     padding: 10px;
     font-size: 13px;
     selection-background-color: {COLORS['green_dark']};
@@ -193,7 +196,7 @@ QComboBox {{
     background-color: {COLORS['bg_input']};
     border: 2px solid {COLORS['green_dim']};
     border-radius: 6px;
-    color: {COLORS['green_bright']};
+    color: {COLORS['text_bright']};
     padding: 8px 12px;
     font-size: 12px;
 }}
@@ -215,14 +218,14 @@ QComboBox QAbstractItemView {{
     background-color: {COLORS['bg_card']};
     border: 2px solid {COLORS['green_bright']};
     border-radius: 6px;
-    color: {COLORS['green_bright']};
+    color: {COLORS['text_bright']};
     selection-background-color: {COLORS['bg_active']};
 }}
 
 /* === ЧЕКБОКСЫ === */
 QCheckBox {{
     spacing: 10px;
-    color: {COLORS['green_bright']};
+    color: {COLORS['text_bright']};
     font-size: 12px;
 }}
 QCheckBox::indicator {{
@@ -245,7 +248,7 @@ QTableWidget {{
     background-color: {COLORS['bg_card']};
     border: 2px solid {COLORS['green_dim']};
     border-radius: 8px;
-    color: {COLORS['green_bright']};
+    color: {COLORS['text_bright']};
     font-size: 12px;
     gridline-color: {COLORS['border_dim']};
     alternate-background-color: {COLORS['bg_panel']};
@@ -256,7 +259,7 @@ QTableWidget::item {{
 }}
 QTableWidget::item:selected {{
     background-color: {COLORS['bg_active']};
-    color: {COLORS['green_bright']};
+    color: {COLORS['text_bright']};
 }}
 QTableWidget::item:hover {{
     background-color: {COLORS['bg_hover']};
@@ -267,7 +270,7 @@ QHeaderView::section {{
         stop:0 {COLORS['bg_active']},
         stop:1 {COLORS['bg_card']}
     );
-    color: {COLORS['green_bright']};
+    color: {COLORS['text_bright']};
     border: 1px solid {COLORS['green_dim']};
     padding: 10px;
     font-weight: bold;
@@ -279,7 +282,7 @@ QListWidget {{
     background-color: {COLORS['bg_card']};
     border: 2px solid {COLORS['green_dim']};
     border-radius: 8px;
-    color: {COLORS['green_bright']};
+    color: {COLORS['text_bright']};
     font-size: 12px;
     outline: none;
 }}
@@ -293,7 +296,7 @@ QListWidget::item:hover {{
 }}
 QListWidget::item:selected {{
     background-color: {COLORS['bg_active']};
-    color: {COLORS['green_bright']};
+    color: {COLORS['text_bright']};
 }}
 
 /* === ВКЛАДКИ === */
@@ -315,7 +318,7 @@ QTabBar::tab {{
 }}
 QTabBar::tab:selected {{
     background-color: {COLORS['bg_active']};
-    color: {COLORS['green_bright']};
+    color: {COLORS['text_bright']};
     border-color: {COLORS['green_bright']};
     font-weight: bold;
 }}
@@ -381,7 +384,7 @@ QScrollArea {{
 /* === МЕНЮ === */
 QMenu {{
     background-color: {COLORS['bg_card']};
-    color: {COLORS['green_bright']};
+    color: {COLORS['text_bright']};
     border: 2px solid {COLORS['green_bright']};
     border-radius: 8px;
     padding: 8px;
@@ -399,7 +402,7 @@ QSpinBox {{
     background-color: {COLORS['bg_input']};
     border: 2px solid {COLORS['green_dim']};
     border-radius: 6px;
-    color: {COLORS['green_bright']};
+    color: {COLORS['text_bright']};
     padding: 8px;
     font-size: 12px;
 }}
@@ -428,7 +431,7 @@ QProgressBar {{
     border: 2px solid {COLORS['green_dim']};
     border-radius: 8px;
     text-align: center;
-    color: {COLORS['green_bright']};
+    color: {COLORS['text_bright']};
     font-weight: bold;
 }}
 QProgressBar::chunk {{
@@ -451,7 +454,7 @@ QMessageBox {{
     background-color: {COLORS['bg_dark']};
 }}
 QMessageBox QLabel {{
-    color: {COLORS['green_bright']};
+    color: {COLORS['text_bright']};
     font-size: 13px;
 }}
 """

@@ -252,13 +252,6 @@ def apply_theme(mode: str = "system") -> str:
         theme = {"system": _Theme.AUTO, "light": _Theme.LIGHT, "dark": _Theme.DARK}[mode]
         _setTheme(theme)
         _setThemeColor(ACCENT_GREEN)
-        try:
-            # Моноширинный стек вместо шрифта библиотеки: таблицы и код
-            # читаются лучше, вид — как в классике, но со всеми цветами.
-            from qfluentwidgets import setFontFamilies as _setFF
-            _setFF(["Cascadia Code", "Consolas", "Courier New"])
-        except Exception as e:
-            logger.warning("fluent font failed: %s", e)
         from PySide6.QtWidgets import QApplication
         from styles import FLUENT_BASE_DARK, FLUENT_BASE_LIGHT
         app = QApplication.instance()

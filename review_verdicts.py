@@ -299,7 +299,7 @@ class VerdictsMixin:
                     btn.setStyleSheet("""
                         QPushButton {
                             background-color: #0D150D;
-                            color: #00FF41;
+                            color: #e8e8e8;
                             border-color: #007722;
                             padding: 4px 8px;
                             border-radius: 4px;
@@ -342,7 +342,7 @@ class VerdictsMixin:
             btn.setStyleSheet("""
                 QPushButton {
                     background-color: #0D150D;
-                    color: #00FF41;
+                    color: #e8e8e8;
                     border-color: #007722;
                     padding: 4px 8px;
                     border-radius: 4px;

@@ -95,7 +95,7 @@ class HistoryScreen(BaseScreen):
             QTableWidget {
                 background-color: #001A0A;
                 border: 2px solid #00FF41;
-                color: #00FF41;
+                color: #e8e8e8;
                 font-size: 13px;
                 gridline-color: #003315;
             }
@@ -104,7 +104,7 @@ class HistoryScreen(BaseScreen):
             }
             QHeaderView::section {
                 background-color: #003315;
-                color: #00FF41;
+                color: #e8e8e8;
                 border: 1px solid #00FF41;
                 padding: 8px;
                 font-weight: bold;

@@ -59,7 +59,7 @@ class BackupScreen(BaseScreen):
                 background-color: #001A0A;
                 border: 2px solid #00FF41;
                 border-radius: 4px;
-                color: #00FF41;
+                color: #e8e8e8;
                 font-size: 14px;
             }
             QListWidget::item {
