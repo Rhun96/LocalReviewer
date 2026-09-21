@@ -1,3 +1,4 @@
+import logging
 import sys
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
@@ -12,6 +13,8 @@ from ui_compat import (
     FLUENT, FPrimaryButton, FPushButton, FSubtitleLabel, FTitleLabel,
     apply_theme, get_theme_mode, notify,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class StartScreen(QWidget):
@@ -539,6 +542,13 @@ class MainWindow(_BaseWindow):
 def main():
     from app_logging import setup_logging
     setup_logging()
+    try:
+        import qfluentwidgets as _qw
+        _qw_ver = getattr(_qw, "__version__", "?")
+    except Exception:
+        _qw_ver = None
+    # Режим в лог при каждом старте: иначе «почему не тот вид» гадается.
+    logger.info("startup: FLUENT=%s qfluentwidgets=%s", FLUENT, _qw_ver)
     app = QApplication(sys.argv)
     if FLUENT:
         # Fluent рисует сам: глобальный APP_STYLE его бы ломал
