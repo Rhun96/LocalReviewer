@@ -649,6 +649,18 @@ class CaseMixin:
                     self.current_case.get('response_text')))
         self.case_layout.addWidget(box, 4)
 
+        # Эталон (ответ оператора + запасные ключи) — чтобы не лазить
+        # в таблицу за правдой.
+        try:
+            from bug_report_service import case_reference as _cref
+            reference = _cref(metadata)
+        except Exception:
+            reference = (metadata.get('operator_response') or '').strip()
+        if reference:
+            ref_box, ref_lay = _box("📖 Эталон")
+            ref_lay.addWidget(_text_widget(reference))
+            self.case_layout.addWidget(ref_box, 1)
+
         self.case_layout.addStretch(0)
 
     def _render_answer(self):

@@ -16,6 +16,27 @@ BUG_STATUS_NAMES = {"New": "Новый", "Confirmed": "Подтверждён",
 BUG_SEVERITY_NAMES = {"Low": "Низкая", "Medium": "Средняя", "High": "Высокая",
                       "Critical": "Критическая"}
 
+def case_reference(metadata: dict | None) -> str:
+    """Эталонный ответ из метаданных: канонический ключ + запасные.
+
+    Файлы называют колонку по-разному («Эталон», «reference»…), а в маппинге
+    её легко положить в «Дополнительное поле» вместо «Ответа оператора» —
+    эталон при этом должен находиться, а не пропадать молча.
+    """
+    meta = metadata if isinstance(metadata, dict) else {}
+    first = str(meta.get("operator_response") or "").strip()
+    if first:
+        return first
+    norm = {str(k or "").strip().lower(): v for k, v in meta.items()}
+    for key in ("эталон", "эталонный ответ", "reference", "expected",
+                "правильный ответ", "правильный_ответ", "ответ оператора",
+                "ответоператора", "expected_behavior", "эталонный_ответ"):
+        v = str(norm.get(key, "") or "").strip()
+        if v:
+            return v
+    return ""
+
+
 _EDITABLE = ("title", "description", "status", "severity", "category_id",
              "subcategory_id", "model_name", "model_version", "prompt_version",
              "system_prompt_version", "external_tracker", "external_id",
@@ -328,7 +349,7 @@ def build_from_case(project_path: str, case_id: int) -> dict:
         pass
     if not isinstance(meta, dict):
         meta = {}
-    reference = (meta.get("operator_response") or "").strip()
+    reference = case_reference(meta)
     return {
         "case_id": case_id,
         "source_id": (case.get("source_id") or "").strip(),

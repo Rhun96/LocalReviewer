@@ -701,6 +701,21 @@ class ImportWizard(QWidget):
             msg += f"\n⏭ Пропущено дублей/битых: {skipped}."
         if errors:
             msg += f"\n⚠️ Битых строк в файле: {len(errors)}."
+        # Залипший фильтр по старому файлу прятал бы новые кейсы под видом
+        # «закэшированного» ревью — сбрасываем его явно.
+        try:
+            pw = getattr(self, "parent_window", None)
+            rev = (pw.screens.get("review") if pw is not None
+                   and hasattr(pw, "screens") else None)
+            if rev is not None and isinstance(
+                    getattr(rev, "filters", None), dict) \
+                    and rev.filters.get("file_id"):
+                rev.filters = {k: v for k, v in rev.filters.items()
+                               if k != "file_id"}
+                msg += ("\n🎛️ Фильтр по файлу сброшен, чтобы показать "
+                        "новые кейсы.")
+        except Exception:
+            pass
         notify(self, "success", "Импорт завершён", msg)
         self.import_finished.emit()
 

@@ -40,6 +40,11 @@ class RunReviewDialog(QDialog):
         self.prompt_label = QLabel("")
         self.prompt_label.setWordWrap(True)
         right.addWidget(self.prompt_label)
+        self.ref_label = QLabel("")
+        self.ref_label.setWordWrap(True)
+        self.ref_label.setStyleSheet("color: #00AA2A; font-size: 12px;")
+        self.ref_label.setVisible(False)
+        right.addWidget(self.ref_label)
         self.answer_pane = QTextBrowser()
         right.addWidget(self.answer_pane, 2)
         self.status_layout = QGridLayout()
@@ -137,6 +142,22 @@ class RunReviewDialog(QDialog):
             f"\n🆔 {row.get('source_id') or row['stable_key']}")
         self.answer_pane.setPlainText(row.get("answer_text") or "(пусто)")
         self.comment_edit.setPlainText(row.get("review_comment") or "")
+        ref = ""
+        try:
+            if row.get("case_id"):
+                import json as _json
+                from database import db as _db
+                with _db(self.project_path) as _conn:
+                    _m = _conn.execute(
+                        "SELECT metadata_json FROM cases WHERE case_id=?",
+                        (row["case_id"],)).fetchone()
+                if _m and _m["metadata_json"]:
+                    from bug_report_service import case_reference as _cref
+                    ref = _cref(_json.loads(_m["metadata_json"] or "{}"))
+        except Exception:
+            ref = ""
+        self.ref_label.setText(f"📖 Эталон: {ref[:400]}" if ref else "")
+        self.ref_label.setVisible(bool(ref))
         cur_st = row.get("review_status") or "unreviewed"
         for code, btn in getattr(self, "status_buttons", {}).items():
             try:

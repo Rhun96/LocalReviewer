@@ -157,6 +157,37 @@ class ReviewScreen(BaseScreen, ProfileMixin, CaseMixin, TableMixin, BulkMixin, V
         except Exception:
             pass
 
+    def ensure_visible_case(self, case_id: int) -> bool:
+        """Открыть кейс, даже если он вне текущей выборки.
+
+        Прыжки (импорт разметки, баги, история) не должны упираться в чужой
+        фильтр молча: вне выборки — сбрасываем фильтры и открываем.
+        """
+        try:
+            if case_id in (self.case_ids or []):
+                self.load_case(self.case_ids.index(case_id))
+                return True
+            self.filters = {}
+            self.current_page = 0
+            self.load_case_ids()
+            self.update_filter_indicator()
+            try:
+                self.load_table_data()
+            except Exception:
+                pass
+            if case_id in (self.case_ids or []):
+                self.load_case(self.case_ids.index(case_id))
+                try:
+                    self.view_stack.setCurrentIndex(0)
+                except Exception:
+                    pass
+                notify(self, "warning", "Фильтры",
+                       "Кейс был вне выборки — фильтры сброшены.")
+                return True
+        except Exception:
+            pass
+        return False
+
     def focus_work_area(self):
         """V2.1 P0 §6.5: фокус остаётся в рабочей области, не на кнопке."""
         try:

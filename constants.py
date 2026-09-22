@@ -89,6 +89,20 @@ HISTORY_LIMIT = 500
 MAX_EXPORT_IN_CHUNK = 500
 MAX_BACKUPS_KEEP = 20
 
+# Русские подписи колонок из метаданных (ключи показать стыдно).
+METADATA_COLUMN_LABELS = {
+    "operator_response": "Эталон",
+    "product": "Продукт",
+    "topic": "Тема",
+    "source": "Источник",
+    "ticket_number": "Номер обращения",
+}
+
+
+def metadata_column_label(key: str) -> str:
+    """Подпись колонки для показа; ключи и системные имена — как есть."""
+    return METADATA_COLUMN_LABELS.get(key, key)
+
 # V2.1 §15: типы regression assertions (без LLM, только формальные условия).
 ASSERTION_TYPES = [
     ("not_empty", "Непустой ответ"),

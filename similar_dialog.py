@@ -218,7 +218,8 @@ class DuplicatesDialog(QDialog):
         layout = QVBoxLayout()
         scope = ("текущем файле" if self.file_id else "проекте")
         layout.addWidget(QLabel(f"Попарное сравнение в {scope} "
-                                "(запрос+ответ). Дубли не ставятся автоматически."))
+                                "(запрос+ответ). Дубли не ставятся автоматически. "
+                                "Перефразировки лови порогом ниже (70–80%)."))
         row = QHBoxLayout()
         row.addWidget(QLabel("Порог:"))
         self.thr_spin = FSpinBox()

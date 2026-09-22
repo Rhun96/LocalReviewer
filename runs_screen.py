@@ -385,6 +385,10 @@ class ModelRunsScreen(BaseScreen):
         hint.setWordWrap(True)
         layout.addWidget(hint)
         self.runs_list = QListWidget()
+        from PySide6.QtWidgets import QAbstractItemView as _AIV
+        self.runs_list.setSelectionMode(
+            _AIV.SelectionMode.ExtendedSelection)
+        self.runs_list.setToolTip("Множественный выбор: Ctrl+клик, Shift+клик")
         self.runs_list.currentRowChanged.connect(self._on_run_selected)
         layout.addWidget(self.runs_list, 2)
         row = QHBoxLayout()
@@ -576,17 +580,35 @@ class ModelRunsScreen(BaseScreen):
         QTimer.singleShot(0, _work_outer)
 
     def _delete_run(self):
-        if self._run_id is None:
-            return
-        if not confirm(self, "Подтверждение",
-                       "Удалить прогон и все его ответы/предпочтения?"):
-            return
+        """Удаляет выделенные прогоны (или текущий, если выделения нет)."""
+        from PySide6.QtCore import Qt as _Qt
+        ids = []
         try:
-            runs.delete_run(self.project_path, self._run_id)
-            self._run_id = None
-            self.refresh()
-        except ValueError as e:
-            notify(self, "warning", "Ошибка", str(e))
+            for it in self.runs_list.selectedItems():
+                rid = it.data(_Qt.ItemDataRole.UserRole)
+                if rid and rid not in ids:
+                    ids.append(rid)
+        except Exception:
+            ids = []
+        if not ids:
+            if self._run_id is None:
+                return
+            ids = [self._run_id]
+        if not confirm(self, "Подтверждение",
+                       f"Удалить прогонов: {len(ids)} "
+                       "(вместе с ответами/разметкой)?"):
+            return
+        errs = 0
+        for rid in ids:
+            try:
+                runs.delete_run(self.project_path, rid)
+            except ValueError:
+                errs += 1
+        self._run_id = None
+        self.refresh()
+        if errs:
+            notify(self, "warning", "Удаление",
+                   f"Не удалено: {errs} (уже нет?).")
 
     def _compare(self):
         if self._run_id is None:

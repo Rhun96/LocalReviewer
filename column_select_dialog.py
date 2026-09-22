@@ -21,8 +21,9 @@ class ColumnSelectDialog(QDialog):
         scroll.setWidgetResizable(True)
         content = QWidget()
         content_layout = QVBoxLayout()
+        from constants import metadata_column_label
         for col in self.columns:
-            cb = FCheckBox(col)
+            cb = FCheckBox(metadata_column_label(col))
             cb.setChecked(col in self.selected_columns)
             self.checkboxes[col] = cb
             content_layout.addWidget(cb)

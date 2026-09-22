@@ -81,8 +81,9 @@ class TableMixin:
         self.column_filter_combo.clear()
         self.column_filter_combo.addItem("Фильтр по столбцу...", None)
         from ui_compat import add_elided_item as _addc, bound_combo_popup as _boundc
+        from constants import metadata_column_label as _label
         for col in self.available_columns:
-            _addc(self.column_filter_combo, col, col)
+            _addc(self.column_filter_combo, _label(col), col)
         _boundc(self.column_filter_combo)
         _boundc(self.value_filter_combo)
         self.column_filter_combo.blockSignals(False)
@@ -444,7 +445,9 @@ class TableMixin:
             self.cases_table.clear()
             self.cases_table.setColumnCount(len(self.selected_columns) + 2)
             self.cases_table.setRowCount(len(cases))
-            self.cases_table.setHorizontalHeaderLabels(["✓"] + self.selected_columns + ["⚠"])
+            from constants import metadata_column_label as _label
+            self.cases_table.setHorizontalHeaderLabels(
+                ["✓"] + [_label(c) for c in self.selected_columns] + ["⚠"])
             _name_cache: dict = {}
 
             def _status_label(code: str) -> str:

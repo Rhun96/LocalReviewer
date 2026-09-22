@@ -231,6 +231,60 @@ def apply_import(project_path: str, preview: dict, mode: str) -> dict:
             "errors": len(preview.get("errors", []))}
 
 
+TABLE_ALIASES = {
+    "id": ("id", "ид", "identifier", "source_id", "case_id"),
+    "status": ("status", "статус"),
+    "comment": ("comment", "комментарий", "коммент"),
+    "category": ("category", "категория"),
+    "subcategory": ("subcategory", "подкатегория", "подкатегория"),
+    "severity": ("severity", "тяжесть", "критичность"),
+}
+
+
+def read_annotation_table(file_path: str) -> tuple:
+    """Разметка из таблицы (xlsx/csv/ods): первая строка — заголовки.
+
+    Заголовки свободные: id/ид, status/статус, comment/комментарий,
+    category/категория, subcategory/подкатегория, severity/тяжесть.
+    Неизвестные колонки игнорируются. Возвращает (rows, errors) как JSONL.
+    """
+    from pathlib import Path as _Path
+    from file_reader import FileReader as _FR
+    ext = _Path(file_path).suffix.lower()
+    try:
+        if ext == ".xlsx":
+            sheets = _FR.read_excel_sheets(file_path)
+            data = _FR.read_excel_data(file_path, sheets[0], 0)
+        elif ext == ".ods":
+            sheets = _FR.read_ods_sheets(file_path)
+            data = _FR.read_ods_data(file_path, sheets[0], 0)
+        elif ext == ".csv":
+            data = _FR.read_csv_data(file_path)
+        else:
+            raise ValueError(f"Формат {ext!r}: нужен JSONL, xlsx, csv или ods")
+    except (ValueError, IndexError) as e:
+        raise ValueError(str(e)) from e
+    rows, errors = [], []
+    for n, row in enumerate(data, 2):
+        if not isinstance(row, dict):
+            errors.append({"line": n, "error": "не строка таблицы"})
+            continue
+        norm = {str(k or "").strip().lower(): v for k, v in row.items()}
+        item = {}
+        for field, aliases in TABLE_ALIASES.items():
+            for a in aliases:
+                if a in norm and str(norm[a] or "").strip():
+                    item[field] = str(norm[a]).strip()
+                    break
+            else:
+                item[field] = ""
+        if not item["id"]:
+            errors.append({"line": n, "error": "нет id"})
+            continue
+        rows.append(item)
+    return rows, errors
+
+
 def read_annotation_file(file_path: str) -> tuple:
     """Читает JSONL разметки: (rows, errors). Формат строгий, но терпимый."""
     rows, errors = [], []

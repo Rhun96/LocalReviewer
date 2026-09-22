@@ -333,10 +333,22 @@ class ProjectScreen(BaseScreen):
         self.load_project_info()
 
     def on_import_annotations(self):
-        """Импорт разметки: Preview → Merge/Update."""
+        """Импорт разметки: Preview → Merge/Update → прыжок в ревью."""
         from annotation_io_dialog import ImportAnnotationsDialog
-        ImportAnnotationsDialog(self.project_path, self).exec()
+        dlg = ImportAnnotationsDialog(self.project_path, self)
+        dlg.exec()
         self.load_project_info()
+        cid = getattr(dlg, "result_case_id", None)
+        if cid:
+            try:
+                mw = self.parent_window.main_window
+                mw.show_screen("review")
+                scr = mw.project_window.screens.get("review")
+                if scr is not None and not scr.ensure_visible_case(cid):
+                    notify(self, "warning", "Внимание",
+                           "Кейс не найден в проекте.")
+            except Exception:
+                pass
 
     def on_runs(self):
         """Переход к прогонам модели."""
