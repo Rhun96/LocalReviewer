@@ -200,6 +200,17 @@ class ProfileMixin:
         _add("Ctrl+Shift+A", self.on_bulk_clear)
         # Ctrl+H — свободен (профили — одиночные символы): скрыть кейс.
         _add("Ctrl+H", self.toggle_hide_current)
+        # V2.2 §13: Ctrl+P — глобальный поиск кейса (свободен, печати нет).
+        # Без guarded: Ctrl+P текстом не набирается, а фокус почти всегда
+        # в комментарии — с guard поиск «не работает» (проверено жалобой).
+        # Строгий «Плохо» всё равно держит open_global_search изнутри.
+        try:
+            sc_find = QShortcut(QKeySequence("Ctrl+P"), self)
+            sc_find.setContext(Qt.ShortcutContext.WindowShortcut)
+            sc_find.activated.connect(self.open_global_search)
+            self._shortcuts.append(sc_find)
+        except Exception:
+            pass
         # Ctrl+Enter: в Qt Return (основной) и Enter (кейпад) — разные
         # клавиши, вешаем оба. Без guarded: сохранение должно работать
         # и внутри полей ввода.

@@ -836,9 +836,19 @@ class ReportsScreen(BaseScreen):
             "Excel файлы (*.xlsx)"
         )
         if file_path:
+            try:
+                import privacy_scan_service as _scan
+                from export_guard_dialog import confirm_export as _guard
+                summary = _scan.scan_export(self.project_path)
+                mode = _guard(self, summary)
+            except Exception:
+                mode = "as_is"
+            if not mode:
+                return  # отмена — тихо, без шума
             self.setEnabled(False)
             run_in_background(
                 export_results_to_xlsx, self.project_path, file_path,
+                None, mode == "anonymized",
                 on_finished=lambda count: (
                     self.setEnabled(True),
                     notify(self, "success", "Экспорт завершён",
@@ -898,10 +908,19 @@ class ReportsScreen(BaseScreen):
             "JSONL (*.jsonl)")
         if not file_path:
             return
+        try:
+            import privacy_scan_service as _scan
+            from export_guard_dialog import confirm_export as _guard
+            summary = _scan.scan_export(self.project_path, chosen["file_id"])
+            mode = _guard(self, summary)
+        except Exception:
+            mode = "as_is"
+        if not mode:
+            return
         self.setEnabled(False)
         run_in_background(
             export_results_jsonl, self.project_path, file_path,
-            chosen["file_id"], chosen["extra"],
+            chosen["file_id"], chosen["extra"], mode == "anonymized",
             on_finished=lambda count: (
                 self.setEnabled(True),
                 notify(self, "success", "Экспорт завершён",

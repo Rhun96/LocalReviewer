@@ -550,6 +550,18 @@ def main():
     # Режим в лог при каждом старте: иначе «почему не тот вид» гадается.
     logger.info("startup: FLUENT=%s qfluentwidgets=%s", FLUENT, _qw_ver)
     app = QApplication(sys.argv)
+    try:
+        # V2.2 §3: монитор буфера (любая копия из программы взводит таймер).
+        from clipboard_service import install_monitor as _mon
+        _mon()
+    except Exception:
+        pass
+    try:
+        # V2.2 §13: Ctrl+P фильтром приложения (обход мёртвого QShortcutMap).
+        from app_shortcuts import install_global_keys as _keys
+        _keys(app)
+    except Exception:
+        pass
     if FLUENT:
         # Fluent рисует сам: глобальный APP_STYLE его бы ломал
         apply_theme(get_theme_mode())

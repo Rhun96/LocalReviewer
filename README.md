@@ -13,7 +13,7 @@
 ![Qt](https://img.shields.io/badge/Interface-PySide6_Fluent-41CD52?logo=qt&logoColor=white)
 ![Windows](https://img.shields.io/badge/OS-Windows_10%2F11-0078D6?logo=windows&logoColor=white)
 ![SQLite](https://img.shields.io/badge/Storage-SQLite-003B57?logo=sqlite&logoColor=white)
-![Version](https://img.shields.io/badge/Version-0.6.3-0b7a34)
+![Version](https://img.shields.io/badge/Version-0.7.0-0b7a34)
 
 ---
 
@@ -76,11 +76,14 @@
 - Экспорт результатов и отчётов в `.xlsx` (защита от formula injection)
 
 ### 💾 Надёжность
-- Хранение в SQLite — одна папка проекта на диске, версионированные миграции (v17)
+- Хранение в SQLite — одна папка проекта на диске, версионированные миграции (v19)
   с autobackup и аккуратным слиянием дублей старых импортов
 - Резервные копии через SQLite backup API с проверкой целостности и ротацией
 - История изменений по каждому кейсу, включая массовые операции и вердикты
 - Тяжёлое (импорт/экспорт/пересчёт/бэкап/поиск дублей) — в фоне, интерфейс не виснет
+- v0.7: приватность (автоочистка буфера с пилюлей-таймером, Privacy Scan и
+  обезличенный экспорт по выбору), расширенная проверка целостности
+  с безопасным ремонтом, глобальный поиск кейса
 
 ### 🎨 Оформление
 - Fluent-дизайн (Windows 11): светлая, тёмная и системная темы, переключаются
@@ -206,14 +209,21 @@ LocalReviewer/
 │
 ├── report_service.py         # Расчёт отчётов (base-агрегация, precision)
 ├── reports_screen.py         # Экран отчётов с графиками
-├── export_service.py         # Экспорт в xlsx (+ regressions.xlsx)
+├── export_service.py         # Экспорт в xlsx/JSONL (+ regressions.xlsx, обезличивание)
 ├── history_screen.py         # История изменений
 ├── backup_service.py         # Резервное копирование
 ├── backup_screen.py          # Экран резервных копий
-├── settings_screen.py        # Настройки (ревью, веса, проверки, тема)
+├── settings_screen.py        # Настройки (ревью, веса, проверки, тема, приватность)
+├── clipboard_service.py      # Безопасный буфер (автоочистка, мониторинг)
+├── privacy_scan_service.py   # Privacy Scan перед экспортом (без PERSON)
+├── anonymizer_service.py     # Обезличивание экспортной копии
+├── integrity_check_service.py # Проверка целостности + безопасный ремонт
+├── global_search_service.py  # Глобальный поиск кейса (Ctrl+P)
+├── app_shortcuts.py          # Клавиши уровня приложения
 │
 ├── docs/USER_GUIDE.md        # Подробная инструкция пользователя
-├── tests/                    # pytest (110 тестов: все подсистемы)
+├── SECURITY.md               # Политика безопасности
+├── tests/                    # pytest (177 тестов: все подсистемы)
 └── requirements.txt
 ```
 

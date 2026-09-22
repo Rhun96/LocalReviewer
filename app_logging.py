@@ -5,11 +5,43 @@
 Ротация 1 МБ × 3, чтобы exe не растил лог бесконечно.
 """
 import logging
+import os
 import sys
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 _configured_files: set = set()
+
+_DEBUG_KEY = "privacy/debug_content"
+
+
+def is_content_debug_enabled() -> bool:
+    """Диагностический режим с контентом кейсов: только явное включение.
+
+    По умолчанию False: в обычные логи пишутся только ID/счётчики/ошибки
+    (ТЗ V2.2 §2). Включается env LOCALREVIEWER_DEBUG_CONTENT=1 или флагом
+    в QSettings (экран настроек). Проверяй этот флаг перед каждым логом,
+    куда хочешь положить текст запроса/ответа/бага.
+    """
+    try:
+        if os.environ.get("LOCALREVIEWER_DEBUG_CONTENT", "").strip() == "1":
+            return True
+        from PySide6.QtCore import QSettings
+        v = QSettings("LocalReviewer", "LocalReviewer").value(_DEBUG_KEY, False)
+        if isinstance(v, str):
+            return v.lower() in ("1", "true", "yes", "on")
+        return bool(v)
+    except Exception:
+        return False
+
+
+def set_content_debug_enabled(on: bool) -> None:
+    try:
+        from PySide6.QtCore import QSettings
+        QSettings("LocalReviewer", "LocalReviewer").setValue(
+            _DEBUG_KEY, bool(on))
+    except Exception:
+        pass
 
 
 def _add_file_handler(log_dir: Path) -> None:

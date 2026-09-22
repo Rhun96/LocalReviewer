@@ -287,6 +287,9 @@ class CaseMixin:
         """Редкие инструменты кейса — одним меню вместо ряда кнопок."""
         # Смайлы можно (проверено: кривизну давали тултипы, их нет).
         menu = QMenu(self)
+        a_find = menu.addAction("🔍 Найти кейс… (Ctrl+P)")
+        a_find.triggered.connect(self.open_global_search)
+        menu.addSeparator()
         a_tax = menu.addAction("⚠ Таксономия…")
         a_tax.triggered.connect(self.open_taxonomy_editor)
         a_add = menu.addAction("＋ Новый тег")
@@ -426,6 +429,28 @@ class CaseMixin:
                         hs.load_history()
             except Exception:
                 pass
+
+    def open_global_search(self):
+        """V2.2 §13: Ctrl+P — быстрый прыжок к известному кейсу."""
+        if not self._bad_can_leave():
+            return
+        try:
+            from global_search_dialog import GlobalSearchDialog
+            dlg = GlobalSearchDialog(self.project_path, self)
+            if dlg.exec() != QDialog.DialogCode.Accepted:
+                return
+            cid = getattr(dlg, "result_case_id", None)
+            if not cid:
+                return
+            try:
+                shown = self.ensure_visible_case(int(cid))
+            except Exception:
+                shown = False
+            if not shown:
+                notify(self, "warning", "Внимание",
+                       "Кейс не найден в проекте")
+        except Exception as e:
+            self.show_error("Не удалось открыть поиск", e)
 
     def load_case(self, index: int):
         if index < 0 or index >= len(self.case_ids):

@@ -66,7 +66,8 @@ def _tags_chunked(cursor, case_ids: list) -> dict:
     return tags_map
 
 
-def export_results_to_xlsx(project_path: str, output_path: str, file_id=None):
+def export_results_to_xlsx(project_path: str, output_path: str, file_id=None,
+                           anonymize: bool = False):
     import openpyxl
     from openpyxl.styles import Alignment, Font, PatternFill
     from openpyxl.utils import get_column_letter
@@ -131,17 +132,35 @@ def export_results_to_xlsx(project_path: str, output_path: str, file_id=None):
         cell.fill = header_fill
         cell.alignment = Alignment(horizontal="center")
 
+    _anon = None
+    if anonymize:
+        try:
+            from anonymizer_service import Anonymizer as _AnonCls
+            _anon = _AnonCls()
+        except Exception:
+            _anon = None
+
     for row_idx, row in enumerate(rows, 2):
         tags = tags_map.get(row["case_id"], [])
+        _q = row["primary_text"] or ""
+        _a = row["response_text"] or ""
+        _c = row["review_comment"] or ""
+        if _anon is not None:
+            try:
+                _q = _anon.anonymize(_q)
+                _a = _anon.anonymize(_a)
+                _c = _anon.anonymize(_c)
+            except Exception:
+                pass
         ws.cell(row=row_idx, column=1, value=row_idx - 1)
         ws.cell(row=row_idx, column=2, value=safe_cell(row["file_name"]))
         ws.cell(row=row_idx, column=3, value=row["row_index"] + 1)
-        ws.cell(row=row_idx, column=4, value=safe_cell(row["primary_text"] or ""))
-        ws.cell(row=row_idx, column=5, value=safe_cell(row["response_text"] or ""))
+        ws.cell(row=row_idx, column=4, value=safe_cell(_q))
+        ws.cell(row=row_idx, column=5, value=safe_cell(_a))
         ws.cell(row=row_idx, column=6, value=safe_cell(row["group_name"] or ""))
         ws.cell(row=row_idx, column=7, value=STATUS_NAMES.get(row["status"], row["status"]))
         ws.cell(row=row_idx, column=8, value=safe_cell(", ".join(tags)))
-        ws.cell(row=row_idx, column=9, value=safe_cell(row["review_comment"] or ""))
+        ws.cell(row=row_idx, column=9, value=safe_cell(_c))
         ws.cell(row=row_idx, column=10, value=row["reviewed_at"] or "")
         ws.cell(row=row_idx, column=11, value=safe_cell(row["error_category"] or ""))
         ws.cell(row=row_idx, column=12, value=safe_cell(row["error_subcategory"] or ""))
@@ -149,7 +168,13 @@ def export_results_to_xlsx(project_path: str, output_path: str, file_id=None):
         meta = metas[row_idx - 2]
         ws.cell(row=row_idx, column=14, value=safe_cell(meta.get("product") or ""))
         for ci, key in enumerate(meta_keys, 15):
-            ws.cell(row=row_idx, column=ci, value=safe_cell(meta.get(key) or ""))
+            _mv = meta.get(key) or ""
+            if _anon is not None and _mv:
+                try:
+                    _mv = _anon.anonymize(_mv)
+                except Exception:
+                    pass
+            ws.cell(row=row_idx, column=ci, value=safe_cell(_mv))
 
     for i, width in enumerate([5, 20, 8, 50, 50, 15, 12, 25, 30, 20, 20, 20, 12,
                                15, *([25] * len(meta_keys))], 1):
@@ -166,7 +191,8 @@ JSONL_OPTIONAL = ("tags", "group", "file", "source_id", "reviewed_at")
 
 
 def export_results_jsonl(project_path: str, output_path: str, file_id=None,
-                         extra_fields: list | None = None) -> int:
+                         extra_fields: list | None = None,
+                         anonymize: bool = False) -> int:
     """Экспорт JSONL (ТЗ V2 §14, §35): один кейс — одна строка, UTF-8.
 
     Стабильная схема: base-поля всегда, extra — по выбору (tags/group/file/
@@ -177,6 +203,13 @@ def export_results_jsonl(project_path: str, output_path: str, file_id=None,
     out = _resolve_text_output(output_path, ".jsonl")
     tmp = str(out) + ".part"
     count = 0
+    _anon = None
+    if anonymize:
+        try:
+            from anonymizer_service import Anonymizer as _AnonCls
+            _anon = _AnonCls()
+        except Exception:
+            _anon = None
     with db(project_path) as conn:
         cursor = conn.cursor()
         file_condition = "WHERE COALESCE(c.hidden, 0) = 0"
@@ -210,16 +243,26 @@ def export_results_jsonl(project_path: str, output_path: str, file_id=None,
                 for r in batch:
                     row = dict(zip(cols, r, strict=True))
                     sid = (row["source_id"] or "").strip()
+                    _q = row["primary_text"] or ""
+                    _a = row["response_text"] or ""
+                    _c = row["review_comment"] or ""
+                    if _anon is not None:
+                        try:
+                            _q = _anon.anonymize(_q)
+                            _a = _anon.anonymize(_a)
+                            _c = _anon.anonymize(_c)
+                        except Exception:
+                            pass
                     obj = {
                         "id": sid or str(row["case_id"]),
                         "case_id": row["case_id"],
-                        "query": row["primary_text"] or "",
-                        "response": row["response_text"] or "",
+                        "query": _q,
+                        "response": _a,
                         "status": row["status"],
                         "category": row["error_category"] or "",
                         "subcategory": row["error_subcategory"] or "",
                         "severity": row["error_severity"] or "",
-                        "comment": row["review_comment"] or "",
+                        "comment": _c,
                     }
                     if "tags" in extra:
                         obj["tags"] = []

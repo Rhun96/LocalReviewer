@@ -2,7 +2,7 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QLabel,
     QScrollArea, QStackedWidget,
 )
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QTimer
 from ui_base import BaseScreen
 from ui_compat import (
     FPushButton, clear_in_fluent,
@@ -161,6 +161,24 @@ class ReviewScreen(BaseScreen, ProfileMixin, CaseMixin, TableMixin, BulkMixin, V
         except Exception:
             pass
 
+    def _tick_clip_pill(self):
+        """Пилюля буфера: остаток автоочистки или скрыть (чужое/пусто/выкл)."""
+        try:
+            import clipboard_service as _clip
+            left = _clip.countdown_state()
+        except Exception:
+            left = None
+        try:
+            if left is None:
+                if self.clip_pill.isVisible():
+                    self.clip_pill.setVisible(False)
+                return
+            self.clip_pill.setText(f"⏳ До сброса буфера: {left} сек.")
+            if not self.clip_pill.isVisible():
+                self.clip_pill.setVisible(True)
+        except Exception:
+            pass
+
     def ensure_visible_case(self, case_id: int) -> bool:
         """Открыть кейс, даже если он вне текущей выборки.
 
@@ -248,6 +266,18 @@ class ReviewScreen(BaseScreen, ProfileMixin, CaseMixin, TableMixin, BulkMixin, V
         self.header_label.setObjectName("title")
         self.header_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self.header_label)
+
+        # Пилюля буфера (V2.2 §3): видна только пока тикает автоочистка.
+        # Общая для кейса и таблицы (шапка вне view_stack).
+        self.clip_pill = QLabel("")
+        self.clip_pill.setStyleSheet("font-size: 12px; color: #00AAFF; font-weight: bold;")
+        self.clip_pill.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.clip_pill.setVisible(False)
+        layout.addWidget(self.clip_pill)
+        self._clip_timer = QTimer(self)
+        self._clip_timer.setInterval(1000)
+        self._clip_timer.timeout.connect(self._tick_clip_pill)
+        self._clip_timer.start()
 
         # Информация о кейсе
         self.info_label = QLabel()

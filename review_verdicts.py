@@ -599,15 +599,31 @@ class VerdictsMixin:
         # остаёмся на том же кейсе: контекст не разрушен
 
     def _do_copy_context(self, fmt: str, label: str):
-        from PySide6.QtGui import QGuiApplication
         import bug_export_service as bex
         try:
             text = bex.render_case(self.project_path, self.current_case_id, fmt)
         except ValueError as e:
             notify(self, "warning", "Ошибка", str(e))
             return
-        QGuiApplication.clipboard().setText(text)
-        notify(self, "success", "Скопировано", f"Контекст ({label}) — в буфере")
+        try:
+            import clipboard_service as _clip
+            _clip.safe_copy(text)
+            _after = _clip.get_clear_after()
+            suffix = (f" Буфер очистится через {_clip.timeout_label(_after)}."
+                      if _after else "")
+        except Exception:
+            from PySide6.QtGui import QGuiApplication
+            QGuiApplication.clipboard().setText(text)
+            suffix = ""
+        notify(self, "success", "Скопировано", f"Контекст ({label}) — в буфере.{suffix}")
+
+    def copy_for_developer(self):
+        """V2.2 §15: копия для разработчика без создания Bug Report.
+
+        Тот же render_case (CASE/QUERY/RESPONSE/REFERENCE/REVIEW/...),
+        Markdown в буфер; Shift+клик — Plain. Баг не создаётся.
+        """
+        self.copy_case_context()
 
     def open_duplicates(self):
         """Потенциальные дубли в области текущего фильтра/файла."""

@@ -151,6 +151,42 @@ class SettingsScreen(BaseScreen):
         session_group.setLayout(session_layout)
         layout.addWidget(session_group)
 
+        # Приватность V2.2 §2–§3: буфер + диагностический режим (глобально).
+        privacy_group = QGroupBox("Приватность")
+        privacy_layout = QFormLayout()
+        self.clipboard_combo = FComboBox()
+        for secs, label in ((0, "Выкл."), (30, "30 секунд"),
+                            (60, "60 секунд"), (300, "5 минут")):
+            self.clipboard_combo.addItem(label, secs)
+        self.clipboard_combo.setToolTip(
+            "Автоочистка буфера после копирования. "
+            "Чужой текст, скопированный поверх, не трогаем.")
+        try:
+            import clipboard_service as _clip
+            _cur = _clip.get_clear_after()
+            for i in range(self.clipboard_combo.count()):
+                if self.clipboard_combo.itemData(i) == _cur:
+                    self.clipboard_combo.setCurrentIndex(i)
+                    break
+        except Exception:
+            pass
+        self.clipboard_combo.currentIndexChanged.connect(self.on_clipboard_changed)
+        privacy_layout.addRow("Очищать буфер обмена:", self.clipboard_combo)
+        self.debug_content_checkbox = FCheckBox(
+            "Диагностический режим: писать содержимое кейсов в лог")
+        self.debug_content_checkbox.setToolTip(
+            "По умолчанию ВЫКЛ: в лог идут только ID/счётчики. "
+            "Включай только для отладки, потом выключи.")
+        try:
+            import app_logging as _log
+            self.debug_content_checkbox.setChecked(bool(_log.is_content_debug_enabled()))
+        except Exception:
+            pass
+        self.debug_content_checkbox.checkStateChanged.connect(self.on_debug_toggled)
+        privacy_layout.addRow(self.debug_content_checkbox)
+        privacy_group.setLayout(privacy_layout)
+        layout.addWidget(privacy_group)
+
         # Настройки автопроверок
         checks_group = QGroupBox("Автопроверки")
         checks_layout = QFormLayout()
@@ -391,11 +427,41 @@ class SettingsScreen(BaseScreen):
             self.restore_checkbox.setChecked(bool(is_restore_enabled()))
         except Exception:
             pass
+        try:
+            import clipboard_service as _clip
+            _cur = _clip.get_clear_after()
+            for i in range(self.clipboard_combo.count()):
+                if self.clipboard_combo.itemData(i) == _cur:
+                    self.clipboard_combo.blockSignals(True)
+                    self.clipboard_combo.setCurrentIndex(i)
+                    self.clipboard_combo.blockSignals(False)
+                    break
+        except Exception:
+            pass
+        try:
+            import app_logging as _log
+            self.debug_content_checkbox.setChecked(bool(_log.is_content_debug_enabled()))
+        except Exception:
+            pass
 
     def on_restore_toggled(self, *_a):
         try:
             from session_service import set_restore_enabled
             set_restore_enabled(bool(self.restore_checkbox.isChecked()))
+        except Exception:
+            pass
+
+    def on_clipboard_changed(self, *_a):
+        try:
+            import clipboard_service as _clip
+            _clip.set_clear_after(self.clipboard_combo.currentData())
+        except Exception:
+            pass
+
+    def on_debug_toggled(self, *_a):
+        try:
+            import app_logging as _log
+            _log.set_content_debug_enabled(bool(self.debug_content_checkbox.isChecked()))
         except Exception:
             pass
 

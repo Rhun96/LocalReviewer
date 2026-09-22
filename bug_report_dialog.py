@@ -305,15 +305,23 @@ class BugReportDialog(QDialog):
             menu.exec()
 
     def _do_copy(self, fmt: str, label: str):
-        from PySide6.QtGui import QGuiApplication
         import bug_export_service as bex
         try:
             text = bex.render(self.project_path, self.bug_id, fmt)
         except ValueError as e:
             notify(self, "warning", "Ошибка", str(e))
             return
-        QGuiApplication.clipboard().setText(text)
-        notify(self, "success", "Скопировано", f"{label} — в буфере обмена")
+        try:
+            import clipboard_service as _clip
+            _clip.safe_copy(text)
+            _after = _clip.get_clear_after()
+            suffix = (f" Буфер будет очищен через {_clip.timeout_label(_after)}."
+                      if _after else "")
+        except Exception:
+            from PySide6.QtGui import QGuiApplication
+            QGuiApplication.clipboard().setText(text)
+            suffix = ""
+        notify(self, "success", "Скопировано", f"{label} — в буфере обмена.{suffix}")
 
     def _open_linked_case(self):
         """V2.1 §10: сохранить баг и перейти к кейсу (не теряя правки)."""

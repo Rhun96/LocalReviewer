@@ -1,11 +1,11 @@
-"""Целостность БД: отчёт о сиротах + чистка (с подтверждением)."""
+"""Целостность БД (V2.2 §9–§10): полный отчёт + безопасный ремонт сирот."""
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QListWidget,
     QListWidgetItem,
 )
 from PySide6.QtCore import Qt
 from ui_compat import FPushButton, confirm, notify
-import maintenance_service as maint
+import integrity_check_service as check
 
 
 class IntegrityDialog(QDialog):
@@ -15,8 +15,10 @@ class IntegrityDialog(QDialog):
         self.setWindowTitle("Целостность базы")
         self.setMinimumSize(520, 420)
         layout = QVBoxLayout()
-        hint = QLabel("Сироты — кейсы удалённых файлов: невидимы в ревью, "
-                      "но врут в сырых счётчиках. Снимки версий не трогаем.")
+        hint = QLabel("Проверка связей SQLite: сироты, висячие линки, версии, "
+                      "баги, подсветки. Чиним только безопасное (сироты и "
+                      "висячие линки) — разметка, баги и снимки не трогаем. "
+                      "Перед ремонтом — автоматический бэкап.")
         hint.setWordWrap(True)
         layout.addWidget(hint)
         self.info = QLabel("")
@@ -43,46 +45,52 @@ class IntegrityDialog(QDialog):
 
     def _refresh(self):
         try:
-            rep = maint.integrity_report(self.project_path)
+            rep = check.check_project(self.project_path)
         except Exception as e:
             notify(self, "error", "Ошибка", str(e))
             return
-        n = rep["orphan_cases"]
-        if not n:
-            self.info.setText(
-                f"Файлов: {rep['files']}, кейсов: {rep['cases']}. "
-                "Сирот нет — чистить нечего.")
+        issues = rep.get("issues", [])
+        if rep.get("ok"):
+            self.info.setText("Проект исправен.")
         else:
-            self.info.setText(
-                f"Файлов: {rep['files']}, кейсов: {rep['cases']}, "
-                f"сирот: {n}.")
+            self.info.setText(f"Найдено проблем: {len(issues)}.")
         self.details.clear()
-        for t, c in (rep.get("children") or {}).items():
-            item = QListWidgetItem(f"{t}: {c}")
+        for it in issues:
+            mark = "🛠" if it.get("fixable") else "👁"
+            item = QListWidgetItem(f"{mark} [{it.get('scope')}] {it.get('detail')}")
             item.setData(Qt.ItemDataRole.UserRole, None)
             self.details.addItem(item)
-        self.btn_purge.setEnabled(bool(n))
+        # Кнопка чистки активна только если есть чинимое.
+        self.btn_purge.setEnabled(any(i.get("fixable") for i in issues))
+        self.btn_purge.setText("🛠 Исправить безопасное")
 
     def _purge(self):
         try:
-            rep = maint.integrity_report(self.project_path)
+            rep = check.check_project(self.project_path)
         except Exception as e:
             notify(self, "error", "Ошибка", str(e))
             return
-        n = rep["orphan_cases"]
-        if not n:
+        fixable = [i for i in rep.get("issues", []) if i.get("fixable")]
+        if not fixable:
             return
-        if not confirm(self, "Очистить сирот",
-                       f"Удалить {n} кейсов удалённых файлов и их хвосты?\n"
-                       "Снимки версий не пострадают.\n"
-                       "Действие необратимо (сделай бэкап!)",
-                       ok_text="Очистить", cancel_text="Отмена"):
+        if not confirm(self, "Безопасный ремонт",
+                       "Исправить только безопасное:\n• "
+                       + "\n• ".join(i.get("detail", "") for i in fixable[:10])
+                       + "\n\nРазметка, баги, снимки версий не пострадают.\n"
+                         "Сначала сделаем бэкап.",
+                       ok_text="Исправить", cancel_text="Отмена"):
             return
         try:
-            done = maint.purge_orphans(self.project_path)
+            import backup_service as _bak
+            _bak.create_backup(self.project_path)
+        except Exception as e:
+            notify(self, "error", "Ошибка",
+                   f"Бэкап не создан — ремонт отменён:\n{e}")
+            return
+        try:
+            done = check.repair_safe(self.project_path)
         except Exception as e:
             notify(self, "error", "Ошибка", str(e))
             return
-        notify(self, "success", "Готово",
-               f"Удалено кейсов-сирот: {done.get('orphan_cases', 0)}")
+        notify(self, "success", "Готово", f"Исправлено: {done}")
         self._refresh()

@@ -10,4 +10,5 @@ jobs:
           python-version: "3.11"
       - run: pip install -r requirements-dev.txt
       - run: ruff check .
+      - run: python tools/check_secrets.py .
       - run: pytest
