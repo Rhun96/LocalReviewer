@@ -644,6 +644,13 @@ class VerdictsMixin:
             base = ("⚠️ Фильтры: " + " | ".join(parts)) if parts else "Фильтры не применены"
         # Всегда показываем размер выборки — видно, что фильтр сработал
         self._filter_base = f"{base}  |  Найдено: {len(self.case_ids)}"
+        try:
+            import visibility_service as _vis
+            _hn = _vis.hidden_count(self.project_path)
+            if _hn:
+                self._filter_base += f"  |  👁 Скрыто: {_hn}"
+        except Exception:
+            pass
         self.filter_indicator.setText(self._filter_base)
 
     def open_filters(self):

@@ -274,10 +274,20 @@ class FileReader:
                     continue
                 if all(c is None or str(c).strip() == "" for c in row):
                     continue
+                try:
+                    from importer import _cell_str as _norm
+                except Exception:
+                    _norm = None
                 row_dict = {}
                 for j, header in enumerate(headers):
                     v = row[j] if j < len(row) else None
-                    row_dict[header] = "" if v is None else v
+                    if v is None:
+                        row_dict[header] = ""
+                        continue
+                    try:
+                        row_dict[header] = _norm(v) if _norm else v
+                    except Exception:
+                        row_dict[header] = v
                 data.append(row_dict)
             return data
         except ValueError:

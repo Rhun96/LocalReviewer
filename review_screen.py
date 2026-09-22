@@ -61,6 +61,8 @@ class ReviewScreen(BaseScreen, ProfileMixin, CaseMixin, TableMixin, BulkMixin, V
         # Фильтр по значениям столбца
         self.column_filter = None
         self.value_filter = None
+        self.value_filter_like = False
+        self.value_search_text = ""
         # Теги раскрыты или нет
         self.tags_expanded = False
         # Массовые операции (ТЗ §5): выбранные кейсы
@@ -71,6 +73,8 @@ class ReviewScreen(BaseScreen, ProfileMixin, CaseMixin, TableMixin, BulkMixin, V
         self._review_finished = False
         # Умная очередь (ТЗ §8): normal | unreviewed | problematic
         self.queue_mode = "normal"
+        # Показ скрытых в таблице (серыми); в кейсах их нет никогда.
+        self.show_hidden = False
         self.load_case_ids()
         self.load_available_columns()
         self.init_ui()

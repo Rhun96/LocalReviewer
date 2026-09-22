@@ -11,7 +11,7 @@ from database import db
 from filter_dialog import FilterDialog
 from filter_service import get_filtered_case_ids, get_all_case_ids
 from ui_compat import (
-    FCheckBox, FComboBox, FPushButton, FTable, clear_in_fluent,
+    FCheckBox, FComboBox, FLineEdit, FPushButton, FTable, clear_in_fluent,
     confirm, notify, polish_table,
 )
 import json
@@ -25,6 +25,7 @@ class TableMixin:
     """Table view, pagination, filters, queue, bulk selection."""
 
     def load_case_ids(self):
+        # Выборка кейсов: скрытых здесь нет НИКОГДА (тумблер — только таблице).
         if self.queue_mode and self.queue_mode != "normal":
             try:
                 from review_queue_service import build_queue
@@ -109,9 +110,11 @@ class TableMixin:
         if not column:
             self.column_filter = None
             self.value_filter = None
+            self.value_filter_like = False
             self.value_filter_combo.blockSignals(False)
             return
         self.column_filter = column
+        self.value_filter_like = False
         try:
             with db(self.project_path) as conn:
                 cursor = conn.cursor()
@@ -199,10 +202,40 @@ class TableMixin:
         self.load_table_data()
 
     def on_value_filter_changed(self):
-        """При изменении значения фильтра перезагружаем таблицу."""
+        """Выбор из списка — точное совпадение (поиск при этом гаснет)."""
         if not hasattr(self, 'value_filter_combo'):
             return
         self.value_filter = self.value_filter_combo.currentData()
+        self.value_filter_like = False
+        try:
+            if hasattr(self, "value_search"):
+                self.value_search.blockSignals(True)
+                self.value_search.clear()
+                self.value_search.blockSignals(False)
+            self.value_search_text = ""
+        except Exception:
+            pass
+        self.current_page = 0
+        self.load_table_data()
+
+    def on_value_search(self):
+        """Свободный текст — подстрока по той же колонке."""
+        if not hasattr(self, "value_search"):
+            return
+        # Правда — в самом комбо, а не в памяти: после пересборки списка
+        # память может врать. Без колонки ищем глобально — предупреждение
+        # больше не нужно вообще.
+        try:
+            _live = self.column_filter_combo.currentData()
+        except Exception:
+            _live = None
+        if _live:
+            self.column_filter = _live
+        try:
+            text = self.value_search.text().strip()
+        except Exception:
+            text = ""
+        self.value_search_text = text
         self.current_page = 0
         self.load_table_data()
 
@@ -242,7 +275,18 @@ class TableMixin:
         self.value_filter_combo = FComboBox()
         self.value_filter_combo.addItem("Все значения", None)
         self.value_filter_combo.setMinimumHeight(30)
-        self.value_filter_combo.currentIndexChanged.connect(self.on_value_filter_changed)
+        self.value_filter_combo.setToolTip("Точное значение из списка")
+        self.value_filter_combo.currentIndexChanged.connect(
+            self.on_value_filter_changed)
+        self.value_search = FLineEdit()
+        self.value_search.setPlaceholderText("🔍 поиск…")
+        self.value_search.setToolTip("Подстрока по выбранной колонке, "
+                                     "без колонки — везде (вопрос, ответ, "
+                                     "ID, комментарий). Enter — найти, "
+                                     "очистил + Enter — сбросить")
+        self.value_search.setMaximumWidth(150)
+        self.value_search.setMinimumHeight(30)
+        self.value_search.returnPressed.connect(self.on_value_search)
         self.btn_table_filters = FPushButton("🎛️ Фильтры")
         self.btn_table_filters.setMinimumHeight(30)
         self.btn_table_filters.setStyleSheet("""
@@ -253,6 +297,7 @@ class TableMixin:
         controls_layout.addWidget(self.btn_select_columns)
         controls_layout.addWidget(self.column_filter_combo)
         controls_layout.addWidget(self.value_filter_combo)
+        controls_layout.addWidget(self.value_search)
         controls_layout.addWidget(self.btn_table_filters)
         self.btn_duplicates = FPushButton("👯 Дубли")
         self.btn_duplicates.setMinimumHeight(30)
@@ -267,6 +312,13 @@ class TableMixin:
         self.sort_combo.setToolTip("Сортировка таблицы (сохраняется в фильтр)")
         self.sort_combo.currentIndexChanged.connect(self.on_sort_changed)
         controls_layout.addWidget(self.sort_combo)
+        self.btn_show_hidden = FPushButton("👁 Скрытые")
+        self.btn_show_hidden.setMinimumHeight(30)
+        self.btn_show_hidden.setCheckable(True)
+        self.btn_show_hidden.setToolTip("Показать скрытые строки серыми "
+                                        "(в кейсы они не возвращаются)")
+        self.btn_show_hidden.toggled.connect(self.on_toggle_hidden)
+        controls_layout.addWidget(self.btn_show_hidden)
         controls_layout.addStretch()
         layout.addLayout(controls_layout)
         self.update_column_filter_combo()
@@ -287,6 +339,14 @@ class TableMixin:
         btn_bulk_undo = FPushButton("↩ Отменить последнюю")
         btn_bulk_undo.setMinimumHeight(30)
         btn_bulk_undo.clicked.connect(self.on_bulk_undo)
+        btn_hide = FPushButton("👁 Скрыть выбранные")
+        btn_hide.setMinimumHeight(30)
+        btn_hide.setToolTip("Убрать из ревью (не удаление!)")
+        btn_hide.clicked.connect(self.on_bulk_hide)
+        btn_unhide = FPushButton("👁 Показать выбранные")
+        btn_unhide.setMinimumHeight(30)
+        btn_unhide.setToolTip("Вернуть скрытые в ревью")
+        btn_unhide.clicked.connect(self.on_bulk_unhide)
         btn_recheck = FPushButton("🔄 Пересчитать проверки")
         btn_recheck.setMinimumHeight(30)
         btn_recheck.setToolTip("Записать автопроверки в БД: нужно для фильтров "
@@ -302,6 +362,8 @@ class TableMixin:
         bulk_layout.addWidget(btn_bulk_clear)
         bulk_layout.addWidget(btn_bulk_run)
         bulk_layout.addWidget(btn_bulk_undo)
+        bulk_layout.addWidget(btn_hide)
+        bulk_layout.addWidget(btn_unhide)
         bulk_layout.addWidget(btn_recheck)
         bulk_layout.addWidget(self.queue_combo)
         bulk_layout.addStretch()
@@ -320,6 +382,23 @@ class TableMixin:
             }
             QTableWidget::item {
                 padding: 6px;
+            }
+            QTableWidget::indicator {
+                width: 18px;
+                height: 18px;
+            }
+            QTableWidget::indicator:unchecked {
+                border: 1px solid #888888;
+                border-radius: 4px;
+                background-color: transparent;
+            }
+            QTableWidget::indicator:checked {
+                border: 1px solid #00FF41;
+                border-radius: 4px;
+                background-color: #00AA2A;
+            }
+            QTableWidget::indicator:unchecked:hover {
+                border: 1px solid #00FF41;
             }
             QTableWidget::item:selected {
                 background-color: #1A3A1A;
@@ -370,6 +449,8 @@ class TableMixin:
         try:
             from filter_service import filter_from, BASE_FROM
             eff_filters = dict(self.filters or {})
+            if getattr(self, "show_hidden", False):
+                eff_filters["include_hidden"] = True
             # Таблица уважает режим очереди: unreviewed — это фильтр, а не только порядок.
             if getattr(self, "queue_mode", "normal") == "unreviewed":
                 eff_filters = dict(eff_filters)
@@ -382,15 +463,57 @@ class TableMixin:
                 data_conditions = list(conditions)
                 data_params = list(params)
                 if self.column_filter and self.value_filter:
+                    from filter_service import _escape_like as _esc
+                    like = bool(getattr(self, "value_filter_like", False))
                     if self.column_filter in TABLE_SYSTEM_COLUMNS:
-                        data_conditions = data_conditions + [
-                            f"CAST({COLUMN_TO_SQL[self.column_filter]} AS TEXT) = ?"]
-                        data_params = data_params + [self.value_filter]
+                        col_sql = COLUMN_TO_SQL[self.column_filter]
+                        if like:
+                            data_conditions = data_conditions + [
+                                f"CAST({col_sql} AS TEXT) LIKE ? ESCAPE '\\'"]
+                            data_params = data_params + [
+                                f"%{_esc(str(self.value_filter))}%"]
+                        else:
+                            data_conditions = data_conditions + [
+                                f"CAST({col_sql} AS TEXT) = ?"]
+                            data_params = data_params + [self.value_filter]
                     else:
                         # Metadata-фильтр в SQL (иначе total врёт, страница полупустая).
+                        if like:
+                            data_conditions = data_conditions + [
+                                "json_extract(c.metadata_json, '$.' || ?) "
+                                "LIKE ? ESCAPE '\\'"]
+                            data_params = data_params + [
+                                self.column_filter,
+                                f"%{_esc(str(self.value_filter))}%"]
+                        else:
+                            data_conditions = data_conditions + [
+                                "json_extract(c.metadata_json, '$.' || ?) = ?"]
+                            data_params = data_params + [
+                                self.column_filter, self.value_filter]
+                search_text = (getattr(self, "value_search_text", "") or "").strip()
+                if search_text:
+                    from filter_service import _escape_like as _esc2
+                    # lower_ru с обеих сторон: встроенный LOWER глух к кириллице.
+                    pat = f"%{_esc2(search_text.lower())}%"
+                    if self.column_filter:
+                        if self.column_filter in TABLE_SYSTEM_COLUMNS:
+                            col_sql = COLUMN_TO_SQL[self.column_filter]
+                            data_conditions = data_conditions + [
+                                f"lower_ru(CAST({col_sql} AS TEXT)) LIKE ? ESCAPE '\\'"]
+                            data_params = data_params + [pat]
+                        else:
+                            data_conditions = data_conditions + [
+                                "lower_ru(json_extract(c.metadata_json, '$.' || ?)) "
+                                "LIKE ? ESCAPE '\\'"]
+                            data_params = data_params + [self.column_filter, pat]
+                    else:
+                        # Без колонки — глобально: вопрос, ответ, ID, комментарий.
                         data_conditions = data_conditions + [
-                            "json_extract(c.metadata_json, '$.' || ?) = ?"]
-                        data_params = data_params + [self.column_filter, self.value_filter]
+                            "(lower_ru(c.primary_text) LIKE ? ESCAPE '\\' "
+                            "OR lower_ru(c.response_text) LIKE ? ESCAPE '\\' "
+                            "OR lower_ru(COALESCE(c.source_id, '')) LIKE ? ESCAPE '\\' "
+                            "OR lower_ru(COALESCE(a.comment, '')) LIKE ? ESCAPE '\\')"]
+                        data_params = data_params + [pat] * 4
                 if data_conditions:
                     count_query += " WHERE " + " AND ".join(data_conditions)
                 cursor.execute(count_query, data_params)
@@ -402,7 +525,8 @@ class TableMixin:
                     SELECT c.case_id, c.source_id, c.row_index + 1 as row_num, f.file_name,
                            c.primary_text, c.response_text,
                            COALESCE(a.status, 'unreviewed') as status,
-                           a.comment, c.metadata_json
+                           a.comment, c.metadata_json,
+                           COALESCE(c.hidden, 0) as hidden
                 """ + BASE_FROM
                 if self.table_sort == "problematic_first":
                     # JOIN строго до WHERE, иначе near "LEFT": syntax error.
@@ -442,6 +566,27 @@ class TableMixin:
                 except Exception as e:
                     logger.warning("checks summary failed: %s", e)
             self.cases_table.blockSignals(True)
+            # Синхронный снос виджетов-боксов: deleteLater не всегда
+            # отрабатывает до следующей отрисовки, и призраки остаются
+            # на старых координатах (пробы 68→78→98).
+            try:
+                from shiboken6 import delete as _sdel
+            except Exception:
+                _sdel = None
+            try:
+                for _r in range(self.cases_table.rowCount()):
+                    _old = self.cases_table.cellWidget(_r, 0)
+                    if _old is not None:
+                        self.cases_table.removeCellWidget(_r, 0)
+                        if _sdel is not None:
+                            try:
+                                _sdel(_old)
+                            except Exception:
+                                _old.deleteLater()
+                        else:
+                            _old.deleteLater()
+            except Exception:
+                pass
             self.cases_table.clear()
             self.cases_table.setColumnCount(len(self.selected_columns) + 2)
             self.cases_table.setRowCount(len(cases))
@@ -464,8 +609,10 @@ class TableMixin:
                         metadata = json.loads(case['metadata_json'])
                     except (ValueError, TypeError):
                         pass
-                # Чекбокс — настоящим виджетом по центру ячейки: рисованный
-                # индикатор item'а fluent-стиль ужимает и сдвигает в угол
+                # Чекбокс — виджетом: нативный рисует сама библиотека
+                # (QSS ::indicator игнорирует — проверено), получается дёшево.
+                # Виджет строго по центру; снос старых — синхронный (см. выше),
+                # иначе призраки.
                 check_item = QTableWidgetItem()
                 check_item.setData(Qt.ItemDataRole.UserRole, case['case_id'])
                 check_item.setFlags(check_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
@@ -498,11 +645,21 @@ class TableMixin:
                         value = (case['comment'] or '')[:100]
                     else:
                         value = str(metadata.get(col_name, ''))[:100]
+                    # Row — не dict (.get нет!): флаг через keys().
+                    _hidden = bool(case["hidden"]) if "hidden" in case.keys() else False
+                    if _hidden and col_name == 'ID':
+                        value = f"👁 {value}"
                     item = QTableWidgetItem(value)
                     # case_id дублируем и в первую дата-колонку для совместимости
                     if col_idx == 1:
                         item.setData(Qt.ItemDataRole.UserRole, case['case_id'])
                     item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                    if _hidden:
+                        try:
+                            from PySide6.QtGui import QColor as _QC
+                            item.setForeground(_QC("#888888"))
+                        except Exception:
+                            pass
                     self.cases_table.setItem(row, col_idx, item)
                 sev = checks_map.get(case['case_id'], {})
                 if sev:
@@ -525,8 +682,16 @@ class TableMixin:
                 self.cases_table.setItem(row, len(self.selected_columns) + 1, checks_item)
             self.cases_table.blockSignals(False)
             self.cases_table.resizeColumnsToContents()
-            # Колонка галочки — фиксированная узкая, как раньше: бокс ровно
-            # напротив номера строки, без люфта
+            # Колонка галочки — фиксированная узкая: бокс ровно напротив
+            # номера строки, без люфта. ResizeMode.Fixed + маленький минимум:
+            # иначе стиль растопыривает секцию и виджеты плывут вправо.
+            try:
+                from PySide6.QtWidgets import QHeaderView as _QHV
+                _hh = self.cases_table.horizontalHeader()
+                _hh.setMinimumSectionSize(18)
+                _hh.setSectionResizeMode(0, _QHV.ResizeMode.Fixed)
+            except Exception:
+                pass
             self.cases_table.setColumnWidth(0, 30)
             # Широкие текстовые колонки укорачиваем, но не душим (440),
             # иначе Статус и ⚠ выдавливаются за край даже со скроллом
@@ -537,11 +702,12 @@ class TableMixin:
                 f"Страница {self.current_page + 1} / {self.total_pages} "
                 f"(всего: {total})")
             self._update_bulk_label()
+            self._update_hidden_button()
         except Exception as e:
             self.show_error("Не удалось загрузить таблицу", e)
 
     def _on_bulk_toggled(self, case_id: int, checked: bool):
-        """Чекбокс-виджет массовых операций."""
+        """Совместимость: выбор теперь идёт через _on_item_changed."""
         try:
             case_id = int(case_id)
         except (TypeError, ValueError):
@@ -555,6 +721,50 @@ class TableMixin:
     def _update_bulk_label(self):
         if hasattr(self, "bulk_label"):
             self.bulk_label.setText(f"Выбрано: {len(self.bulk_selected)}")
+
+    def on_toggle_hidden(self, checked: bool):
+        """Тумблер серых строк. В навигацию кейсов они не попадают никогда."""
+        self.show_hidden = bool(checked)
+        self.current_page = 0
+        self.load_table_data()
+        self._update_hidden_button()
+
+    def _update_hidden_button(self):
+        try:
+            import visibility_service as _vis
+            n = _vis.hidden_count(self.project_path)
+            self.btn_show_hidden.setText(f"👁 Скрытые ({n})" if n else "👁 Скрытые")
+        except Exception:
+            pass
+
+    def _hide_many(self, hide: bool):
+        ids = sorted(self.bulk_selected or [])
+        if not ids:
+            # Скрытие всей выборки одним кликом — слишком легко стрельнуть
+            # себе в ногу: требуем явные галочки.
+            notify(self, "warning", "Скрытие",
+                   "Отметь галочками строки для скрытия/показа.")
+            return
+        try:
+            import visibility_service as _vis
+            n = (_vis.hide_cases if hide else _vis.unhide_cases)(
+                self.project_path, ids)
+            self.bulk_selected.clear()
+            self.load_case_ids()
+            self.load_table_data()
+            self._update_hidden_button()
+            self.update_queue_indicator()
+            self.update_filter_indicator()
+            notify(self, "success", "Скрытие",
+                   f"{'Скрыто' if hide else 'Возвращено'}: {n}.")
+        except Exception as e:
+            self.show_error("Не удалось изменить видимость", e)
+
+    def on_bulk_hide(self):
+        self._hide_many(True)
+
+    def on_bulk_unhide(self):
+        self._hide_many(False)
 
     def _bulk_target_ids(self) -> list:
         if self.bulk_selected:

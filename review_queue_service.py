@@ -73,7 +73,8 @@ def build_queue(project_path: str, mode: str = "normal", filters: dict = None) -
         query, params = build_filter_query(base_filters)
     else:
         query, params = ("SELECT c.case_id FROM cases c "
-                         "JOIN files f ON c.file_id = f.file_id "
+                         "JOIN files f ON f.file_id = c.file_id "
+                         "WHERE COALESCE(c.hidden, 0) = 0 "
                          "ORDER BY f.imported_at, c.row_index"), []
 
     with db(project_path) as conn:
@@ -149,33 +150,37 @@ def queue_stats(project_path: str, file_id=None) -> dict:
     bad_ph = ",".join(["?"] * len(bad_codes))
     with db(project_path) as conn:
         cur = conn.cursor()
-        fcond_cases = "WHERE c.file_id = ?" if file_id else ""
         fcond_ann = "AND c.file_id = ?" if file_id else ""
         fcond_cc = "AND c.file_id = ?" if file_id else ""
         p = [file_id] if file_id else []
         # JOIN files: осиротевшие кейсы удалённых файлов невидимы в ревью,
         # поэтому в статистику не входят (иначе тотал врёт).
+        total_where = "WHERE COALESCE(c.hidden, 0) = 0"
+        if file_id:
+            total_where += " AND c.file_id = ?"
         total = cur.execute(
             "SELECT COUNT(*) AS c FROM cases c "
             "JOIN files f ON f.file_id = c.file_id "
-            f"{fcond_cases}", p).fetchone()["c"]
+            f"{total_where}", p).fetchone()["c"]
         reviewed = cur.execute(f"""
             SELECT COUNT(*) AS c FROM annotations a
             JOIN cases c ON c.case_id = a.case_id
             JOIN files f ON f.file_id = c.file_id
-            WHERE COALESCE(a.status, 'unreviewed') NOT IN ({ph}) {fcond_ann}
+            WHERE COALESCE(c.hidden, 0) = 0
+              AND COALESCE(a.status, 'unreviewed') NOT IN ({ph}) {fcond_ann}
         """, (*unrev_codes, *p)).fetchone()["c"]
         bad = cur.execute(f"""
             SELECT COUNT(*) AS c FROM annotations a
             JOIN cases c ON c.case_id = a.case_id
             JOIN files f ON f.file_id = c.file_id
-            WHERE COALESCE(a.status, 'unreviewed') IN ({bad_ph}) {fcond_ann}
+            WHERE COALESCE(c.hidden, 0) = 0
+              AND COALESCE(a.status, 'unreviewed') IN ({bad_ph}) {fcond_ann}
         """, (*bad_codes, *p)).fetchone()["c"]
         problematic = cur.execute(f"""
             SELECT COUNT(DISTINCT cc.case_id) AS c FROM case_checks cc
             JOIN cases c ON c.case_id = cc.case_id
             JOIN files f ON f.file_id = c.file_id
-            WHERE 1=1 {fcond_cc}
+            WHERE COALESCE(c.hidden, 0) = 0 {fcond_cc}
         """, p).fetchone()["c"]
     return {"total": total, "reviewed": reviewed, "problematic": problematic,
             "bad": bad, "remaining": max(0, total - reviewed), "file_id": file_id}

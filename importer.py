@@ -12,8 +12,23 @@ logger = logging.getLogger(__name__)
 BATCH = 2000
 
 
+def _cell_str(value):
+    """Значение ячейки в текст: даты Excel — читаемой строкой, а не объектом."""
+    import datetime as _dt
+    if isinstance(value, _dt.datetime):
+        if value.time() == _dt.time(0, 0):
+            return value.strftime("%Y-%m-%d")
+        return value.strftime("%Y-%m-%d %H:%M")
+    if isinstance(value, _dt.date):
+        return value.isoformat()
+    if isinstance(value, _dt.time):
+        return value.strftime("%H:%M")
+    return value
+
+
 def compute_content_hash(row_data: dict) -> str:
-    content = json.dumps(row_data, sort_keys=True, ensure_ascii=False)
+    content = json.dumps(row_data, sort_keys=True, ensure_ascii=False,
+                         default=str)
     return hashlib.sha256(content.encode("utf-8")).hexdigest()
 
 
@@ -165,6 +180,12 @@ def import_file(
             if not isinstance(row, dict):
                 skipped += 1
                 continue
+            # Даты Excel приезжают объектами datetime — в текст сразу,
+            # иначе падает хэш/JSON (баг больших датасетов).
+            try:
+                row = {k: _cell_str(v) for k, v in row.items()}
+            except Exception:
+                pass
             primary_text = get_role_value(row, "primary_text") or ""
             response_text = get_role_value(row, "response_text")
             group_name = get_role_value(row, "group_name")
@@ -203,8 +224,9 @@ def import_file(
                 file_id, row_index, source_id, content_hash,
                 primary_text, response_text, group_name,
                 comment_from_source,
-                json.dumps(metadata, ensure_ascii=False) if metadata else None,
-                json.dumps(row, ensure_ascii=False), now,
+                json.dumps(metadata, ensure_ascii=False, default=str)
+                if metadata else None,
+                json.dumps(row, ensure_ascii=False, default=str), now,
             ))
             ann_batch.append((now, file_id, content_hash))
             if len(cases_batch) >= BATCH:

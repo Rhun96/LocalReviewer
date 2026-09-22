@@ -741,3 +741,17 @@ def migrate_to_v18(cursor) -> None:
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_highlights_case "
                    "ON case_highlights(case_id)")
     logger.info("migrated to v18 (answer highlights)")
+
+
+def migrate_to_v19(cursor) -> None:
+    """Скрытие мусорных строк из ревью (не удаление!).
+
+    Только ADD COLUMN + INDEX. Скрытые исключаются из выборок ревью,
+    счётчиков, версий и экспорта; в истории и БД остаются.
+    """
+    cols = {r[1] for r in cursor.execute("PRAGMA table_info(cases)").fetchall()}
+    if "hidden" not in cols:
+        cursor.execute("ALTER TABLE cases ADD COLUMN hidden INTEGER DEFAULT 0")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_cases_hidden "
+                   "ON cases(hidden)")
+    logger.info("migrated to v19 (case hidden flag)")

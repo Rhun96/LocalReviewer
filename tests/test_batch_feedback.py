@@ -120,6 +120,129 @@ def test_jump_opens_case_outside_filter():
         w.close()
 
 
+def test_value_free_text_search():
+    import tempfile as _t
+    from PySide6.QtWidgets import QApplication
+    QApplication.instance() or QApplication([])
+    from database import init_database as _init
+    from importer import import_file as _imp
+    from review_screen import ReviewScreen
+    p = _t.mkdtemp()
+    _init(p)
+    _imp(p, "f.xlsx", "excel", "S", 0,
+         {"q": "primary_text", "p": "product"},
+         [{"q": "q1", "p": "Доставка"}, {"q": "q2", "p": "Оплата"},
+          {"q": "q3", "p": "Доставка-курьер"}])
+    w = ReviewScreen(p)
+    try:
+        w.show()
+        w.toggle_view()
+        w.column_filter = "product"
+        w.value_search_text = "достав"
+        w.load_table_data()
+        assert w.cases_table.rowCount() == 2
+        w.value_search_text = "ОПЛАТА"
+        w.load_table_data()
+        assert w.cases_table.rowCount() == 1
+        w.value_search_text = ""
+        w.value_filter = "Доставка"
+        w.load_table_data()
+        assert w.cases_table.rowCount() == 1
+    finally:
+        w.close()
+
+
+def test_value_search_needs_column():
+    import tempfile as _t
+    from PySide6.QtWidgets import QApplication
+    QApplication.instance() or QApplication([])
+    from database import init_database as _init
+    from importer import import_file as _imp
+    from review_screen import ReviewScreen
+    p = _t.mkdtemp()
+    _init(p)
+    _imp(p, "f.xlsx", "excel", "S", 0, {"q": "primary_text"},
+         [{"q": "q1"}, {"q": "q2"}])
+    w = ReviewScreen(p)
+    try:
+        w.show()
+        w.toggle_view()
+        w.value_search.setText("q1")
+        w.on_value_search()  # без колонки — глобально по тексту
+        assert w.value_search_text == "q1"
+        assert w.cases_table.rowCount() == 1
+    finally:
+        w.close()
+
+
+def test_checkbox_column_stays_narrow():
+    import tempfile as _t
+    from PySide6.QtWidgets import QApplication
+    QApplication.instance() or QApplication([])
+    from database import init_database as _init
+    from importer import import_file as _imp
+    from review_screen import ReviewScreen
+    p = _t.mkdtemp()
+    _init(p)
+    _imp(p, "f.xlsx", "excel", "S", 0, {"q": "primary_text"},
+         [{"q": "q1"}, {"q": "q2"}])
+    from PySide6.QtWidgets import QWidget as _QW, QCheckBox as _QB
+    w = ReviewScreen(p)
+    try:
+        w.show()
+        w.toggle_view()
+        w.load_table_data()
+        assert w.cases_table.columnWidth(0) == 30
+
+        def _boxes():
+            return [x for x in w.cases_table.findChildren(_QW)
+                    if isinstance(x, _QB)]
+        assert len(_boxes()) == w.cases_table.rowCount() == 2
+        # Перезагрузки не плодят призраков: боксов ровно столько, сколько строк.
+        w.column_filter = "Запрос"
+        w.value_search_text = "q1"
+        w.load_table_data()
+        assert len(_boxes()) == w.cases_table.rowCount() == 1
+        w.value_search_text = ""
+        w.load_table_data()
+        assert len(_boxes()) == w.cases_table.rowCount() == 2
+    finally:
+        w.close()
+
+
+def test_search_reads_live_combo_not_memory():
+    import tempfile as _t
+    from PySide6.QtWidgets import QApplication
+    QApplication.instance() or QApplication([])
+    from database import init_database as _init
+    from importer import import_file as _imp
+    from review_screen import ReviewScreen
+    import review_table as _rt
+    _orig = _rt.notify
+    _rt.notify = lambda *a, **k: None
+    p = _t.mkdtemp()
+    _init(p)
+    _imp(p, "f.xlsx", "excel", "S", 0,
+         {"q": "primary_text", "p": "product"},
+         [{"q": "q1", "p": "Доставка"}, {"q": "q2", "p": "Оплата"}])
+    w = ReviewScreen(p)
+    try:
+        w.show()
+        w.toggle_view()
+        cc = w.column_filter_combo
+        idx = next(i for i in range(cc.count()) if cc.itemData(i) == "product")
+        cc.setCurrentIndex(idx)
+        # память протухла (как после пересборки), комбо кажет колонку
+        w.column_filter = None
+        w.value_search.setText("достав")
+        w.on_value_search()
+        assert w.cases_table.rowCount() == 1
+        assert w.column_filter == "product"
+    finally:
+        _rt.notify = _orig
+        w.close()
+
+
 def test_reference_fallback_keys():
     from bug_report_service import case_reference
     assert case_reference({"operator_response": "a"}) == "a"

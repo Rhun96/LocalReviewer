@@ -24,6 +24,9 @@ def filter_from(filters: dict):
     conditions: list = []
     params: list = []
     extra_joins = ""
+    # Скрытые вне ревью всегда, кроме явного include_hidden (тумблер таблицы).
+    if not (filters or {}).get("include_hidden"):
+        conditions.append("COALESCE(c.hidden, 0) = 0")
 
     statuses = (filters or {}).get("statuses", [])
     if statuses:
@@ -132,6 +135,7 @@ def get_all_case_ids(project_path: str, limit: int = 0, offset: int = 0) -> list
         SELECT c.case_id
         FROM cases c
         JOIN files f ON c.file_id = f.file_id
+        WHERE COALESCE(c.hidden, 0) = 0
         ORDER BY f.imported_at, c.row_index
     """
     params: list = []

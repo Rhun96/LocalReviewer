@@ -16,12 +16,12 @@ def _proj():
     return tmp
 
 
-def test_schema_v18():
-    assert SCHEMA_VERSION == 18
+def test_schema_current():
+    assert SCHEMA_VERSION == 19
     p = _proj()
     from database import db
     with db(p) as conn:
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 18
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 19
 
 
 def test_add_list_render():

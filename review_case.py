@@ -95,11 +95,17 @@ class CaseMixin:
         self.btn_finish.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.btn_finish.setToolTip("Сохранить версию датасета (снимок всех оценок)")
         self.btn_finish.clicked.connect(self.on_finish_review)
+        self.btn_hide = FPushButton("👁")
+        self.btn_hide.setMaximumWidth(44)
+        self.btn_hide.setMinimumHeight(30)
+        self.btn_hide.setToolTip("Скрыть кейс из ревью (Ctrl+H). Не удаление!")
+        self.btn_hide.clicked.connect(self.toggle_hide_current)
         nav_layout.addWidget(btn_prev)
         nav_layout.addWidget(btn_filters)
         nav_layout.addWidget(btn_next)
         nav_layout.addWidget(btn_back)
         nav_layout.addWidget(self.btn_finish)
+        nav_layout.addWidget(self.btn_hide)
         for _i in range(5):
             nav_layout.setStretch(_i, 1)
         nav_group.setLayout(nav_layout)
@@ -774,6 +780,8 @@ class CaseMixin:
             f"📄 {self.current_case.get('file_name')}{sid_part} | "
             f"{status}"
         )
+        if self.current_case.get('hidden'):
+            text += " | 👁 Скрыт"
         err = getattr(self, "current_error", None)
         if err and err.get("category_name"):
             from taxonomy_service import SEVERITY_NAMES
@@ -912,6 +920,36 @@ class CaseMixin:
         if new != prev.strip():
             self._last_single = {"kind": "comment", "case_id": self.current_case_id,
                                  "old": prev, "new": new}
+
+    def toggle_hide_current(self):
+        """Скрыть/показать текущий кейс (не удаление!). После скрытия — дальше."""
+        if not self.current_case_id:
+            return
+        try:
+            import visibility_service as _vis
+            hidden = bool((self.current_case or {}).get("hidden"))
+            if hidden:
+                n = _vis.unhide_cases(self.project_path, [self.current_case_id])
+                notify(self, "success", "Скрытие",
+                       f"Кейс снова в ревью ({n}).")
+            else:
+                n = _vis.hide_cases(self.project_path, [self.current_case_id])
+                notify(self, "success", "Скрытие",
+                       f"Кейс скрыт из ревью ({n}). Вернуть: таблица → 👁 → bulk.")
+            self.current_case["hidden"] = 0 if hidden else 1
+            self.update_info_label()
+            self.update_queue_indicator()
+            self.update_filter_indicator()
+            if not hidden:
+                # Выборку пересобираем: скрытый должен исчезнуть из навигации.
+                self.load_case_ids()
+                self.current_index = min(self.current_index,
+                                         max(0, len(self.case_ids) - 1))
+                if self.case_ids:
+                    self.load_case(self.current_index)
+            self.focus_work_area()
+        except Exception as e:
+            self.show_error("Не удалось скрыть кейс", e)
 
     def undo_single(self):
         """Отмена последнего одиночного действия (статус/тег/комментарий)."""

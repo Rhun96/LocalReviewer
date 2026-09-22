@@ -25,15 +25,18 @@ def get_overall_report(project_path: str, file_id=None) -> dict:
         if file_id:
             file_condition = " WHERE c.file_id = ?"
             params.append(file_id)
+        hid = "COALESCE(c.hidden, 0) = 0"
+        if file_condition:
+            hid += " AND c.file_id = ?"
         cursor.execute(f"SELECT COUNT(*) as total FROM cases c "
-                       f"JOIN files f ON f.file_id = c.file_id{file_condition}", params)
+                       f"JOIN files f ON f.file_id = c.file_id WHERE {hid}", params)
         total = cursor.fetchone()["total"]
         cursor.execute(f"""
             SELECT COALESCE(a.status, 'unreviewed') as status, COUNT(*) as count
             FROM cases c
             JOIN files f ON f.file_id = c.file_id
             LEFT JOIN annotations a ON c.case_id = a.case_id
-            {file_condition}
+            WHERE {hid}
             GROUP BY COALESCE(a.status, 'unreviewed')
         """, params)
         status_counts = {row["status"]: row["count"] for row in cursor.fetchall()}
@@ -66,9 +69,10 @@ def get_files_report(project_path: str) -> list:
                 f.file_name,
                 f.row_count,
                 f.imported_at,
-                COUNT(DISTINCT c.case_id) as cases_count,
-                COUNT(DISTINCT CASE WHEN COALESCE(a.status, 'unreviewed')
-                      NOT IN ({ph})
+                COUNT(DISTINCT CASE WHEN COALESCE(c.hidden, 0) = 0
+                      THEN c.case_id END) as cases_count,
+                COUNT(DISTINCT CASE WHEN COALESCE(c.hidden, 0) = 0
+                      AND COALESCE(a.status, 'unreviewed') NOT IN ({ph})
                       THEN c.case_id END) as reviewed_count
             FROM files f
             LEFT JOIN cases c ON f.file_id = c.file_id

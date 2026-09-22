@@ -143,12 +143,16 @@ def create_version(project_path: str, dataset_id: int, case_ids: list | None = N
         if _dataset_locked(cur, dataset_id):
             raise ValueError("Датасет заперт (locked): состав зафиксирован")
         if case_ids is None:
+            # Скрытые в слепок не входят (мусор не версионируем); явный список
+            # уважаем как есть.
             if file_id is not None:
                 case_ids = [r["case_id"] for r in cur.execute(
-                    "SELECT case_id FROM cases WHERE file_id=?", (file_id,)).fetchall()]
+                    "SELECT case_id FROM cases WHERE file_id=? "
+                    "AND COALESCE(hidden, 0) = 0", (file_id,)).fetchall()]
             else:
                 case_ids = [r["case_id"] for r in
-                            cur.execute("SELECT case_id FROM cases").fetchall()]
+                            cur.execute("SELECT case_id FROM cases "
+                                        "WHERE COALESCE(hidden, 0) = 0").fetchall()]
     case_ids = list(dict.fromkeys(int(c) for c in case_ids))
 
     last_err: Exception | None = None

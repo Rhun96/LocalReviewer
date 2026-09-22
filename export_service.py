@@ -75,10 +75,10 @@ def export_results_to_xlsx(project_path: str, output_path: str, file_id=None):
 
     with db(project_path) as conn:
         cursor = conn.cursor()
-        file_condition = ""
+        file_condition = "WHERE COALESCE(c.hidden, 0) = 0"
         params: list = []
         if file_id:
-            file_condition = " WHERE c.file_id = ?"
+            file_condition += " AND c.file_id = ?"
             params.append(file_id)
         cursor.execute(f"""
             SELECT
@@ -179,10 +179,10 @@ def export_results_jsonl(project_path: str, output_path: str, file_id=None,
     count = 0
     with db(project_path) as conn:
         cursor = conn.cursor()
-        file_condition = ""
+        file_condition = "WHERE COALESCE(c.hidden, 0) = 0"
         params: list = []
         if file_id:
-            file_condition = " WHERE c.file_id = ?"
+            file_condition += " AND c.file_id = ?"
             params.append(file_id)
         cursor.execute(f"""
             SELECT

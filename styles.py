@@ -624,6 +624,23 @@ QTableWidget, TableWidget {{
 QTableWidget::item, TableWidget::item {{
     padding: 2px 6px;
 }}
+QTableWidget::indicator, TableWidget::indicator {{
+    width: 18px;
+    height: 18px;
+}}
+QTableWidget::indicator:unchecked, TableWidget::indicator:unchecked {{
+    border: 1px solid {text_dim};
+    border-radius: 4px;
+    background-color: transparent;
+}}
+QTableWidget::indicator:checked, TableWidget::indicator:checked {{
+    border: 1px solid {accent};
+    border-radius: 4px;
+    background-color: {accent};
+}}
+QTableWidget::indicator:unchecked:hover, TableWidget::indicator:unchecked:hover {{
+    border: 1px solid {accent};
+}}
 QTableWidget::item:hover, TableWidget::item:hover {{
     background-color: {header_bg};
 }}

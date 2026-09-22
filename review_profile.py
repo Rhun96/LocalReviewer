@@ -198,6 +198,8 @@ class ProfileMixin:
             _add("S", self.open_similar)
         _add("Ctrl+A", self.on_bulk_select_all)
         _add("Ctrl+Shift+A", self.on_bulk_clear)
+        # Ctrl+H — свободен (профили — одиночные символы): скрыть кейс.
+        _add("Ctrl+H", self.toggle_hide_current)
         # Ctrl+Enter: в Qt Return (основной) и Enter (кейпад) — разные
         # клавиши, вешаем оба. Без guarded: сохранение должно работать
         # и внутри полей ввода.
