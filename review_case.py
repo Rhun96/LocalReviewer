@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt
 from database import db
 from ui_compat import (
-    FLUENT, FPushButton, clear_in_fluent,
+    FLUENT, FPrimaryButton, FPushButton, clear_in_fluent,
     confirm, notify,
 )
 import json
@@ -37,11 +37,13 @@ class CaseMixin:
         text_scroll = QScrollArea()
         text_scroll.setWidgetResizable(True)
         text_scroll.setMinimumHeight(150)
+        # Нейтральная карточка (как stat-карточки в шапке): видна на любой
+        # теме. Был захардкожен тёмный фон — ломал светлую тему.
         text_scroll.setStyleSheet("""
             QScrollArea {
-                border: 2px solid #00441A;
+                border: 1px solid rgba(127, 127, 127, 0.25);
                 border-radius: 8px;
-                background-color: #0A0F0A;
+                background: transparent;
             }
         """)
         self.case_content = QWidget()
@@ -191,7 +193,7 @@ class CaseMixin:
         """)
         btn_del_template.setMinimumHeight(28)
         btn_del_template.clicked.connect(self.delete_template)
-        btn_save_comment = FPushButton("💾 Сохранить")
+        btn_save_comment = FPrimaryButton("💾 Сохранить")
         btn_save_comment.setMinimumHeight(28)
         btn_save_comment.clicked.connect(self.save_comment_manual)
         btn_undo_single = FPushButton("↩")

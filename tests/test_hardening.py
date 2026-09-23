@@ -109,6 +109,35 @@ def test_ctrl_p_fires_with_focus_in_comment():
         w.close()
 
 
+def test_stat_cards_show_and_update():
+    """Карточки шапки: 5 шт, цифры из get_overall_report, живут после разметки."""
+    import tempfile as _t
+    from PySide6.QtWidgets import QApplication
+    QApplication.instance() or QApplication([])
+    from database import init_database as _init
+    from importer import import_file as _imp
+    from review_screen import ReviewScreen
+    p = _t.mkdtemp()
+    _init(p)
+    _imp(p, "f.xlsx", "excel", "S", 0, {"q": "primary_text"},
+         [{"q": "q1"}, {"q": "q2"}, {"q": "q3"}, {"q": "q4"}])
+    w = ReviewScreen(p)
+    try:
+        w.show()
+        w.load_case(0)
+        assert sorted(w._stat_cards) == ["bad", "duplicate", "reviewed",
+                                         "total", "uncertain"]
+        assert w._stat_cards["total"][0].text() == "4"
+        assert w._stat_cards["reviewed"][0].text() == "0"
+        w.set_status("good")
+        assert w._stat_cards["reviewed"][0].text() == "1"
+        assert w._stat_cards["reviewed"][1].text() == "25%"
+        w.toggle_view()
+        assert w._stat_cards["total"][0].isVisible()
+    finally:
+        w.close()
+
+
 def test_clip_pill_shows_and_hides():
     """Пилюля в шапке ревью: видна пока тикает, прячется после."""
     import tempfile as _t
@@ -118,6 +147,8 @@ def test_clip_pill_shows_and_hides():
     from importer import import_file as _imp
     from review_screen import ReviewScreen
     import clipboard_service as _clip
+    prev = _clip.get_clear_after()
+    _clip.set_clear_after(60)
     p = _t.mkdtemp()
     _init(p)
     _imp(p, "f.xlsx", "excel", "S", 0, {"q": "primary_text"},
@@ -138,6 +169,7 @@ def test_clip_pill_shows_and_hides():
         assert not w.clip_pill.isVisible()
     finally:
         w.close()
+        _clip.set_clear_after(prev)
         _clip.reset_pending()
 
 
@@ -201,6 +233,91 @@ def test_global_keys_filter_ctrl_p():
     finally:
         other.close()
         w.close()
+
+
+def test_integrity_dialog_checklist():
+    """Диалог целостности: здоровый — чек-лист скоупов, битый — проблемы."""
+    import tempfile as _t
+    from PySide6.QtWidgets import QApplication
+    QApplication.instance() or QApplication([])
+    from database import init_database as _init, db as _db
+    from importer import import_file as _imp
+    from maintenance_dialog import IntegrityDialog
+    p = _t.mkdtemp()
+    _init(p)
+    _imp(p, "f.xlsx", "excel", "S", 0, {"q": "primary_text"},
+         [{"q": "q1"}])
+    try:
+        dlg = IntegrityDialog(p, None)
+        try:
+            assert "исправен" in dlg.info.text()
+            assert dlg.details.count() == 9
+            assert not dlg.btn_purge.isEnabled()
+        finally:
+            dlg.close()
+        with _db(p) as conn:
+            conn.execute("PRAGMA foreign_keys=OFF")
+            fid = conn.execute("SELECT file_id FROM files").fetchone()["file_id"]
+            conn.execute("INSERT INTO cases (file_id, row_index, source_id,"
+                         " primary_text, created_at) VALUES (?, 999, 'ORPH',"
+                         " 'orphan', datetime('now'))", (fid,))
+            conn.execute("DELETE FROM files WHERE file_id=?", (fid,))
+            conn.execute("PRAGMA foreign_keys=ON")
+        dlg2 = IntegrityDialog(p, None)
+        try:
+            assert "проблем" in dlg2.info.text()
+            assert dlg2.details.count() >= 1
+            assert dlg2.btn_purge.isEnabled()
+        finally:
+            dlg2.close()
+    finally:
+        pass
+
+
+def test_table_status_colors_and_bug_severity_colors():
+    """Цвета статусов/критичности в таблицах (только foreground, обе темы)."""
+    import tempfile as _t
+    from PySide6.QtWidgets import QApplication
+    QApplication.instance() or QApplication([])
+    from database import init_database as _init, db as _db
+    from importer import import_file as _imp
+    from review_screen import ReviewScreen
+    from bug_reports_screen import BugReportsScreen
+    import bug_report_service as _bugs
+    p = _t.mkdtemp()
+    _init(p)
+    _imp(p, "f.xlsx", "excel", "S", 0, {"q": "primary_text"},
+         [{"q": "q1"}, {"q": "q2"}])
+    with _db(p) as conn:
+        ids = [r["case_id"] for r in conn.execute(
+            "SELECT case_id FROM cases ORDER BY case_id").fetchall()]
+        conn.execute("UPDATE annotations SET status='good' WHERE case_id=?",
+                     (ids[0],))
+        conn.execute("UPDATE annotations SET status='bad' WHERE case_id=?",
+                     (ids[1],))
+    bid = _bugs.create_bug(p, "t", [ids[0]], severity="Critical")
+    w = ReviewScreen(p)
+    try:
+        w.show()
+        w.toggle_view()
+        cols = list(w.selected_columns)
+        sidx = cols.index("Статус") + 1
+        fgs = {}
+        for row in range(w.cases_table.rowCount()):
+            item = w.cases_table.item(row, sidx)
+            fgs[item.text()] = item.foreground().color().name()
+        assert any(v == "#2ea043" for v in fgs.values()), fgs
+        assert any(v == "#da3633" for v in fgs.values()), fgs
+    finally:
+        w.close()
+    b = BugReportsScreen(p, None)
+    try:
+        b.show()
+        assert b.table.rowCount() == 1
+        assert b.table.item(0, 3).foreground().color().name() == "#da3633"
+        _ = bid
+    finally:
+        b.close()
 
 
 def test_anonymized_exports_keep_source():

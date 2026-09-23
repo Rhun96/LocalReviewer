@@ -50,16 +50,25 @@ class IntegrityDialog(QDialog):
             notify(self, "error", "Ошибка", str(e))
             return
         issues = rep.get("issues", [])
+        self.details.clear()
         if rep.get("ok"):
-            self.info.setText("Проект исправен.")
+            self.info.setText("✅ Проект исправен.")
+            # Здоровый проект — показываем ЧТО проверено (как в референсе),
+            # а не пустой список: спокойствие должно быть видно.
+            for scope in ("database", "cases", "annotations", "tags",
+                          "datasets", "runs", "regression", "bugs",
+                          "highlights"):
+                item = QListWidgetItem(f"✅ {scope} — чисто")
+                item.setData(Qt.ItemDataRole.UserRole, None)
+                self.details.addItem(item)
         else:
             self.info.setText(f"Найдено проблем: {len(issues)}.")
-        self.details.clear()
-        for it in issues:
-            mark = "🛠" if it.get("fixable") else "👁"
-            item = QListWidgetItem(f"{mark} [{it.get('scope')}] {it.get('detail')}")
-            item.setData(Qt.ItemDataRole.UserRole, None)
-            self.details.addItem(item)
+            for it in issues:
+                mark = "🛠" if it.get("fixable") else "👁"
+                item = QListWidgetItem(
+                    f"{mark} [{it.get('scope')}] {it.get('detail')}")
+                item.setData(Qt.ItemDataRole.UserRole, None)
+                self.details.addItem(item)
         # Кнопка чистки активна только если есть чинимое.
         self.btn_purge.setEnabled(any(i.get("fixable") for i in issues))
         self.btn_purge.setText("🛠 Исправить безопасное")

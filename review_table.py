@@ -593,6 +593,19 @@ class TableMixin:
             from constants import metadata_column_label as _label
             self.cases_table.setHorizontalHeaderLabels(
                 ["✓"] + [_label(c) for c in self.selected_columns] + ["⚠"])
+            # Цвета статусов (только foreground: фоновые пилюли невозможны —
+            # TableItemDelegate библиотеки рисует сам, QSS игнорит, проверено
+            # на чекбоксах). Цвета нейтральные — читаются на обеих темах.
+            # Серый скрытых строк важнее раскраски: он применяется позже.
+            try:
+                from PySide6.QtGui import QColor as _QC
+                _STATUS_FG = {
+                    "good": _QC("#2ea043"), "bad": _QC("#da3633"),
+                    "uncertain": _QC("#bf8700"), "duplicate": _QC("#1f6feb"),
+                    "skip": _QC("#888888"),
+                }
+            except Exception:
+                _STATUS_FG = {}
             _name_cache: dict = {}
 
             def _status_label(code: str) -> str:
@@ -654,6 +667,14 @@ class TableMixin:
                     if col_idx == 1:
                         item.setData(Qt.ItemDataRole.UserRole, case['case_id'])
                     item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                    if col_name == 'Статус' and not _hidden:
+                        try:
+                            _fg = _STATUS_FG.get(
+                                self._status_base(case['status'] or "unreviewed"))
+                            if _fg is not None:
+                                item.setForeground(_fg)
+                        except Exception:
+                            pass
                     if _hidden:
                         try:
                             from PySide6.QtGui import QColor as _QC
@@ -811,6 +832,12 @@ class TableMixin:
             self.filter_indicator.setText(
                 f"{base}  |  {scope}: 🔴 {stats['problematic']} проблемных{bad_part}, "
                 f"🟢 {stats['reviewed']}/{stats['total']} обработан")
+        except Exception:
+            pass
+        try:
+            upd = getattr(self, "update_stat_cards", None)
+            if callable(upd):
+                upd()
         except Exception:
             pass
 

@@ -92,6 +92,8 @@ def test_clipboard_monitor_arms_only_inapp_copies(monkeypatch):
     QApplication.instance() or QApplication([])
     import clipboard_service as _clip
     assert _clip.install_monitor() is True
+    prev = _clip.get_clear_after()
+    _clip.set_clear_after(60)
     saved_cb = QGuiApplication.clipboard().text()
     w = QWidget()
     try:
@@ -115,6 +117,7 @@ def test_clipboard_monitor_arms_only_inapp_copies(monkeypatch):
         _pump_clipboard()
         assert _clip.countdown_state() is None
     finally:
+        _clip.set_clear_after(prev)
         w.close()
         _clip.reset_pending()
         QGuiApplication.clipboard().setText(saved_cb)
@@ -148,6 +151,8 @@ def test_clipboard_countdown_state(monkeypatch):
     from PySide6.QtWidgets import QApplication
     from PySide6.QtGui import QGuiApplication
     QApplication.instance() or QApplication([])
+    prev = clip.get_clear_after()
+    clip.set_clear_after(60)
     clip.reset_pending()
     assert clip.countdown_state() is None
     clip.safe_copy("секрет")
@@ -158,6 +163,7 @@ def test_clipboard_countdown_state(monkeypatch):
                         classmethod(lambda _cls: None))
     QGuiApplication.clipboard().setText("пользовательское")
     assert clip.countdown_state() is None
+    clip.set_clear_after(prev)
     clip.reset_pending()
 
 

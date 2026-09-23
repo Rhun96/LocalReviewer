@@ -161,6 +161,38 @@ class ReviewScreen(BaseScreen, ProfileMixin, CaseMixin, TableMixin, BulkMixin, V
         except Exception:
             pass
 
+    def update_stat_cards(self):
+        """Пересчёт карточек шапки (проект, base-семантика, скрытые вне счёта)."""
+        if not hasattr(self, "_stat_cards"):
+            return
+        try:
+            from report_service import get_overall_report
+            rep = get_overall_report(self.project_path)
+        except Exception:
+            return
+        try:
+            total = int(rep.get("total", 0) or 0)
+            vals = {
+                "total": (total, ""),
+                "reviewed": (int(rep.get("reviewed", 0) or 0), "проверено"),
+                "bad": (int(rep.get("bad", 0) or 0), "плохих"),
+                "uncertain": (int(rep.get("uncertain", 0) or 0), "сомнений"),
+                "duplicate": (int(rep.get("duplicate", 0) or 0), "дублей"),
+            }
+            for key, (val, _caption) in vals.items():
+                slot = self._stat_cards.get(key)
+                if not slot:
+                    continue
+                vlab, slab = slot
+                vlab.setText(f"{val:,}".replace(",", " "))
+                if key == "total":
+                    slab.setText("в проекте")
+                else:
+                    pct = (100.0 * val / total) if total else 0.0
+                    slab.setText(f"{pct:.0f}%")
+        except Exception:
+            pass
+
     def _tick_clip_pill(self):
         """Пилюля буфера: остаток автоочистки или скрыть (чужое/пусто/выкл)."""
         try:
@@ -278,6 +310,49 @@ class ReviewScreen(BaseScreen, ProfileMixin, CaseMixin, TableMixin, BulkMixin, V
         self._clip_timer.setInterval(1000)
         self._clip_timer.timeout.connect(self._tick_clip_pill)
         self._clip_timer.start()
+
+        # Карточки статистики (референс: Всего / Проверено / С ошибками /
+        # Сомневаюсь / Дубликаты). Только чтение, скоуп — проект.
+        # Нейтральный полупрозрачный фон: видно на любой теме без знания
+        # палитры; семантические цвета значений читаются и на тёмной,
+        # и на светлой.
+        from PySide6.QtWidgets import QHBoxLayout as _HB, QFrame as _FR
+        cards_row = _HB()
+        cards_row.setSpacing(8)
+        self._stat_cards: dict = {}
+        for _key, _title, _color in (
+                ("total", "Всего кейсов", ""),
+                ("reviewed", "Проверено", "#2ea043"),
+                ("bad", "С ошибками", "#da3633"),
+                ("uncertain", "Сомневаюсь", "#bf8700"),
+                ("duplicate", "Дубликаты", "#1f6feb")):
+            _frame = _FR()
+            _frame.setStyleSheet(
+                "QFrame { background: rgba(127, 127, 127, 0.08);"
+                " border: 1px solid rgba(127, 127, 127, 0.25);"
+                " border-radius: 8px; }")
+            _box = QVBoxLayout()
+            _box.setSpacing(0)
+            _box.setContentsMargins(10, 6, 10, 6)
+            _t = QLabel(_title)
+            _t.setStyleSheet("font-size: 11px; border: none; background: transparent;")
+            _t.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            _v = QLabel("—")
+            _v.setStyleSheet(
+                f"font-size: 18px; font-weight: bold; border: none;"
+                f" background: transparent;{(' color: ' + _color + ';') if _color else ''}")
+            _v.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            _s = QLabel("")
+            _s.setStyleSheet("font-size: 10px; border: none; background: transparent;")
+            _s.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            _box.addWidget(_t)
+            _box.addWidget(_v)
+            _box.addWidget(_s)
+            _frame.setLayout(_box)
+            cards_row.addWidget(_frame)
+            self._stat_cards[_key] = (_v, _s)
+        layout.addLayout(cards_row)
+        self.update_stat_cards()
 
         # Информация о кейсе
         self.info_label = QLabel()
