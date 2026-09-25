@@ -116,15 +116,22 @@ class BugReportsScreen(BaseScreen):
         self.table.setHorizontalHeaderLabels(
             ["ID", "Заголовок", "Статус", "Критичность", "Категория", "Кейсы",
              "External", "Обновлён"])
-        # Цвет критичности (только foreground — делегат библиотеки).
+        # Цвет статуса и критичности (только foreground — делегат библиотеки).
         try:
             from PySide6.QtGui import QColor as _QC
             from styles import SEMANTIC as _SEM, COLORS as _CC
+            _ST_FG = {"New": _QC(_SEM["info"]),
+                      "Confirmed": _QC(_SEM["warning"]),
+                      "In Progress": _QC(_CC["blue"]),
+                      "Fixed": _QC(_SEM["success"]),
+                      "Rejected": _QC(_CC["gray"]),
+                      "Duplicate": _QC(_CC["gray"])}
             _SEV_FG = {"Critical": _QC(_SEM["danger"]),
                        "High": _QC(_SEM["danger"]),
                        "Medium": _QC(_SEM["warning"]),
                        "Low": _QC(_CC["gray"])}
         except Exception:
+            _ST_FG = {}
             _SEV_FG = {}
         for i, r in enumerate(rows):
             cat = cats.get(r["category_id"], "") if r["category_id"] else ""
@@ -132,7 +139,14 @@ class BugReportsScreen(BaseScreen):
             sv = bugs.BUG_SEVERITY_NAMES.get(r["severity"] or "", r["severity"] or "")
             self.table.setItem(i, 0, QTableWidgetItem(str(r["bug_id"])))
             self.table.setItem(i, 1, QTableWidgetItem((r["title"] or "")[:80]))
-            self.table.setItem(i, 2, QTableWidgetItem(st))
+            _st_item = QTableWidgetItem(st)
+            try:
+                _fg = _ST_FG.get(r["status"] or "")
+                if _fg is not None:
+                    _st_item.setForeground(_fg)
+            except Exception:
+                pass
+            self.table.setItem(i, 2, _st_item)
             _sev_item = QTableWidgetItem(sv)
             try:
                 _fg = _SEV_FG.get(r["severity"] or "")
