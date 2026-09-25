@@ -20,6 +20,29 @@ from review_verdicts import VerdictsMixin
 logger = logging.getLogger(__name__)
 
 
+class _FitStack(QStackedWidget):
+    """Стек высотой по текущей странице (рескин: иначе таблица тянется
+    по длинной странице кейса и футер с номерами уезжает за скролл)."""
+
+    def sizeHint(self):
+        try:
+            w = self.currentWidget()
+            if w is not None:
+                return w.sizeHint()
+        except Exception:
+            pass
+        return super().sizeHint()
+
+    def minimumSizeHint(self):
+        try:
+            w = self.currentWidget()
+            if w is not None:
+                return w.minimumSizeHint()
+        except Exception:
+            pass
+        return super().minimumSizeHint()
+
+
 class ReviewScreen(BaseScreen, ProfileMixin, CaseMixin, TableMixin, BulkMixin, VerdictsMixin):
     """Экран ревью с переключением между кейсом и таблицей."""
 
@@ -90,6 +113,17 @@ class ReviewScreen(BaseScreen, ProfileMixin, CaseMixin, TableMixin, BulkMixin, V
         if getattr(self, "_pending_empty_warning", False):
             self._pending_empty_warning = False
             notify(self, "warning", "Внимание", "Нет кейсов, соответствующих фильтрам")
+
+    def resizeEvent(self, event):
+        """Форвардер рефита таблицы (виртуалки из миксинов Qt не вызывает)."""
+        try:
+            self._refit_on_resize()
+        except Exception:
+            pass
+        try:
+            super().resizeEvent(event)
+        except Exception:
+            pass
 
     def snapshot_session(self) -> dict:
         """V2.1 P0 §5: текущее место ревью (координация, без бизнес-логики)."""
@@ -386,18 +420,27 @@ class ReviewScreen(BaseScreen, ProfileMixin, CaseMixin, TableMixin, BulkMixin, V
         self.btn_toggle_view.clicked.connect(self.toggle_view)
         layout.addWidget(self.btn_toggle_view)
 
-        # Стек видов
-        self.view_stack = QStackedWidget()
+        # Стек видов (адаптивный: высота по текущей странице).
+        self.view_stack = _FitStack()
         # Вид 1: Один кейс
         self.case_view = self.create_case_view()
         self.view_stack.addWidget(self.case_view)
         # Вид 2: Таблица
         self.table_view = self.create_table_view()
         self.view_stack.addWidget(self.table_view)
-        layout.addWidget(self.view_stack)
+        layout.addWidget(self.view_stack, 1)
+        try:
+            self.view_stack.currentChanged.connect(
+                lambda _i: self.view_stack.updateGeometry())
+        except Exception:
+            pass
 
         content_widget.setLayout(layout)
         scroll.setWidget(content_widget)
         main_layout.addWidget(scroll)
         clear_in_fluent(scroll)
         self.setLayout(main_layout)
+        # Якоря для вьюпорт-фита таблицы (рескин): table view ужимает
+        # таблицу под высоту окна, чтобы футер с номерами был виден.
+        self._review_scroll = scroll
+        self._review_content = content_widget

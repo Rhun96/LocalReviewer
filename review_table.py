@@ -412,7 +412,7 @@ class TableMixin:
         self.cases_table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
         self.cases_table.setHorizontalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
         self.cases_table.doubleClicked.connect(self.on_table_double_click)
-        layout.addWidget(self.cases_table)
+        layout.addWidget(self.cases_table, 1)
         clear_in_fluent(self.cases_table)
         # Без stretch: у таблицы всегда горизонтальный скролл, колонки шире
         # вида — тянуть последнюю некуда.
@@ -780,6 +780,10 @@ class TableMixin:
                 self._rebuild_page_numbers()
             except Exception:
                 pass
+            try:
+                self._fit_table_height()
+            except Exception:
+                pass
             self._update_bulk_label()
             self._update_hidden_button()
         except Exception as e:
@@ -902,6 +906,71 @@ class TableMixin:
             upd = getattr(self, "update_stat_cards", None)
             if callable(upd):
                 upd()
+        except Exception:
+            pass
+
+    def _refit_on_resize(self):
+        """Рефит таблицы после ресайза окна (вызывает оболочка: Qt не видит
+        виртуалки, определённые только в миксинах, — проверено пробой)."""
+        try:
+            from PySide6.QtCore import QTimer as _QT
+            _QT.singleShot(50, self._fit_table_height)
+        except Exception:
+            pass
+
+    def _chrome_height(self) -> int:
+        """Высота всего, кроме таблицы: шапка + ряды table view."""
+        total = 0
+        try:
+            content = getattr(self, "_review_content", None)
+            stack = getattr(self, "view_stack", None)
+            if content is not None and content.layout() is not None:
+                lay = content.layout()
+                total += (lay.contentsMargins().top()
+                          + lay.contentsMargins().bottom())
+                for i in range(lay.count()):
+                    it = lay.itemAt(i)
+                    if it is None:
+                        continue
+                    if it.layout() is not None:
+                        # Ряд stat-карточек: виджета нет, только layout.
+                        total += it.layout().sizeHint().height() + lay.spacing()
+                        continue
+                    ch = it.widget()
+                    if ch is None or ch is stack:
+                        continue
+                    total += ch.sizeHint().height() + lay.spacing()
+            tlay = self.table_view.layout()
+            total += (tlay.contentsMargins().top()
+                      + tlay.contentsMargins().bottom())
+            for i in range(tlay.count()):
+                it = tlay.itemAt(i)
+                if it is None:
+                    continue
+                if it.layout() is not None:
+                    total += it.layout().sizeHint().height() + tlay.spacing()
+                    continue
+                ch = it.widget()
+                if ch is None or ch is self.cases_table:
+                    continue
+                total += ch.sizeHint().height() + tlay.spacing()
+        except Exception:
+            pass
+        return total
+
+    def _fit_table_height(self):
+        """Ужать таблицу под вьюпорт: внутренний скролл вместо внешнего."""
+        try:
+            scr = getattr(self, "_review_scroll", None)
+            if scr is None:
+                return
+            avail = scr.viewport().height()
+            if avail <= 0:
+                return
+            cap = avail - self._chrome_height() - 4
+            cap = max(220, int(cap))
+            if abs(self.cases_table.maximumHeight() - cap) > 2:
+                self.cases_table.setMaximumHeight(cap)
         except Exception:
             pass
 

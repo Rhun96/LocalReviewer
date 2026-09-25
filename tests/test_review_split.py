@@ -150,3 +150,36 @@ def test_indicator_ignores_orphan_cases():
         assert "0/3" in ps.info_label.text(), ps.info_label.text()
     finally:
         ps.close()
+
+
+def test_table_fits_viewport_footer_visible():
+    """Вьюпорт-фит: таблица ужата, футер с номерами в пределах экрана."""
+    from PySide6.QtCore import QPoint
+    from PySide6.QtWidgets import QApplication
+
+    from database import init_database
+    from importer import import_file
+
+    tmp = tempfile.mkdtemp()
+    init_database(tmp)
+    mapping = {"q": "primary_text", "a": "response_text"}
+    import_file(tmp, "f.xlsx", "excel", "S", 0, mapping,
+                [{"q": f"q{i}", "a": f"a{i}"} for i in range(60)])
+    QApplication.instance() or QApplication([])
+    w = ReviewScreen(tmp)
+    try:
+        app = QApplication.instance()
+        w.show()
+        w.resize(1600, 900)
+        app.processEvents()
+        w.view_stack.setCurrentIndex(1)
+        w.page_size = 50
+        w.load_table_data()
+        app.processEvents()
+        scr = w._review_scroll
+        assert w.cases_table.maximumHeight() < 16777215
+        foot_y = w.btn_next_page.mapTo(
+            scr.viewport(), QPoint(0, w.btn_next_page.height())).y()
+        assert foot_y <= scr.viewport().height(), (foot_y, scr.viewport().height())
+    finally:
+        w.close()
