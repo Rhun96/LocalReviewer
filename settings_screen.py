@@ -6,8 +6,9 @@ from PySide6.QtCore import Qt, Signal
 from database import db
 from ui_base import BaseScreen
 from ui_compat import (
-    FLUENT, FCheckBox, FComboBox, FPrimaryButton, FPushButton, FSpinBox,
-    THEME_NAMES, apply_theme, get_theme_mode, notify, set_theme_mode,
+    FLUENT, FComboBox, FPrimaryButton, FPushButton, FSpinBox,
+    FSwitch, THEME_NAMES, apply_theme, connect_check_changed, get_theme_mode,
+    notify, set_theme_mode,
 )
 from datetime import datetime, UTC
 
@@ -49,22 +50,26 @@ class SettingsScreen(BaseScreen):
         review_group = QGroupBox("Режим ревью")
         review_layout = QFormLayout()
 
-        self.auto_next_checkbox = FCheckBox(
-            "Автоматически переходить к следующему кейсу после выбора статуса")
+        self.auto_next_checkbox = FSwitch()
         self.auto_next_checkbox.setChecked(True)
-        review_layout.addRow(self.auto_next_checkbox)
+        review_layout.addRow(
+            "Автоматически переходить к следующему кейсу после выбора статуса",
+            self.auto_next_checkbox)
 
-        self.skip_reviewed_checkbox = FCheckBox("Пропускать уже просмотренные при переходе")
+        self.skip_reviewed_checkbox = FSwitch()
         self.skip_reviewed_checkbox.setChecked(False)
-        review_layout.addRow(self.skip_reviewed_checkbox)
+        review_layout.addRow("Пропускать уже просмотренные при переходе",
+                             self.skip_reviewed_checkbox)
 
-        self.checks_first_checkbox = FCheckBox("Сначала кейсы с автопроверками при переходе")
+        self.checks_first_checkbox = FSwitch()
         self.checks_first_checkbox.setChecked(False)
-        review_layout.addRow(self.checks_first_checkbox)
+        review_layout.addRow("Сначала кейсы с автопроверками при переходе",
+                             self.checks_first_checkbox)
 
-        self.no_return_good_checkbox = FCheckBox("Не возвращаться к «Хорошо» при переходе")
+        self.no_return_good_checkbox = FSwitch()
         self.no_return_good_checkbox.setChecked(False)
-        review_layout.addRow(self.no_return_good_checkbox)
+        review_layout.addRow("Не возвращаться к «Хорошо» при переходе",
+                             self.no_return_good_checkbox)
 
         self.comment_for_bad_combo = FComboBox()
         self.comment_for_bad_combo.addItem("Не обязателен", "none")
@@ -131,8 +136,7 @@ class SettingsScreen(BaseScreen):
         # Рабочее место V2.1 P0: восстановление сессии (глобально, QSettings).
         session_group = QGroupBox("Рабочее место")
         session_layout = QFormLayout()
-        self.restore_checkbox = FCheckBox(
-            "Восстанавливать последнее рабочее состояние")
+        self.restore_checkbox = FSwitch()
         self.restore_checkbox.setChecked(True)
         self.restore_checkbox.setToolTip(
             "Проект, экран, кейс, фильтр, очередь, столбцы, сортировка, страница")
@@ -141,8 +145,9 @@ class SettingsScreen(BaseScreen):
             self.restore_checkbox.setChecked(bool(is_restore_enabled()))
         except Exception:
             pass
-        self.restore_checkbox.checkStateChanged.connect(self.on_restore_toggled)
-        session_layout.addRow(self.restore_checkbox)
+        connect_check_changed(self.restore_checkbox, self.on_restore_toggled)
+        session_layout.addRow("Восстанавливать последнее рабочее состояние",
+                              self.restore_checkbox)
         self.btn_clean_session = FPushButton("Начать с чистого состояния")
         self.btn_clean_session.setToolTip(
             "Сбрасывает только сохранённую сессию, не данные проекта")
@@ -172,8 +177,7 @@ class SettingsScreen(BaseScreen):
             pass
         self.clipboard_combo.currentIndexChanged.connect(self.on_clipboard_changed)
         privacy_layout.addRow("Очищать буфер обмена:", self.clipboard_combo)
-        self.debug_content_checkbox = FCheckBox(
-            "Диагностический режим: писать содержимое кейсов в лог")
+        self.debug_content_checkbox = FSwitch()
         self.debug_content_checkbox.setToolTip(
             "По умолчанию ВЫКЛ: в лог идут только ID/счётчики. "
             "Включай только для отладки, потом выключи.")
@@ -182,8 +186,9 @@ class SettingsScreen(BaseScreen):
             self.debug_content_checkbox.setChecked(bool(_log.is_content_debug_enabled()))
         except Exception:
             pass
-        self.debug_content_checkbox.checkStateChanged.connect(self.on_debug_toggled)
-        privacy_layout.addRow(self.debug_content_checkbox)
+        connect_check_changed(self.debug_content_checkbox, self.on_debug_toggled)
+        privacy_layout.addRow("Диагностический режим: писать содержимое кейсов в лог",
+                              self.debug_content_checkbox)
         privacy_group.setLayout(privacy_layout)
         layout.addWidget(privacy_group)
 
@@ -206,65 +211,73 @@ class SettingsScreen(BaseScreen):
         self.max_length_spin.setMaximumWidth(180)
         checks_layout.addRow("Максимальная длина текста:", self.max_length_spin)
 
-        self.check_url_checkbox = FCheckBox("Проверять наличие URL")
+        self.check_url_checkbox = FSwitch()
         self.check_url_checkbox.setChecked(True)
-        checks_layout.addRow(self.check_url_checkbox)
+        checks_layout.addRow("Проверять наличие URL", self.check_url_checkbox)
 
-        self.check_email_checkbox = FCheckBox("Проверять наличие email")
+        self.check_email_checkbox = FSwitch()
         self.check_email_checkbox.setChecked(True)
-        checks_layout.addRow(self.check_email_checkbox)
+        checks_layout.addRow("Проверять наличие email", self.check_email_checkbox)
 
-        self.check_phone_checkbox = FCheckBox("Проверять наличие телефона")
+        self.check_phone_checkbox = FSwitch()
         self.check_phone_checkbox.setChecked(True)
-        checks_layout.addRow(self.check_phone_checkbox)
+        checks_layout.addRow("Проверять наличие телефона", self.check_phone_checkbox)
 
-        self.check_spaces_checkbox = FCheckBox("Проверять много пробелов")
+        self.check_spaces_checkbox = FSwitch()
         self.check_spaces_checkbox.setChecked(True)
-        checks_layout.addRow(self.check_spaces_checkbox)
+        checks_layout.addRow("Проверять много пробелов", self.check_spaces_checkbox)
 
-        self.check_caps_checkbox = FCheckBox("Проверять много заглавных букв")
+        self.check_caps_checkbox = FSwitch()
         self.check_caps_checkbox.setChecked(True)
-        checks_layout.addRow(self.check_caps_checkbox)
+        checks_layout.addRow("Проверять много заглавных букв", self.check_caps_checkbox)
 
-        self.check_duplicate_checkbox = FCheckBox("Проверять дубли")
+        self.check_duplicate_checkbox = FSwitch()
         self.check_duplicate_checkbox.setChecked(True)
-        checks_layout.addRow(self.check_duplicate_checkbox)
+        checks_layout.addRow("Проверять дубли", self.check_duplicate_checkbox)
 
-        self.check_repeat_words_checkbox = FCheckBox("Проверять повторы слов (да да да)")
+        self.check_repeat_words_checkbox = FSwitch()
         self.check_repeat_words_checkbox.setChecked(True)
-        checks_layout.addRow(self.check_repeat_words_checkbox)
+        checks_layout.addRow("Проверять повторы слов (да да да)",
+                             self.check_repeat_words_checkbox)
 
-        self.check_punct_checkbox = FCheckBox("Проверять серии знаков (!!!!!)")
+        self.check_punct_checkbox = FSwitch()
         self.check_punct_checkbox.setChecked(True)
-        checks_layout.addRow(self.check_punct_checkbox)
+        checks_layout.addRow("Проверять серии знаков (!!!!!)",
+                             self.check_punct_checkbox)
 
-        self.check_repeat_chars_checkbox = FCheckBox("Проверять повторы символов (аааааа)")
+        self.check_repeat_chars_checkbox = FSwitch()
         self.check_repeat_chars_checkbox.setChecked(True)
-        checks_layout.addRow(self.check_repeat_chars_checkbox)
+        checks_layout.addRow("Проверять повторы символов (аааааа)",
+                             self.check_repeat_chars_checkbox)
 
-        self.check_long_sentence_checkbox = FCheckBox("Проверять длинные предложения")
+        self.check_long_sentence_checkbox = FSwitch()
         self.check_long_sentence_checkbox.setChecked(True)
-        checks_layout.addRow(self.check_long_sentence_checkbox)
+        checks_layout.addRow("Проверять длинные предложения",
+                             self.check_long_sentence_checkbox)
 
-        self.check_junk_checkbox = FCheckBox("Проверять служебный мусор (SYSTEM:, <END>)")
+        self.check_junk_checkbox = FSwitch()
         self.check_junk_checkbox.setChecked(True)
-        checks_layout.addRow(self.check_junk_checkbox)
+        checks_layout.addRow("Проверять служебный мусор (SYSTEM:, <END>)",
+                             self.check_junk_checkbox)
 
-        self.check_html_checkbox = FCheckBox("Проверять HTML-разметку")
+        self.check_html_checkbox = FSwitch()
         self.check_html_checkbox.setChecked(True)
-        checks_layout.addRow(self.check_html_checkbox)
+        checks_layout.addRow("Проверять HTML-разметку", self.check_html_checkbox)
 
-        self.check_markdown_checkbox = FCheckBox("Проверять Markdown (заголовки/таблицы)")
+        self.check_markdown_checkbox = FSwitch()
         self.check_markdown_checkbox.setChecked(True)
-        checks_layout.addRow(self.check_markdown_checkbox)
+        checks_layout.addRow("Проверять Markdown (заголовки/таблицы)",
+                             self.check_markdown_checkbox)
 
-        self.check_encoding_checkbox = FCheckBox("Проверять битую кодировку")
+        self.check_encoding_checkbox = FSwitch()
         self.check_encoding_checkbox.setChecked(True)
-        checks_layout.addRow(self.check_encoding_checkbox)
+        checks_layout.addRow("Проверять битую кодировку",
+                             self.check_encoding_checkbox)
 
-        self.check_suspicious_checkbox = FCheckBox("Проверять невидимые символы")
+        self.check_suspicious_checkbox = FSwitch()
         self.check_suspicious_checkbox.setChecked(True)
-        checks_layout.addRow(self.check_suspicious_checkbox)
+        checks_layout.addRow("Проверять невидимые символы",
+                             self.check_suspicious_checkbox)
 
         self.max_sentence_spin = FSpinBox()
         self.max_sentence_spin.setMinimum(50)

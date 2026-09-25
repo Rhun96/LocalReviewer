@@ -395,18 +395,24 @@ class TableMixin:
         # вида — тянуть последнюю некуда.
         polish_table(self.cases_table)
 
-        # Пагинация
+        # Пагинация (пилот: номера страниц как в референсе Кейсы).
         page_layout = QHBoxLayout()
         self.btn_prev_page = FPushButton("◀️ Пред.")
         self.btn_prev_page.setMinimumHeight(30)
         self.btn_prev_page.clicked.connect(self.prev_page)
         self.page_label = QLabel("Страница 1 / 1")
         self.page_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.page_nums_wrap = QWidget()
+        self.page_nums = QHBoxLayout()
+        self.page_nums.setSpacing(4)
+        self.page_nums.setContentsMargins(0, 0, 0, 0)
+        self.page_nums_wrap.setLayout(self.page_nums)
         self.btn_next_page = FPushButton("➡️ След.")
         self.btn_next_page.setMinimumHeight(30)
         self.btn_next_page.clicked.connect(self.next_page)
         page_layout.addWidget(self.btn_prev_page)
         page_layout.addWidget(self.page_label)
+        page_layout.addWidget(self.page_nums_wrap)
         page_layout.addWidget(self.btn_next_page)
         layout.addLayout(page_layout)
 
@@ -742,6 +748,10 @@ class TableMixin:
                     self.current_page < self.total_pages - 1)
             except Exception:
                 pass
+            try:
+                self._rebuild_page_numbers()
+            except Exception:
+                pass
             self._update_bulk_label()
             self._update_hidden_button()
         except Exception as e:
@@ -876,6 +886,58 @@ class TableMixin:
         if self.current_page < self.total_pages - 1:
             self.current_page += 1
             self.load_table_data()
+
+    def goto_page(self, n: int):
+        """Прыжок на страницу (кнопки-номера)."""
+        try:
+            n = int(n)
+        except (TypeError, ValueError):
+            return
+        n = max(0, min(n, self.total_pages - 1))
+        if n == self.current_page:
+            return
+        self.current_page = n
+        self.load_table_data()
+
+    def _page_window(self) -> list:
+        """Номера для кнопок: все при <=7, иначе 1 … окно … N."""
+        t, c = self.total_pages, self.current_page
+        if t <= 7:
+            return list(range(t))
+        want = sorted({p for p in (0, c - 1, c, c + 1, t - 1) if 0 <= p < t})
+        out: list = []
+        prev = None
+        for p in want:
+            if prev is not None and p - prev > 1:
+                out.append(None)
+            out.append(p)
+            prev = p
+        return out
+
+    def _rebuild_page_numbers(self):
+        lay = self.page_nums
+        while lay.count():
+            item = lay.takeAt(0)
+            w = item.widget()
+            if w is not None:
+                w.deleteLater()
+        for p in self._page_window():
+            if p is None:
+                lay.addWidget(QLabel("…"))
+                continue
+            b = FPushButton(str(p + 1))
+            b.setMinimumHeight(30)
+            b.setMaximumWidth(44)
+            if p == self.current_page:
+                b.setEnabled(False)
+                try:
+                    from ui_compat import accent_button_style as _abs
+                    b.setStyleSheet(_abs())
+                except Exception:
+                    pass
+            else:
+                b.clicked.connect(lambda _checked, n=p: self.goto_page(n))
+            lay.addWidget(b)
 
     def on_table_double_click(self, index):
         if not self._bad_can_leave():

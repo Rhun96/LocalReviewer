@@ -126,6 +126,15 @@ else:
     Theme = None
 
 
+def connect_check_changed(widget, slot) -> None:
+    """Сигнал смены состояния: checkedChanged у Fluent-свитча,
+    checkStateChanged у QCheckBox (API разные, логика одна)."""
+    sig = getattr(widget, "checkedChanged", None)
+    if sig is None:
+        sig = widget.checkStateChanged
+    sig.connect(slot)
+
+
 def clear_in_fluent(*widgets) -> None:
     """Сброс декоративного QSS в Fluent-режиме (вид задаёт тема).
 
