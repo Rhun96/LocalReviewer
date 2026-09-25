@@ -719,9 +719,25 @@ class TableMixin:
             for _c in range(1, self.cases_table.columnCount()):
                 if self.cases_table.columnWidth(_c) > 440:
                     self.cases_table.setColumnWidth(_c, 440)
-            self.page_label.setText(
-                f"Страница {self.current_page + 1} / {self.total_pages} "
-                f"(всего: {total})")
+            # Пагинация (пилот шаг 3, как в референсе Кейсы: видно,
+            # сколько показано из скольки; стрелки гаснут по краям).
+            shown = self.cases_table.rowCount()
+            if total and shown:
+                lo = self.current_page * self.page_size + 1
+                hi = lo + shown - 1
+                self.page_label.setText(
+                    f"Показано {lo}–{hi} из {total} · "
+                    f"Страница {self.current_page + 1} / {self.total_pages}")
+            else:
+                self.page_label.setText(
+                    f"Ничего не найдено · "
+                    f"Страница {self.current_page + 1} / {self.total_pages}")
+            try:
+                self.btn_prev_page.setEnabled(self.current_page > 0)
+                self.btn_next_page.setEnabled(
+                    self.current_page < self.total_pages - 1)
+            except Exception:
+                pass
             self._update_bulk_label()
             self._update_hidden_button()
         except Exception as e:
