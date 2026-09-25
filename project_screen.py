@@ -7,7 +7,8 @@ from PySide6.QtCore import Qt
 from database import db
 from styles import apply_shadow
 from ui_base import BaseScreen
-from ui_compat import FPrimaryButton, FPushButton, confirm, notify
+from ui_compat import (FPrimaryButton, FPushButton, accent_button_style,
+                        confirm, notify)
 
 
 class ProjectScreen(BaseScreen):
@@ -118,10 +119,7 @@ class ProjectScreen(BaseScreen):
         apply_shadow(btn_history)
 
         btn_backup = FPushButton("💾 Резервные копии")
-        btn_backup.setStyleSheet("""
-            QPushButton { border-color: #00AAFF; color: #00AAFF; }
-            QPushButton:hover { background-color: #002233; }
-        """)
+        btn_backup.setStyleSheet(accent_button_style())
         btn_backup.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         btn_backup.setMinimumHeight(45)
         btn_backup.clicked.connect(self.on_backup)
@@ -134,10 +132,7 @@ class ProjectScreen(BaseScreen):
 
         # Ряд 2
         btn_settings = FPushButton("⚙️ Настройки")
-        btn_settings.setStyleSheet("""
-            QPushButton { border-color: #00AAFF; color: #00AAFF; }
-            QPushButton:hover { background-color: #002233; }
-        """)
+        btn_settings.setStyleSheet(accent_button_style())
         btn_settings.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         btn_settings.setMinimumHeight(45)
         btn_settings.clicked.connect(self.on_settings)

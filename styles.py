@@ -29,10 +29,25 @@ COLORS = {
     'red_dark': '#CC2222',
     'yellow': '#FFD700',
     'orange': '#FF9900',
+    # Янтарь предупреждений (#FFAA00 живёт в ~10 местах по экранам).
+    'amber': '#FFAA00',
     'blue': '#00AAFF',
+    # Ховер синей кнопки (жил в 8 местах пятью файлами).
+    'accent_hover': '#002233',
     'gray': '#888888',
     'border': '#00FF41',
     'border_dim': '#00441A',
+    # Глубокий зелёный шапок таблиц (жил в 4+ местах reports_screen).
+    'green_deep': '#003315',
+}
+
+# Семантика reskin-ветки: один смысл — один цвет. Нейтральные значения
+# читаются на тёмной И светлой темах (в отличие от неоновых из COLORS).
+SEMANTIC = {
+    'success': '#2ea043',
+    'danger': '#da3633',
+    'warning': '#bf8700',
+    'info': '#1f6feb',
 }
 
 def apply_shadow(widget, color='#00FF41', blur=25, offset=4, alpha=50):

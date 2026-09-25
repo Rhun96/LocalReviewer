@@ -9,8 +9,8 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt
 from database import db
 from ui_compat import (
-    FLUENT, FPrimaryButton, FPushButton, clear_in_fluent,
-    confirm, notify,
+    FLUENT, FPrimaryButton, FPushButton, accent_button_style,
+    clear_in_fluent, confirm, notify,
 )
 import json
 import logging
@@ -173,17 +173,11 @@ class CaseMixin:
         templates_layout = QHBoxLayout()
         btn_templates = FPushButton("📋 Шаблоны")
         self.btn_templates = btn_templates
-        btn_templates.setStyleSheet("""
-            QPushButton { border-color: #00AAFF; color: #00AAFF; }
-            QPushButton:hover { background-color: #002233; }
-        """)
+        btn_templates.setStyleSheet(accent_button_style())
         btn_templates.setMinimumHeight(28)
         btn_templates.clicked.connect(self.show_templates_menu)
         btn_add_template = FPushButton("➕ Новый")
-        btn_add_template.setStyleSheet("""
-            QPushButton { border-color: #00AAFF; color: #00AAFF; }
-            QPushButton:hover { background-color: #002233; }
-        """)
+        btn_add_template.setStyleSheet(accent_button_style())
         btn_add_template.setMinimumHeight(28)
         btn_add_template.clicked.connect(self.add_new_template)
         btn_del_template = FPushButton("🗑️ Удалить")
@@ -226,10 +220,7 @@ class CaseMixin:
         # === 6. Теги (раскрывающиеся) ===
         self.btn_toggle_tags = FPushButton("🏷️ Теги (нажмите для раскрытия)")
         self.btn_toggle_tags.setMinimumHeight(30)
-        self.btn_toggle_tags.setStyleSheet("""
-            QPushButton { border-color: #00AAFF; color: #00AAFF; }
-            QPushButton:hover { background-color: #002233; }
-        """)
+        self.btn_toggle_tags.setStyleSheet(accent_button_style())
         self.btn_toggle_tags.clicked.connect(self.toggle_tags)
         tags_row = QHBoxLayout()
         tags_row.addWidget(self.btn_toggle_tags)

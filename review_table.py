@@ -11,7 +11,8 @@ from database import db
 from filter_dialog import FilterDialog
 from filter_service import get_filtered_case_ids, get_all_case_ids
 from ui_compat import (
-    FCheckBox, FComboBox, FLineEdit, FPushButton, FTable, clear_in_fluent,
+    FCheckBox, FComboBox, FLineEdit, FPushButton, FTable,
+    accent_button_style, clear_in_fluent,
     confirm, notify, polish_table,
 )
 import json
@@ -263,10 +264,7 @@ class TableMixin:
         controls_layout = QHBoxLayout()
         self.btn_select_columns = FPushButton("📊 Столбцы")
         self.btn_select_columns.setMinimumHeight(30)
-        self.btn_select_columns.setStyleSheet("""
-            QPushButton { border-color: #00AAFF; color: #00AAFF; }
-            QPushButton:hover { background-color: #002233; }
-        """)
+        self.btn_select_columns.setStyleSheet(accent_button_style())
         self.btn_select_columns.clicked.connect(self.open_column_selector)
         self.column_filter_combo = FComboBox()
         self.column_filter_combo.addItem("Фильтр по столбцу...", None)

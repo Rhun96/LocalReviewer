@@ -140,6 +140,48 @@ def maybe_style(widget, qss: str) -> None:
         widget.setStyleSheet(qss)
 
 
+def classic_table_style() -> str:
+    """Единый QSS классических таблиц отчётов (тёмно-зелёный).
+
+    1-в-1 как было в 4 местах reports_screen (проверено диффом строк):
+    те же цвета через токены, та же разметка. Отдельные экраны больше
+    не держат копии этого блока.
+    """
+    from styles import COLORS as _C
+    return f"""
+        QTableWidget {{
+            background-color: {_C['bg_input']};
+            border: 1px solid {_C['green_bright']};
+            color: {_C['text_bright']};
+            font-size: 14px;
+            gridline-color: {_C['green_deep']};
+        }}
+        QTableWidget::item {{ padding: 8px; }}
+        QHeaderView::section {{
+            background-color: {_C['green_deep']};
+            color: {_C['text_bright']};
+            border: 1px solid {_C['green_bright']};
+            padding: 8px;
+            font-weight: bold;
+        }}
+    """
+
+
+def accent_button_style(extra: str = "") -> str:
+    """Синяя акцентная кнопка (была в 8 местах пятью файлами, 1-в-1).
+
+    extra — добавка внутрь правила QPushButton (например padding).
+    """
+    from styles import COLORS as _C
+    inner = f"border-color: {_C['blue']}; color: {_C['blue']};"
+    if extra.strip():
+        inner += f" {extra.strip()}"
+    return (
+        f"QPushButton {{ {inner} }} "
+        f"QPushButton:hover {{ background-color: {_C['accent_hover']}; }}"
+    )
+
+
 def notify(parent, kind: str, title: str, text: str) -> None:
     """Ненавязчивое уведомление: InfoBar во Fluent, QMessageBox в fallback."""
     if FLUENT:

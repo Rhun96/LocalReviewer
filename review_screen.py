@@ -5,7 +5,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, Signal, QTimer
 from ui_base import BaseScreen
 from ui_compat import (
-    FPushButton, clear_in_fluent,
+    FPushButton, accent_button_style, clear_in_fluent,
     notify,
 )
 import logging
@@ -372,10 +372,8 @@ class ReviewScreen(BaseScreen, ProfileMixin, CaseMixin, TableMixin, BulkMixin, V
         # Кнопка переключения вида
         self.btn_toggle_view = FPushButton("📋 Таблица")
         self.btn_toggle_view.setMinimumHeight(30)
-        self.btn_toggle_view.setStyleSheet("""
-            QPushButton { border-color: #00AAFF; color: #00AAFF; padding: 6px 12px; }
-            QPushButton:hover { background-color: #002233; }
-        """)
+        self.btn_toggle_view.setStyleSheet(
+            accent_button_style(" padding: 6px 12px;"))
         self.btn_toggle_view.clicked.connect(self.toggle_view)
         layout.addWidget(self.btn_toggle_view)
 

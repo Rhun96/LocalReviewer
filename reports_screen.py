@@ -11,7 +11,8 @@ from report_service import (get_files_list, get_overall_report, get_files_report
 from export_service import export_results_to_xlsx, export_report_to_xlsx
 from datetime import datetime
 from ui_base import BaseScreen
-from ui_compat import (FComboBox, FPushButton, FTable, clear_in_fluent,
+from ui_compat import (FComboBox, FPushButton, FTable, accent_button_style,
+                       clear_in_fluent, classic_table_style,
                        effective_theme, notify, polish_table)
 from workers import run_in_background
 from io import BytesIO
@@ -82,23 +83,24 @@ class ReportsScreen(BaseScreen):
 
         # Вкладки
         self.tabs = QTabWidget()
-        self.tabs.setStyleSheet("""
-            QTabWidget::pane {
-                border: 2px solid #00FF41;
+        from styles import COLORS as _C
+        self.tabs.setStyleSheet(f"""
+            QTabWidget::pane {{
+                border: 2px solid {_C['green_bright']};
                 border-radius: 4px;
-                background-color: #000000;
-            }
-            QTabBar::tab {
-                background-color: #001A0A;
-                color: #e8e8e8;
-                border: 1px solid #00FF41;
+                background-color: {_C['bg_dark']};
+            }}
+            QTabBar::tab {{
+                background-color: {_C['bg_input']};
+                color: {_C['text_bright']};
+                border: 1px solid {_C['green_bright']};
                 padding: 10px 20px;
                 font-size: 14px;
-            }
-            QTabBar::tab:selected {
-                background-color: #003315;
+            }}
+            QTabBar::tab:selected {{
+                background-color: {_C['green_deep']};
                 font-weight: bold;
-            }
+            }}
         """)
 
         # Вкладка 0: Сводка (ТЗ Analytics — цифра → клик → кейсы)
@@ -191,23 +193,7 @@ class ReportsScreen(BaseScreen):
         widget = QWidget()
         layout = QVBoxLayout()
         self.overall_table = FTable()
-        self.overall_table.setStyleSheet("""
-            QTableWidget {
-                background-color: #001A0A;
-                border: 1px solid #00FF41;
-                color: #e8e8e8;
-                font-size: 14px;
-                gridline-color: #003315;
-            }
-            QTableWidget::item { padding: 8px; }
-            QHeaderView::section {
-                background-color: #003315;
-                color: #e8e8e8;
-                border: 1px solid #00FF41;
-                padding: 8px;
-                font-weight: bold;
-            }
-        """)
+        self.overall_table.setStyleSheet(classic_table_style())
         layout.addWidget(self.overall_table)
         clear_in_fluent(self.overall_table)
         polish_table(self.overall_table, stretch_last=True)
@@ -221,16 +207,15 @@ class ReportsScreen(BaseScreen):
 
         btn_refresh = FPushButton("🔄 Обновить графики")
         btn_refresh.setMinimumHeight(35)
-        btn_refresh.setStyleSheet("""
-            QPushButton { border-color: #00AAFF; color: #00AAFF; }
-            QPushButton:hover { background-color: #002233; }
-        """)
+        btn_refresh.setStyleSheet(accent_button_style())
         btn_refresh.clicked.connect(self.refresh_charts)
         layout.addWidget(btn_refresh)
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
-        scroll.setStyleSheet("QScrollArea { border: none; background-color: #000000; }")
+        from styles import COLORS as _CC
+        scroll.setStyleSheet(
+            f"QScrollArea {{ border: none; background-color: {_CC['bg_dark']}; }}")
 
         self.charts_container = QWidget()
         self.charts_layout = QVBoxLayout()
@@ -246,23 +231,7 @@ class ReportsScreen(BaseScreen):
         widget = QWidget()
         layout = QVBoxLayout()
         self.files_table = FTable()
-        self.files_table.setStyleSheet("""
-            QTableWidget {
-                background-color: #001A0A;
-                border: 1px solid #00FF41;
-                color: #e8e8e8;
-                font-size: 14px;
-                gridline-color: #003315;
-            }
-            QTableWidget::item { padding: 8px; }
-            QHeaderView::section {
-                background-color: #003315;
-                color: #e8e8e8;
-                border: 1px solid #00FF41;
-                padding: 8px;
-                font-weight: bold;
-            }
-        """)
+        self.files_table.setStyleSheet(classic_table_style())
         layout.addWidget(self.files_table)
         clear_in_fluent(self.files_table)
         polish_table(self.files_table, stretch_last=True)
@@ -273,23 +242,7 @@ class ReportsScreen(BaseScreen):
         widget = QWidget()
         layout = QVBoxLayout()
         self.tags_table = FTable()
-        self.tags_table.setStyleSheet("""
-            QTableWidget {
-                background-color: #001A0A;
-                border: 1px solid #00FF41;
-                color: #e8e8e8;
-                font-size: 14px;
-                gridline-color: #003315;
-            }
-            QTableWidget::item { padding: 8px; }
-            QHeaderView::section {
-                background-color: #003315;
-                color: #e8e8e8;
-                border: 1px solid #00FF41;
-                padding: 8px;
-                font-weight: bold;
-            }
-        """)
+        self.tags_table.setStyleSheet(classic_table_style())
         layout.addWidget(self.tags_table)
         clear_in_fluent(self.tags_table)
         polish_table(self.tags_table, stretch_last=True)
@@ -300,23 +253,7 @@ class ReportsScreen(BaseScreen):
         widget = QWidget()
         layout = QVBoxLayout()
         self.checks_table = FTable()
-        self.checks_table.setStyleSheet("""
-            QTableWidget {
-                background-color: #001A0A;
-                border: 1px solid #00FF41;
-                color: #e8e8e8;
-                font-size: 14px;
-                gridline-color: #003315;
-            }
-            QTableWidget::item { padding: 8px; }
-            QHeaderView::section {
-                background-color: #003315;
-                color: #e8e8e8;
-                border: 1px solid #00FF41;
-                padding: 8px;
-                font-weight: bold;
-            }
-        """)
+        self.checks_table.setStyleSheet(classic_table_style())
         layout.addWidget(self.checks_table)
         clear_in_fluent(self.checks_table)
         polish_table(self.checks_table, stretch_last=True)
