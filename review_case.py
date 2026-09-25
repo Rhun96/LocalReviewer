@@ -179,9 +179,8 @@ class CaseMixin:
         self.status_layout = QGridLayout()
         self.status_layout.setSpacing(6)
         self.status_buttons = {}
-        # Равномерные колонки: в узком окне кнопки сжимаются одинаково,
-        # текст остаётся по центру и не «съезжает»
-        for _c in range(3):
+        # Одна колонка: рельс 360px (apply_profile пересоберёт так же).
+        for _c in range(1):
             self.status_layout.setColumnStretch(_c, 1)
         status_group.setLayout(self.status_layout)
         right_col.addWidget(status_group)

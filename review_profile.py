@@ -70,7 +70,10 @@ class ProfileMixin:
                     item.widget().deleteLater()
             self.status_buttons = {}
             specs = self.profile_statuses()
-            cols = 3
+            # Пилот шаг 2.1: вертикальный список (1 колонка) — статусы живут
+            # в узком правом рельсе 360px (референс Проверка: оценка столбецом).
+            # В 3 колонки текст резался ("Хорошо [1" без скобки, скрин).
+            cols = 1
             for i, spec in enumerate(specs):
                 code = spec["code"]
                 base = spec.get("base") or code
