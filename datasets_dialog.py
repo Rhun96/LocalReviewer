@@ -1,7 +1,7 @@
 """Датасеты: список, версии, freeze, сравнение A vs B."""
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QListWidget,
-    QListWidgetItem, QInputDialog,
+    QListWidgetItem, QInputDialog, QWidget,
 )
 from PySide6.QtCore import Qt
 from dataset_service import (
@@ -12,12 +12,12 @@ from dataset_service import (
 from ui_compat import FComboBox, FPrimaryButton, FPushButton, clear_in_fluent, notify
 
 
-class DatasetsDialog(QDialog):
+class DatasetsWidget(QWidget):
+    """Тело управления датасетами (экран и диалог делят один код)."""
+
     def __init__(self, project_path: str, parent=None):
         super().__init__(parent)
         self.project_path = project_path
-        self.setWindowTitle("Датасеты")
-        self.setMinimumSize(680, 520)
         self._init_ui()
         self.reload_datasets()
 
@@ -105,10 +105,6 @@ class DatasetsDialog(QDialog):
         self.cmp_details.setMaximumHeight(140)
         layout.addWidget(self.cmp_details)
         clear_in_fluent(self.cmp_details)
-
-        btn_close = FPushButton("Закрыть")
-        btn_close.clicked.connect(self.accept)
-        layout.addWidget(btn_close)
         self.setLayout(layout)
 
     def _current_ds(self) -> int | None:
@@ -359,3 +355,23 @@ class DatasetsDialog(QDialog):
         rest = len(res["details"]) - 200
         if rest > 0:
             self.cmp_details.addItem(f"… и ещё {rest}")
+
+
+class DatasetsDialog(QDialog):
+    """Тонкая модалка поверх DatasetsWidget (старые вызовы целы)."""
+
+    def __init__(self, project_path: str, parent=None):
+        super().__init__(parent)
+        self.project_path = project_path
+        self.setWindowTitle("Датасеты")
+        self.setMinimumSize(680, 520)
+        layout = QVBoxLayout()
+        self.body = DatasetsWidget(project_path, self)
+        layout.addWidget(self.body, 1)
+        btn_close = FPushButton("Закрыть")
+        btn_close.clicked.connect(self.accept)
+        layout.addWidget(btn_close)
+        self.setLayout(layout)
+
+    def reload_datasets(self):
+        self.body.reload_datasets()

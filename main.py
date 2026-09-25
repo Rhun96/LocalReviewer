@@ -175,6 +175,7 @@ class ProjectWindow(QWidget):
         from runs_screen import ModelRunsScreen
         from bug_reports_screen import BugReportsScreen
         from launches_screen import LaunchesScreen
+        from datasets_screen import DatasetsScreen
         from reports_screen import ReportsScreen
         from history_screen import HistoryScreen
         from backup_screen import BackupScreen
@@ -185,6 +186,7 @@ class ProjectWindow(QWidget):
         self.screens['runs'] = ModelRunsScreen(self.project_path, self)
         self.screens['bugs'] = BugReportsScreen(self.project_path, self)
         self.screens['launches'] = LaunchesScreen(self.project_path, self)
+        self.screens['datasets'] = DatasetsScreen(self.project_path, self)
         self.screens['reports'] = ReportsScreen(self.project_path, self)
         self.screens['history'] = HistoryScreen(self.project_path, self)
         self.screens['backup'] = BackupScreen(self.project_path, self)
@@ -263,6 +265,7 @@ class MainWindow(_BaseWindow):
         ("runs", "SYNC", "Прогоны"),
         ("bugs", "FLAG", "Баги"),
         ("launches", "SEND", "Запуски"),
+        ("datasets", "LIBRARY", "Датасеты"),
         ("reports", "DOCUMENT", "Отчёты"),
         ("history", "HISTORY", "История"),
         ("backup", "SAVE", "Бэкапы"),

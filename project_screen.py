@@ -130,7 +130,8 @@ class ProjectScreen(BaseScreen):
         buttons_grid.addWidget(btn_history, 0, 2)
         buttons_grid.addWidget(btn_backup, 0, 3)
 
-        # Ряд 2
+        # Ряд 2 (рескин: Датасеты и Прогоны живут в сайдбаре —
+        # дублей точек входа больше нет).
         btn_settings = FPushButton("⚙️ Настройки")
         btn_settings.setStyleSheet(accent_button_style())
         btn_settings.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
@@ -145,20 +146,8 @@ class ProjectScreen(BaseScreen):
         btn_back.clicked.connect(self.on_back)
         apply_shadow(btn_back, color=COLORS['red'])
 
-        btn_datasets = FPushButton("🗂 Датасеты")
-        btn_datasets.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        btn_datasets.setMinimumHeight(45)
-        btn_datasets.clicked.connect(self.on_datasets)
-
-        btn_runs = FPushButton("🏃 Прогоны")
-        btn_runs.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        btn_runs.setMinimumHeight(45)
-        btn_runs.clicked.connect(self.on_runs)
-
-        buttons_grid.addWidget(btn_settings, 1, 0)
-        buttons_grid.addWidget(btn_datasets, 1, 1)
-        buttons_grid.addWidget(btn_runs, 1, 2)
-        buttons_grid.addWidget(btn_back, 1, 3)
+        buttons_grid.addWidget(btn_settings, 1, 0, 1, 2)
+        buttons_grid.addWidget(btn_back, 1, 2, 1, 2)
         actions_group.setLayout(buttons_grid)
         apply_shadow(actions_group)
         layout.addWidget(actions_group)
@@ -321,12 +310,6 @@ class ProjectScreen(BaseScreen):
         """Переход к настройкам."""
         self.parent_window.main_window.show_screen("settings")
 
-    def on_datasets(self):
-        """Датасеты и версии."""
-        from datasets_dialog import DatasetsDialog
-        DatasetsDialog(self.project_path, self).exec()
-        self.load_project_info()
-
     def on_import_annotations(self):
         """Импорт разметки: Preview → Merge/Update → прыжок в ревью."""
         from annotation_io_dialog import ImportAnnotationsDialog
@@ -344,10 +327,6 @@ class ProjectScreen(BaseScreen):
                            "Кейс не найден в проекте.")
             except Exception:
                 pass
-
-    def on_runs(self):
-        """Переход к прогонам модели."""
-        self.parent_window.main_window.show_screen("runs")
 
     def on_back(self):
         """Возврат на стартовый экран."""

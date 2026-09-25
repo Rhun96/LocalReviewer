@@ -24,8 +24,8 @@ _K_RESTORE = "session/restore"
 _K_LAST = "session/last_project"
 _K_RECENT = "session/recent"
 
-SCREENS = ("project", "review", "runs", "bugs", "launches", "reports",
-           "history", "backup", "settings")
+SCREENS = ("project", "review", "runs", "bugs", "launches", "datasets",
+           "reports", "history", "backup", "settings")
 QUEUES = ("normal", "unreviewed", "problematic")
 SORTS = ("import", "unreviewed_first", "problematic_first")
 
