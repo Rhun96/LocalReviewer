@@ -119,7 +119,8 @@ class BackupScreen(BaseScreen):
 
         for backup in backups:
             size_mb = backup['size'] / (1024 * 1024)
-            text = f"{backup['name']} ({size_mb:.2f} МБ, {backup['created'][:19]})"
+            from ui_compat import format_dt as _fdt
+            text = f"{backup['name']} ({size_mb:.2f} МБ, {_fdt(backup['created'])})"
             item = QListWidgetItem(text)
             item.setData(Qt.ItemDataRole.UserRole, backup['path'])
             self.backups_list.addItem(item)

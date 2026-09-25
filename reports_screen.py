@@ -894,7 +894,8 @@ class ReportsScreen(BaseScreen):
             self.files_table.setItem(row, 0, QTableWidgetItem(file['file_name']))
             self.files_table.setItem(row, 1, QTableWidgetItem(str(file['cases_count'])))
             self.files_table.setItem(row, 2, QTableWidgetItem(str(file['reviewed_count'])))
-            self.files_table.setItem(row, 3, QTableWidgetItem((file['imported_at'] or '')[:19]))
+            from ui_compat import format_dt as _fdt
+            self.files_table.setItem(row, 3, QTableWidgetItem(_fdt(file['imported_at'])))
         self.files_table.resizeColumnsToContents()
 
     def load_tags_report(self):
@@ -1007,8 +1008,12 @@ class ReportsScreen(BaseScreen):
         for e in stats.get("errors", [])[:10]:
             rows.append((e["category"], e["n"]))
         rows.append(("--- Баги по статусам ---", ""))
+        try:
+            from bug_report_service import BUG_STATUS_NAMES as _BSN
+        except Exception:
+            _BSN = {}
         for b in stats.get("bugs", []):
-            rows.append((b["status"], b["n"]))
+            rows.append((_BSN.get(b["status"], b["status"]), b["n"]))
         regs = stats.get("regressions", {}) or {}
         if regs.get("total"):
             rows.append(("--- Регрессии ---", ""))
@@ -1051,7 +1056,9 @@ class ReportsScreen(BaseScreen):
         fig, ax = plt.subplots(figsize=(10, 4), dpi=100)
         fig.patch.set_facecolor(pal["bg"])
         ax.set_facecolor(pal["bg"])
-        from styles import CHART_SERIES as _CS2
+        from styles import CHART_SERIES as _CS_DARK
+        from styles import CHART_SERIES_LIGHT as _CS_LIGHT
+        _CS2 = _CS_LIGHT if effective_theme() != "dark" else _CS_DARK
         ax.plot(labels, rates, marker="o", color=_CS2["bad"], linewidth=2)
         ax.set_ylabel("Bad-rate, %", color=pal["fg"])
         ax.set_title("Качество по версиям", color=pal["fg"], fontsize=14, pad=15)
@@ -1109,7 +1116,9 @@ class ReportsScreen(BaseScreen):
         """Круговая диаграмма распределения статусов с легендой."""
         plt = _plt()
         pal = _chart_palette()
-        from styles import CHART_SERIES as _CS, COLORS as _CC
+        from styles import CHART_SERIES as _CS_DARK
+        from styles import CHART_SERIES_LIGHT as _CS_LIGHT, COLORS as _CC
+        _CS = _CS_LIGHT if effective_theme() != "dark" else _CS_DARK
         labels = []
         sizes = []
         colors = []

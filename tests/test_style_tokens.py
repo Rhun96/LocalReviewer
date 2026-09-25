@@ -19,6 +19,7 @@ ALLOW_RAW_HEX = 0
 def _load_keys():
     out = {}
     for name in ("COLORS", "SEMANTIC", "UI_TOKENS", "DIFF", "CHART_SERIES",
+                 "CHART_SERIES_LIGHT",
                  "FLUENT_DARK", "FLUENT_LIGHT", "CHART_DARK", "CHART_LIGHT"):
         node = next(n for n in ast.walk(ast.parse(
             (ROOT / "styles.py").read_text(encoding="utf-8")))
@@ -31,7 +32,7 @@ def _load_keys():
 def test_token_refs_valid():
     keys = _load_keys()
     assert keys["COLORS"] and keys["SEMANTIC"] and keys["UI_TOKENS"]
-    assert keys["DIFF"] and keys["CHART_SERIES"]
+    assert keys["DIFF"] and keys["CHART_SERIES"] and keys["CHART_SERIES_LIGHT"]
     assert keys["FLUENT_DARK"] and keys["FLUENT_LIGHT"]
     assert keys["CHART_DARK"] and keys["CHART_LIGHT"]
     bad = []
@@ -42,7 +43,8 @@ def test_token_refs_valid():
         for node in ast.walk(tree):
             if isinstance(node, ast.Constant) and isinstance(node.value, str):
                 for mod in ("COLORS", "SEMANTIC", "UI_TOKENS", "DIFF",
-                            "CHART_SERIES", "FLUENT_DARK", "FLUENT_LIGHT",
+                            "CHART_SERIES", "CHART_SERIES_LIGHT",
+                            "FLUENT_DARK", "FLUENT_LIGHT",
                             "CHART_DARK", "CHART_LIGHT"):
                     if "{" + mod + "[" in node.value:
                         bad.append(f"{path.name}: plain string with {mod}[")

@@ -1105,7 +1105,8 @@ class CaseMixin:
             if self.current_case is not None:
                 self.current_case['comment'] = comment or None
             if not silent:
-                self.save_indicator.setText(f"💾 Комментарий сохранён ({now[:19]})")
+                from ui_compat import format_dt as _fdt
+                self.save_indicator.setText(f"💾 Комментарий сохранён ({_fdt(now)})")
         except Exception as e:
             if not silent:
                 self.show_error("Не удалось сохранить комментарий", e)

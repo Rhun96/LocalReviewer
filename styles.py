@@ -82,6 +82,17 @@ CHART_SERIES = {
     'skip': '#888888',
 }
 
+# Приглушённая серия для светлой темы (добой §3: неон на белом резал глаз).
+# Только токены styles.py (hex-гард вне styles не трогаем).
+CHART_SERIES_LIGHT = {
+    'unreviewed': '#888888',
+    'good': '#2ea043',
+    'bad': '#da3633',
+    'uncertain': '#bf8700',
+    'duplicate': '#b26a00',
+    'skip': '#888888',
+}
+
 # Палитры Fluent-тем (reskin batch 4): единый источник для QSS-базы
 # (_fluent_base) и QPalette (_apply_palette в ui_compat). Значения 1-в-1
 # как были россыпью, ключи совпадают с аргументами _fluent_base.

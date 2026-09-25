@@ -158,7 +158,8 @@ class BugReportsScreen(BaseScreen):
             self.table.setItem(i, 4, QTableWidgetItem(cat))
             self.table.setItem(i, 5, QTableWidgetItem(str(r["cases"])))
             self.table.setItem(i, 6, QTableWidgetItem(r["external_id"] or "—"))
-            self.table.setItem(i, 7, QTableWidgetItem((r["updated_at"] or "")[:19]))
+            from ui_compat import format_dt as _fdt
+            self.table.setItem(i, 7, QTableWidgetItem(_fdt(r["updated_at"])))
             self.table.item(i, 0).setData(Qt.ItemDataRole.UserRole, r["bug_id"])
         self.table.resizeColumnsToContents()
 

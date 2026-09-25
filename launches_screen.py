@@ -111,9 +111,9 @@ class LaunchesScreen(BaseScreen):
              "Регрессии", "Улучшения"])
         for i, r in enumerate(shown):
             self.table.setItem(i, 0, QTableWidgetItem(str(r["regression_id"])))
+            from ui_compat import format_dt as _fdt
             self.table.setItem(
-                i, 1, QTableWidgetItem(
-                    (r.get("created_at") or "")[:16].replace("T", " ")))
+                i, 1, QTableWidgetItem(_fdt(r.get("created_at"))))
             self.table.setItem(i, 2, QTableWidgetItem(r.get("name") or ""))
             self.table.setItem(
                 i, 3, QTableWidgetItem(

@@ -5,10 +5,41 @@
 Qt-виджеты, приложение продолжает работать в классическом виде.
 """
 import logging
+import re as _re
 
 from styles import COLORS, FLUENT_DARK, FLUENT_LIGHT
 
 logger = logging.getLogger(__name__)
+
+
+def format_dt(value) -> str:
+    """Единый показ дат: ДД-ММ-ГГГГ [ЧЧ:ММ]. Хранение везде ISO.
+
+    Неизвестный формат возвращаем как есть (не выдумываем).
+    """
+    s = str(value or "").strip().replace("T", " ")
+    if not s:
+        return "—"
+    m = _re.match(r"(\d{4})-(\d{2})-(\d{2})(?:[ ](\d{2}):(\d{2}))?", s)
+    if not m:
+        return str(value or "").strip()
+    out = f"{m.group(3)}-{m.group(2)}-{m.group(1)}"
+    if m.group(4):
+        out += f" {m.group(4)}:{m.group(5)}"
+    return out
+
+
+def parse_date_input(text) -> str:
+    """Ввод ДД-ММ-ГГГГ (точки/слэши тоже) -> ISO для SQL.
+
+    Старый ISO-ввод пропускаем как есть (тесты и привычки целы);
+    пусто/мусор возвращаем нетронутым — решает вызывающий код.
+    """
+    s = (text or "").strip()
+    m = _re.match(r"(\d{2})[.\-/](\d{2})[.\-/](\d{4})$", s)
+    if m:
+        return f"{m.group(3)}-{m.group(2)}-{m.group(1)}"
+    return s
 
 try:
     from qfluentwidgets import (

@@ -6,7 +6,8 @@ from PySide6.QtCore import Qt, Signal
 from database import db
 from ui_base import BaseScreen
 from ui_compat import (FComboBox, FPushButton, clear_in_fluent, notify,
-                        polish_table)
+                        polish_table, format_dt as _fdt,
+                        parse_date_input as _pdi)
 import history_service as hs
 
 
@@ -78,12 +79,12 @@ class HistoryScreen(BaseScreen):
         search_layout.addWidget(self.field_combo)
         search_layout.addWidget(QLabel("С:"))
         self.date_from = FLineEdit()
-        self.date_from.setPlaceholderText("ГГГГ-ММ-ДД")
+        self.date_from.setPlaceholderText("ДД-ММ-ГГГГ")
         self.date_from.setMaximumWidth(120)
         search_layout.addWidget(self.date_from)
         search_layout.addWidget(QLabel("По:"))
         self.date_to = FLineEdit()
-        self.date_to.setPlaceholderText("ГГГГ-ММ-ДД")
+        self.date_to.setPlaceholderText("ДД-ММ-ГГГГ")
         self.date_to.setMaximumWidth(120)
         search_layout.addWidget(self.date_to)
         search_layout.addStretch()
@@ -186,9 +187,9 @@ class HistoryScreen(BaseScreen):
                 case_ids=case_ids,
                 field=self.field_combo.currentData()
                 if hasattr(self, "field_combo") else None,
-                date_from=(self.date_from.text().strip() or None)
+                date_from=(_pdi(self.date_from.text()) or None)
                 if hasattr(self, "date_from") else None,
-                date_to=(self.date_to.text().strip() or None)
+                date_to=(_pdi(self.date_to.text()) or None)
                 if hasattr(self, "date_to") else None)
             if bug_cases_only:
                 events = [e for e in events if e["event_type"] in (
@@ -222,7 +223,7 @@ class HistoryScreen(BaseScreen):
             'BUG_EXTERNAL_LINKED': 'Баг: трекер',
         }
         for row, event in enumerate(events):
-            created = (event['created_at'] or '')[:19]
+            created = _fdt(event['created_at'])
             self.history_table.setItem(row, 0, QTableWidgetItem(created))
             self.history_table.setItem(
                 row, 1, QTableWidgetItem(str(event['case_id'] or '')))
@@ -283,7 +284,7 @@ class HistoryScreen(BaseScreen):
             old_html, new_html = (ev.get("old_value") or ""), (ev.get("new_value") or "")
         self.detail.setHtml(
             f"<b>{ev.get('event_type')}</b> · кейс {ev.get('case_id')} · "
-            f"{(ev.get('created_at') or '')[:19]}<br>"
+            f"{_fdt(ev.get('created_at'))}<br>"
             f"<b>Было:</b> {old_html}<br><b>Стало:</b> {new_html}")
 
     def open_case(self):
