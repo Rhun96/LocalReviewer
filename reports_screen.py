@@ -14,6 +14,7 @@ from ui_base import BaseScreen
 from ui_compat import (FComboBox, FPushButton, FTable, accent_button_style,
                        clear_in_fluent, classic_table_style,
                        effective_theme, notify, polish_table)
+from styles import CHART_DARK, CHART_LIGHT
 from workers import run_in_background
 from io import BytesIO
 
@@ -30,12 +31,8 @@ def _plt():
 def _chart_palette() -> dict:
     """Цвета графиков под текущую тему (иначе тёмные графики на светлом фоне)."""
     if effective_theme() == "dark":
-        return {"style": "dark_background", "bg": "#0A0F0A", "fg": "#e8e8e8",
-                "spine": "#3a3a3a", "bar_total": "#1d5c33", "bar_done": "#00CC66",
-                "pct_stroke": "#000000"}
-    return {"style": "default", "bg": "#ffffff", "fg": "#1b1b1b",
-            "spine": "#cccccc", "bar_total": "#bcd8c6", "bar_done": "#0b7a34",
-            "pct_stroke": "#ffffff"}
+        return dict(CHART_DARK)
+    return dict(CHART_LIGHT)
 
 
 class ReportsScreen(BaseScreen):

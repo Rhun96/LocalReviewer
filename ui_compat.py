@@ -6,6 +6,8 @@ Qt-виджеты, приложение продолжает работать в
 """
 import logging
 
+from styles import COLORS, FLUENT_DARK, FLUENT_LIGHT
+
 logger = logging.getLogger(__name__)
 
 try:
@@ -284,7 +286,7 @@ def confirm(parent, title: str, text: str,
     ) == QMessageBox.StandardButton.Yes
 
 
-ACCENT_GREEN = "#00DD38"
+ACCENT_GREEN = COLORS["green_main"]
 THEME_MODES = ("system", "light", "dark")
 THEME_NAMES = {"system": "Системная", "light": "Светлая", "dark": "Тёмная"}
 
@@ -363,14 +365,10 @@ def _apply_palette(app, dark: bool) -> None:
     """Тёмная/светлая палитра приложения под текущую тему."""
     from PySide6.QtGui import QPalette, QColor
     pal = QPalette()
-    if dark:
-        window, base, text = QColor("#202020"), QColor("#2b2b2b"), QColor("#ffffff")
-        dim, accent = QColor("#a0a0a0"), QColor("#4ade80")
-        highlight, hl_text = QColor("#2ea043"), QColor("#ffffff")
-    else:
-        window, base, text = QColor("#f3f3f3"), QColor("#ffffff"), QColor("#1b1b1b")
-        dim, accent = QColor("#616161"), QColor("#0b7a34")
-        highlight, hl_text = QColor("#0b7a34"), QColor("#ffffff")
+    theme = FLUENT_DARK if dark else FLUENT_LIGHT
+    window, base, text = QColor(theme["bg"]), QColor(theme["bg_card"]), QColor(theme["text"])
+    dim, accent = QColor(theme["text_dim"]), QColor(theme["accent"])
+    highlight, hl_text = QColor(theme["sel_bg"]), QColor(theme["sel_text"])
     pal.setColor(QPalette.ColorRole.Window, window)
     pal.setColor(QPalette.ColorRole.WindowText, text)
     pal.setColor(QPalette.ColorRole.Base, base)

@@ -3,23 +3,23 @@
 Два инварианта:
 1. Ссылки COLORS[/SEMANTIC[/UI_TOKENS[ живут только в f-строках,
    ключи существуют (иначе молчаливая каша или KeyError на экране).
-2. Сырых hex за пределами styles.py не становится БОЛЬШЕ, чем на момент
-   введения теста (196): старый дрейф вычищаем постепенно, новому — нет.
-   Палитры ui_compat и графиков — осознанные исключения? Нет: они тоже
-   считаются, поэтому их вынос — будущие коммиты hygiene-баatches.
+2. Сырых hex за пределами styles.py нет (было 196, batch 4 занулил):
+   палитры ui_compat и графиков тоже живут в styles.py токенами.
 """
 import ast
 import pathlib
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-# Остаток (27) — осознанные палитры: ui_compat/QSS-палитры тем и _chart_palette
-# в reports_screen. Их не трогаем (это и есть токены другого уровня).
-ALLOW_RAW_HEX = 27
+# Остаток (0, reskin batch 4): палитры ui_compat/QSS-тем и _chart_palette
+# в reports_screen переехали в styles.py (FLUENT_DARK/LIGHT, CHART_DARK/LIGHT).
+# Сырых hex вне styles.py быть не должно.
+ALLOW_RAW_HEX = 0
 
 
 def _load_keys():
     out = {}
-    for name in ("COLORS", "SEMANTIC", "UI_TOKENS", "DIFF", "CHART_SERIES"):
+    for name in ("COLORS", "SEMANTIC", "UI_TOKENS", "DIFF", "CHART_SERIES",
+                 "FLUENT_DARK", "FLUENT_LIGHT", "CHART_DARK", "CHART_LIGHT"):
         node = next(n for n in ast.walk(ast.parse(
             (ROOT / "styles.py").read_text(encoding="utf-8")))
             if isinstance(n, ast.Assign) and any(
@@ -32,6 +32,8 @@ def test_token_refs_valid():
     keys = _load_keys()
     assert keys["COLORS"] and keys["SEMANTIC"] and keys["UI_TOKENS"]
     assert keys["DIFF"] and keys["CHART_SERIES"]
+    assert keys["FLUENT_DARK"] and keys["FLUENT_LIGHT"]
+    assert keys["CHART_DARK"] and keys["CHART_LIGHT"]
     bad = []
     for path in sorted(ROOT.glob("*.py")):
         if path.name == "styles.py":
@@ -40,7 +42,8 @@ def test_token_refs_valid():
         for node in ast.walk(tree):
             if isinstance(node, ast.Constant) and isinstance(node.value, str):
                 for mod in ("COLORS", "SEMANTIC", "UI_TOKENS", "DIFF",
-                            "CHART_SERIES"):
+                            "CHART_SERIES", "FLUENT_DARK", "FLUENT_LIGHT",
+                            "CHART_DARK", "CHART_LIGHT"):
                     if "{" + mod + "[" in node.value:
                         bad.append(f"{path.name}: plain string with {mod}[")
             if isinstance(node, ast.Subscript):

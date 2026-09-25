@@ -82,6 +82,59 @@ CHART_SERIES = {
     'skip': '#888888',
 }
 
+# Палитры Fluent-тем (reskin batch 4): единый источник для QSS-базы
+# (_fluent_base) и QPalette (_apply_palette в ui_compat). Значения 1-в-1
+# как были россыпью, ключи совпадают с аргументами _fluent_base.
+FLUENT_DARK = {
+    'bg': '#202020',
+    'bg_card': '#2b2b2b',
+    'bg_input': '#2b2b2b',
+    'text': '#ffffff',
+    'text_dim': '#a0a0a0',
+    'border': '#3a3a3a',
+    'accent': '#4ade80',
+    'accent_soft': '#1d3a28',
+    'header_bg': '#2d2d2d',
+    'sel_bg': '#2ea043',
+    'sel_text': '#ffffff',
+}
+
+FLUENT_LIGHT = {
+    'bg': '#f3f3f3',
+    'bg_card': '#ffffff',
+    'bg_input': '#ffffff',
+    'text': '#1b1b1b',
+    'text_dim': '#616161',
+    'border': '#e0e0e0',
+    'accent': '#0b7a34',
+    'accent_soft': '#d3e9dc',
+    'header_bg': '#ececec',
+    'sel_bg': '#0b7a34',
+    'sel_text': '#ffffff',
+}
+
+# Палитры графиков matplotlib (reskin batch 4): единый источник для
+# _chart_palette в reports_screen. Значения 1-в-1 как были.
+CHART_DARK = {
+    'style': 'dark_background',
+    'bg': '#0A0F0A',
+    'fg': '#e8e8e8',
+    'spine': '#3a3a3a',
+    'bar_total': '#1d5c33',
+    'bar_done': '#00CC66',
+    'pct_stroke': '#000000',
+}
+
+CHART_LIGHT = {
+    'style': 'default',
+    'bg': '#ffffff',
+    'fg': '#1b1b1b',
+    'spine': '#cccccc',
+    'bar_total': '#bcd8c6',
+    'bar_done': '#0b7a34',
+    'pct_stroke': '#ffffff',
+}
+
 def apply_shadow(widget, color='#00FF41', blur=25, offset=4, alpha=50):
     """Добавляет тень к виджету. Хранит ссылку на виджете, чтобы GC не съел эффект."""
     if not isinstance(color, str) or len(color) != 7 or not color.startswith('#'):
@@ -793,16 +846,6 @@ QProgressBar::chunk {{
 }}
 """
 
-FLUENT_BASE_LIGHT = _fluent_base(
-    bg="#f3f3f3", bg_card="#ffffff", bg_input="#ffffff",
-    text="#1b1b1b", text_dim="#616161", border="#e0e0e0",
-    accent="#0b7a34", accent_soft="#d3e9dc", header_bg="#ececec",
-    sel_bg="#0b7a34", sel_text="#ffffff",
-)
+FLUENT_BASE_LIGHT = _fluent_base(**FLUENT_LIGHT)
 
-FLUENT_BASE_DARK = _fluent_base(
-    bg="#202020", bg_card="#2b2b2b", bg_input="#2b2b2b",
-    text="#ffffff", text_dim="#a0a0a0", border="#3a3a3a",
-    accent="#4ade80", accent_soft="#1d3a28", header_bg="#2d2d2d",
-    sel_bg="#2ea043", sel_text="#ffffff",
-)
+FLUENT_BASE_DARK = _fluent_base(**FLUENT_DARK)
