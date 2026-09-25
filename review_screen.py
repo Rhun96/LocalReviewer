@@ -358,21 +358,22 @@ class ReviewScreen(BaseScreen, ProfileMixin, CaseMixin, TableMixin, BulkMixin, V
         layout.addLayout(cards_row)
         self.update_stat_cards()
 
-        # Информация о кейсе
+        # Информация о кейсе (пилот Review шаг 1: компактная шапка
+        # как в референсе Проверка — влево, в одну строку, короткий ID).
         self.info_label = QLabel()
         from styles import COLORS as _CC2
         self.info_label.setStyleSheet(
             f"font-size: 13px; color: {_CC2['green_dark']}; font-weight: bold;")
-        self.info_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.info_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
         self.info_label.setWordWrap(True)
         layout.addWidget(self.info_label)
 
-        # Индикатор фильтров
+        # Индикатор фильтров (пилот шаг 1: влево, компактно).
         self.filter_indicator = QLabel()
         from styles import COLORS as _CC3
         self.filter_indicator.setStyleSheet(
             f"font-size: 11px; color: {_CC3['amber']};")
-        self.filter_indicator.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.filter_indicator.setAlignment(Qt.AlignmentFlag.AlignLeft)
         self.filter_indicator.setWordWrap(True)
         layout.addWidget(self.filter_indicator)
         self.update_filter_indicator()

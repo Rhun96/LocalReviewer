@@ -797,21 +797,37 @@ class CaseMixin:
         base = self._status_base(code)
         status = f"{self.BASE_EMOJI.get(base, '')} {self._status_display(code)}".strip()
         sid = (self.current_case.get('source_id') or "").strip()
-        sid_part = f" | 🆔 {sid}" if sid else f" | 🆔 case:{self.current_case.get('case_id')}"
+        # Пилот шаг 1: короткий ID в шапке (как #1642 в референсе),
+        # полный — в тултипе. UUID целиком (36 символов) растягивал шапку.
+        if sid:
+            sid_short = sid[:8]
+            sid_part = f"#{sid_short}"
+            sid_tip = sid
+        else:
+            sid_part = f"case:{self.current_case.get('case_id')}"
+            sid_tip = sid_part
         text = (
-            f"📋 Кейс {self.current_index + 1} / {len(self.case_ids)} | "
-            f"📄 {self.current_case.get('file_name')}{sid_part} | "
+            f"Кейс {self.current_index + 1} / {len(self.case_ids)} · "
+            f"{self.current_case.get('file_name')} · {sid_part} · "
             f"{status}"
         )
         if self.current_case.get('hidden'):
-            text += " | 👁 Скрыт"
+            text += " · 👁 Скрыт"
         err = getattr(self, "current_error", None)
         if err and err.get("category_name"):
             from taxonomy_service import SEVERITY_NAMES
             sub = f" → {err['subcategory_name']}" if err.get("subcategory_name") else ""
             sev = SEVERITY_NAMES.get(err.get("severity", ""), "")
-            text += f" | ⚠ {err['category_name']}{sub} [{sev}]"
+            text += f" · ⚠ {err['category_name']}{sub} [{sev}]"
         self.info_label.setText(text)
+        try:
+            full = (
+                f"Кейс {self.current_index + 1} / {len(self.case_ids)} | "
+                f"{self.current_case.get('file_name')} | {sid_tip} | {status}"
+            )
+            self.info_label.setToolTip(full)
+        except Exception:
+            pass
         self.update_finish_button()
         try:
             from bug_report_service import bugs_for_case

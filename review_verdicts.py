@@ -607,17 +607,21 @@ class VerdictsMixin:
             _pt = (self.filters.get('reviewed_to') or '').strip()
             if _pf or _pt:
                 parts.append(f"период: {_pf or '…'}–{_pt or '…'}")
-            base = ("⚠️ Фильтры: " + " | ".join(parts)) if parts else "Фильтры не применены"
+            base = ("⚠️ Фильтры: " + " · ".join(parts)) if parts else "Фильтры не применены"
         # Всегда показываем размер выборки — видно, что фильтр сработал
-        self._filter_base = f"{base}  |  Найдено: {len(self.case_ids)}"
+        self._filter_base = f"{base} · Найдено: {len(self.case_ids)}"
         try:
             import visibility_service as _vis
             _hn = _vis.hidden_count(self.project_path)
             if _hn:
-                self._filter_base += f"  |  👁 Скрыто: {_hn}"
+                self._filter_base += f" · 👁 Скрыто: {_hn}"
         except Exception:
             pass
         self.filter_indicator.setText(self._filter_base)
+        try:
+            self.filter_indicator.setToolTip(self._filter_base)
+        except Exception:
+            pass
 
     def open_filters(self):
         dialog = FilterDialog(self.project_path, self)

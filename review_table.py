@@ -829,9 +829,15 @@ class TableMixin:
             scope = "файл" if fid else "проект"
             base = getattr(self, "_filter_base", self.filter_indicator.text())
             bad_part = f", ❌ {stats['bad']} плохих" if stats.get("bad") else ""
-            self.filter_indicator.setText(
-                f"{base}  |  {scope}: 🔴 {stats['problematic']} проблемных{bad_part}, "
-                f"🟢 {stats['reviewed']}/{stats['total']} обработан")
+            text = (
+                f"{base} · {scope}: 🔴 {stats['problematic']} проблемных{bad_part}, "
+                f"🟢 {stats['reviewed']}/{stats['total']} обработан"
+            )
+            self.filter_indicator.setText(text)
+            try:
+                self.filter_indicator.setToolTip(text)
+            except Exception:
+                pass
         except Exception:
             pass
         try:
