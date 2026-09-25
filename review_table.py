@@ -339,6 +339,29 @@ class TableMixin:
         bulk_layout.addStretch()
         layout.addLayout(bulk_layout)
 
+        # Верхний компактный пейджер (пилот 9.1): таблица выше вьюпорта,
+        # нижний футер требует скролла — этот всегда в пределах экрана.
+        pager_top = QHBoxLayout()
+        pager_top.setSpacing(4)
+        pager_top.setContentsMargins(0, 0, 0, 0)
+        self.btn_prev_top = FPushButton("◀")
+        self.btn_prev_top.setMinimumHeight(28)
+        self.btn_prev_top.setMaximumWidth(40)
+        self.btn_prev_top.setToolTip("Предыдущая страница")
+        self.btn_prev_top.clicked.connect(self.prev_page)
+        self.page_label_top = QLabel("Стр. 1 / 1")
+        self.page_label_top.setStyleSheet("font-size: 11px;")
+        self.btn_next_top = FPushButton("▶")
+        self.btn_next_top.setMinimumHeight(28)
+        self.btn_next_top.setMaximumWidth(40)
+        self.btn_next_top.setToolTip("Следующая страница")
+        self.btn_next_top.clicked.connect(self.next_page)
+        pager_top.addStretch()
+        pager_top.addWidget(self.btn_prev_top)
+        pager_top.addWidget(self.page_label_top)
+        pager_top.addWidget(self.btn_next_top)
+        layout.addLayout(pager_top)
+
         # Таблица
         self.cases_table = FTable()
         from styles import COLORS as _CC
@@ -746,6 +769,11 @@ class TableMixin:
                 self.btn_prev_page.setEnabled(self.current_page > 0)
                 self.btn_next_page.setEnabled(
                     self.current_page < self.total_pages - 1)
+                self.btn_prev_top.setEnabled(self.current_page > 0)
+                self.btn_next_top.setEnabled(
+                    self.current_page < self.total_pages - 1)
+                self.page_label_top.setText(
+                    f"Стр. {self.current_page + 1} / {self.total_pages}")
             except Exception:
                 pass
             try:
