@@ -29,8 +29,8 @@ class DatasetSelectDialog(QDialog):
         layout.addWidget(title)
 
         hint = QLabel("Выберите конкретный файл или все файлы:")
+        from styles import COLORS as _CC
         if not FLUENT:
-            from styles import COLORS as _CC
             hint.setStyleSheet(
                 f"color: {_CC['green_dark']}; font-size: 13px;")
         layout.addWidget(hint)

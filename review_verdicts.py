@@ -49,9 +49,9 @@ class VerdictsMixin:
             return
         settings = get_check_settings(self.project_path)
         checks = check_case(self.current_case, settings)
+        from styles import COLORS as _CC
         if not checks:
             self.checks_label.setText("✅ Нет предупреждений")
-            from styles import COLORS as _CC
             self.checks_label.setStyleSheet(
                 f"color: {_CC['green_dark']}; font-size: 11px;")
         else:

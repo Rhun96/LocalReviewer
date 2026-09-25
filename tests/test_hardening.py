@@ -320,6 +320,52 @@ def test_table_status_colors_and_bug_severity_colors():
         b.close()
 
 
+def test_ui_token_paths_no_unbound():
+    """Ловушка reskin-ветки: импорт токенов в одной ветке, чтение в другой.
+
+    UnboundLocalError '_CC' ронял загрузку кейса при сработавших проверках
+    и диалог выбора файла во Fluent-режиме. Дым: кейс С проверками +
+    все диалоги со стилями строятся без исключений.
+    """
+    import tempfile as _t
+    from PySide6.QtWidgets import QApplication
+    QApplication.instance() or QApplication([])
+    from database import init_database as _init
+    from importer import import_file as _imp
+    from review_screen import ReviewScreen
+    p = _t.mkdtemp()
+    _init(p)
+    _imp(p, "f.xlsx", "excel", "S", 0,
+         {"q": "primary_text", "a": "response_text"},
+         [{"q": "смотри сюда", "a": "подробности на https://example.com/x"}])
+    w = ReviewScreen(p)
+    try:
+        w.show()
+        w.load_case(0)  # раньше падало: _CC из if-ветки при живых проверках
+        assert "http" in (w.current_case.get("response_text") or "")
+    finally:
+        w.close()
+    from datasets_dialog import DatasetsDialog
+    d = DatasetsDialog(p, None)
+    try:
+        d.show()
+    finally:
+        d.close()
+    from dataset_select_dialog import DatasetSelectDialog
+    import inspect as _insp
+    try:
+        _sig = _insp.signature(DatasetSelectDialog.__init__)
+        _params = list(_sig.parameters)
+    except Exception:
+        _params = []
+    if len(_params) >= 2:
+        dd = DatasetSelectDialog(p, None)
+        try:
+            dd.show()
+        finally:
+            dd.close()
+
+
 def test_anonymized_exports_keep_source():
     from database import db
     from export_service import export_results_jsonl, export_results_to_xlsx
