@@ -196,6 +196,41 @@ def danger_button_style(extra: str = "") -> str:
     return _colored_button("red", "danger_hover", extra)
 
 
+def tag_button_style(selected: bool) -> str:
+    """Кнопка тега (была 2×2 копиями в review_verdicts, 1-в-1)."""
+    from styles import COLORS as _C
+    if selected:
+        return f"""
+            QPushButton {{
+                background-color: {_C['green_bright']};
+                color: {_C['bg_dark']};
+                border-color: {_C['green_bright']};
+                padding: 4px 8px;
+                border-radius: 4px;
+                font-weight: bold;
+                font-size: 11px;
+            }}
+        """
+    return f"""
+        QPushButton {{
+            background-color: {_C['bg_card']};
+            color: {_C['text_bright']};
+            border-color: {_C['green_dim']};
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+        }}
+        QPushButton:hover {{
+            background-color: {_C['bg_hover']};
+            border-color: {_C['green_bright']};
+        }}
+        QPushButton:checked {{
+            background-color: {_C['green_bright']};
+            color: {_C['bg_dark']};
+        }}
+    """
+
+
 def notify(parent, kind: str, title: str, text: str) -> None:
     """Ненавязчивое уведомление: InfoBar во Fluent, QMessageBox в fallback."""
     if FLUENT:
@@ -421,9 +456,11 @@ def mapping_label(header, samples: list) -> str:
     Имя и примеры визуально разделены — не сливаются и не путаются.
     """
     import html as _html
+    from styles import COLORS as _CC
     name = _html.escape(str(header))
     if not samples:
         return f"<b>{name}</b>"
     shown = "<br>".join("↳ " + _html.escape(str(s)[:60]) for s in samples[:2])
     return (f"<b>{name}</b>"
-            f'<br><span style="color:#888888; font-size:11px;">{shown}</span>')
+            f'<br><span style="color:{_CC["gray"]}; '
+            f'font-size:11px;">{shown}</span>')

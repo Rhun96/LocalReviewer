@@ -136,16 +136,17 @@ class ErrorCauseDialog(QDialog):
     @staticmethod
     def _style_cat_btn(btn, selected: bool) -> None:
         # Выбранная категория видна сразу, без ухода в подкатегории.
+        from styles import COLORS as _CC
         if selected:
-            btn.setStyleSheet("""
-                QPushButton {
-                    background-color: #00FF41;
-                    color: #000000;
-                    border: 2px solid #00FF41;
+            btn.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {_CC['green_bright']};
+                    color: {_CC['bg_dark']};
+                    border: 2px solid {_CC['green_bright']};
                     border-radius: 6px;
                     font-weight: bold;
                     padding: 6px;
-                }
+                }}
             """)
         else:
             btn.setStyleSheet("")

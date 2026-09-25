@@ -91,24 +91,25 @@ class HistoryScreen(BaseScreen):
 
         # Таблица истории
         self.history_table = QTableWidget()
-        self.history_table.setStyleSheet("""
-            QTableWidget {
-                background-color: #001A0A;
-                border: 2px solid #00FF41;
-                color: #e8e8e8;
+        from styles import COLORS as _CC
+        self.history_table.setStyleSheet(f"""
+            QTableWidget {{
+                background-color: {_CC['bg_input']};
+                border: 2px solid {_CC['green_bright']};
+                color: {_CC['text_bright']};
                 font-size: 13px;
-                gridline-color: #003315;
-            }
-            QTableWidget::item {
+                gridline-color: {_CC['green_deep']};
+            }}
+            QTableWidget::item {{
                 padding: 6px;
-            }
-            QHeaderView::section {
-                background-color: #003315;
-                color: #e8e8e8;
-                border: 1px solid #00FF41;
+            }}
+            QHeaderView::section {{
+                background-color: {_CC['green_deep']};
+                color: {_CC['text_bright']};
+                border: 1px solid {_CC['green_bright']};
                 padding: 8px;
                 font-weight: bold;
-            }
+            }}
         """)
         layout.addWidget(self.history_table)
         clear_in_fluent(self.history_table)

@@ -141,7 +141,9 @@ class CaseMixin:
         self.checks_group = QGroupBox("⚠️ Автопроверки")
         self.checks_label = QLabel("✅ Нет предупреждений")
         self.checks_label.setWordWrap(True)
-        self.checks_label.setStyleSheet("color: #00AA2A; font-size: 11px;")
+        from styles import COLORS as _CC3
+        self.checks_label.setStyleSheet(
+            f"color: {_CC3['green_dark']}; font-size: 11px;")
         checks_layout = QVBoxLayout()
         checks_layout.addWidget(self.checks_label)
         self.verdicts_widget = QWidget()
@@ -204,12 +206,14 @@ class CaseMixin:
         self.comment_edit.setStyleSheet(f"""
             QTextEdit {{
                 selection-background-color: {_CC['blue']};
-                selection-color: #000000;
+                selection-color: {_CC['bg_dark']};
             }}
         """)
         comment_layout.addWidget(self.comment_edit)
         self.save_indicator = QLabel("")
-        self.save_indicator.setStyleSheet("color: #00AA2A; font-size: 10px;")
+        from styles import COLORS as _CC4
+        self.save_indicator.setStyleSheet(
+            f"color: {_CC4['green_dark']}; font-size: 10px;")
         comment_layout.addWidget(self.save_indicator)
         comment_group.setLayout(comment_layout)
         layout.addWidget(comment_group)
@@ -544,17 +548,19 @@ class CaseMixin:
         def _header(text: str):
             h = QLabel(text)
             if not FLUENT:
-                h.setStyleSheet("font-size: 12px; font-weight: bold; color: #00DD38;")
+                from styles import COLORS as _CC
+                h.setStyleSheet(
+                    f"font-size: 12px; font-weight: bold; color: {_CC['green_main']};")
             return h
 
         def _box(title: str):
             # Панель + обычный заголовок вместо вложенного QGroupBox:
             # вложенные группы криво рисуют заголовки.
-            from styles import UI_TOKENS as _T
+            from styles import UI_TOKENS as _T, COLORS as _CC2
             panel = QFrame()
             panel.setObjectName("caseBox")
             panel.setStyleSheet(
-                "#caseBox { border: 1px solid #3a3a3a; "
+                f"#caseBox {{ border: 1px solid {_CC2['border_soft']}; "
                 f"border-radius: {_T['radius_m']}px; }}")
             lay = QVBoxLayout()
             lay.setSpacing(_T['space_s'])

@@ -46,7 +46,9 @@ class RunReviewDialog(QDialog):
         right.addWidget(self.verdict_label)
         self.ref_label = QLabel("")
         self.ref_label.setWordWrap(True)
-        self.ref_label.setStyleSheet("color: #00AA2A; font-size: 12px;")
+        from styles import COLORS as _CC
+        self.ref_label.setStyleSheet(
+            f"color: {_CC['green_dark']}; font-size: 12px;")
         self.ref_label.setVisible(False)
         right.addWidget(self.ref_label)
         self.answer_pane = QTextBrowser()

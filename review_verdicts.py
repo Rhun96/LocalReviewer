@@ -14,7 +14,7 @@ from templates_service import (
     get_user_templates,
 )
 from ui_compat import (
-    FPushButton, confirm, notify,
+    FPushButton, confirm, notify, tag_button_style,
 )
 import logging
 
@@ -51,13 +51,16 @@ class VerdictsMixin:
         checks = check_case(self.current_case, settings)
         if not checks:
             self.checks_label.setText("✅ Нет предупреждений")
-            self.checks_label.setStyleSheet("color: #00AA2A; font-size: 11px;")
+            from styles import COLORS as _CC
+            self.checks_label.setStyleSheet(
+                f"color: {_CC['green_dark']}; font-size: 11px;")
         else:
             from autocheck_service import rule_severity
             sev_icon = {"critical": "🔴", "error": "🔴", "warning": "🟡", "info": "🔵"}
             lines = [f"{sev_icon.get(rule_severity(c[0]), '⚠️')} {c[1]}: {c[2]}" for c in checks]
             self.checks_label.setText("\n".join(lines))
-            self.checks_label.setStyleSheet("color: #FFAA00; font-size: 11px;")
+            self.checks_label.setStyleSheet(
+                f"color: {_CC['amber']}; font-size: 11px;")
         self._refresh_verdicts()
 
     def _refresh_verdicts(self):
@@ -284,36 +287,9 @@ class VerdictsMixin:
                 btn.setChecked(is_selected)
                 btn.setMinimumHeight(25)
                 if is_selected:
-                    btn.setStyleSheet("""
-                        QPushButton {
-                            background-color: #00FF41;
-                            color: #000000;
-                            border-color: #00FF41;
-                            padding: 4px 8px;
-                            border-radius: 4px;
-                            font-weight: bold;
-                            font-size: 11px;
-                        }
-                    """)
+                    btn.setStyleSheet(tag_button_style(True))
                 else:
-                    btn.setStyleSheet("""
-                        QPushButton {
-                            background-color: #0D150D;
-                            color: #e8e8e8;
-                            border-color: #007722;
-                            padding: 4px 8px;
-                            border-radius: 4px;
-                            font-size: 11px;
-                        }
-                        QPushButton:hover {
-                            background-color: #0F2010;
-                            border-color: #00FF41;
-                        }
-                        QPushButton:checked {
-                            background-color: #00FF41;
-                            color: #000000;
-                        }
-                    """)
+                    btn.setStyleSheet(tag_button_style(False))
                 btn.clicked.connect(lambda checked, tid=tag_id: self.toggle_tag(tid))
                 self.tags_layout.addWidget(btn, row, col)
                 self.tag_buttons[tag_id] = btn
@@ -326,37 +302,7 @@ class VerdictsMixin:
 
     @staticmethod
     def _style_tag_btn(btn, selected: bool) -> None:
-        if selected:
-            btn.setStyleSheet("""
-                QPushButton {
-                    background-color: #00FF41;
-                    color: #000000;
-                    border-color: #00FF41;
-                    padding: 4px 8px;
-                    border-radius: 4px;
-                    font-weight: bold;
-                    font-size: 11px;
-                }
-            """)
-        else:
-            btn.setStyleSheet("""
-                QPushButton {
-                    background-color: #0D150D;
-                    color: #e8e8e8;
-                    border-color: #007722;
-                    padding: 4px 8px;
-                    border-radius: 4px;
-                    font-size: 11px;
-                }
-                QPushButton:hover {
-                    background-color: #0F2010;
-                    border-color: #00FF41;
-                }
-                QPushButton:checked {
-                    background-color: #00FF41;
-                    color: #000000;
-                }
-            """)
+        btn.setStyleSheet(tag_button_style(selected))
 
     def toggle_tag(self, tag_id: int):
         added = tag_id not in self.selected_tags

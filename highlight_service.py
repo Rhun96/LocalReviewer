@@ -10,6 +10,7 @@ import html
 import logging
 
 from database import db, utcnow
+from styles import SEMANTIC as _SEM, COLORS as _HC
 
 logger = logging.getLogger(__name__)
 
@@ -17,9 +18,10 @@ COLORS = ("green", "red", "yellow")
 COLOR_NAMES = {"green": "Хорошо", "red": "Косяк", "yellow": "Внимание"}
 # фон + цвет букв (читается и на тёмной, и на светлой теме)
 SPAN_STYLE = {
-    "green": "background-color:#2ea043; color:#ffffff;",
-    "red": "background-color:#c0392b; color:#ffffff;",
-    "yellow": "background-color:#e3b008; color:#000000;",
+    "green": f"background-color:{_SEM['success']}; color:{_HC['pure_white']};",
+    "red": f"background-color:{_HC['gate_red']}; color:{_HC['pure_white']};",
+    "yellow": f"background-color:{_HC['highlight_yellow']}; "
+              f"color:{_HC['pure_black']};",
 }
 
 

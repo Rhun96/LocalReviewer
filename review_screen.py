@@ -282,11 +282,12 @@ class ReviewScreen(BaseScreen, ProfileMixin, CaseMixin, TableMixin, BulkMixin, V
         main_layout.setContentsMargins(0, 0, 0, 0)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
-        scroll.setStyleSheet("""
-            QScrollArea {
+        from styles import COLORS as _CC
+        scroll.setStyleSheet(f"""
+            QScrollArea {{
                 border: none;
-                background-color: #000000;
-            }
+                background-color: {_CC['bg_dark']};
+            }}
         """)
         content_widget = QWidget()
         layout = QVBoxLayout()
@@ -319,15 +320,16 @@ class ReviewScreen(BaseScreen, ProfileMixin, CaseMixin, TableMixin, BulkMixin, V
         # палитры; семантические цвета значений читаются и на тёмной,
         # и на светлой.
         from PySide6.QtWidgets import QHBoxLayout as _HB, QFrame as _FR
+        from styles import SEMANTIC as _SEM
         cards_row = _HB()
         cards_row.setSpacing(8)
         self._stat_cards: dict = {}
         for _key, _title, _color in (
                 ("total", "Всего кейсов", ""),
-                ("reviewed", "Проверено", "#2ea043"),
-                ("bad", "С ошибками", "#da3633"),
-                ("uncertain", "Сомневаюсь", "#bf8700"),
-                ("duplicate", "Дубликаты", "#1f6feb")):
+                ("reviewed", "Проверено", _SEM["success"]),
+                ("bad", "С ошибками", _SEM["danger"]),
+                ("uncertain", "Сомневаюсь", _SEM["warning"]),
+                ("duplicate", "Дубликаты", _SEM["info"])):
             _frame = _FR()
             _frame.setStyleSheet(
                 "QFrame { background: rgba(127, 127, 127, 0.08);"
@@ -358,14 +360,18 @@ class ReviewScreen(BaseScreen, ProfileMixin, CaseMixin, TableMixin, BulkMixin, V
 
         # Информация о кейсе
         self.info_label = QLabel()
-        self.info_label.setStyleSheet("font-size: 13px; color: #00AA2A; font-weight: bold;")
+        from styles import COLORS as _CC2
+        self.info_label.setStyleSheet(
+            f"font-size: 13px; color: {_CC2['green_dark']}; font-weight: bold;")
         self.info_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.info_label.setWordWrap(True)
         layout.addWidget(self.info_label)
 
         # Индикатор фильтров
         self.filter_indicator = QLabel()
-        self.filter_indicator.setStyleSheet("font-size: 11px; color: #FFAA00;")
+        from styles import COLORS as _CC3
+        self.filter_indicator.setStyleSheet(
+            f"font-size: 11px; color: {_CC3['amber']};")
         self.filter_indicator.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.filter_indicator.setWordWrap(True)
         layout.addWidget(self.filter_indicator)

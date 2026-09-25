@@ -148,10 +148,12 @@ class RegressionDialog(QDialog):
     @staticmethod
     def _make_gate_card(caption: str):
         """Мини-карточка сводки: подпись сверху, крупное значение."""
+        from styles import COLORS as _CC
         frame = QFrame()
         frame.setObjectName("gateCard")
         frame.setStyleSheet(
-            "#gateCard { border: 1px solid #3a3a3a; border-radius: 8px; }")
+            f"#gateCard {{ border: 1px solid {_CC['border_soft']}; "
+            "border-radius: 8px; }")
         frame.setSizePolicy(QSizePolicy.Policy.Expanding,
                             QSizePolicy.Policy.Fixed)
         lay = QVBoxLayout()
@@ -159,7 +161,8 @@ class RegressionDialog(QDialog):
         lay.setContentsMargins(8, 6, 8, 6)
         cap = QLabel(caption)
         cap.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        cap.setStyleSheet("font-size: 11px; color: #888888;")
+        cap.setStyleSheet(
+            f"font-size: 11px; color: {_CC['gray']};")
         val = QLabel("—")
         val.setAlignment(Qt.AlignmentFlag.AlignCenter)
         val.setStyleSheet("font-size: 16px; font-weight: bold;")
@@ -256,13 +259,14 @@ class RegressionDialog(QDialog):
         else:
             balance = "паритет с baseline"
         passed = gate == "PASS"
+        from styles import SEMANTIC as _SEM, COLORS as _CC3
         self._set_gate_card("gate", "✅ PASS" if passed else "❌ FAIL",
-                            "#2ea043" if passed else "#c0392b")
+                            _SEM["success"] if passed else _CC3["gate_red"])
         self._set_gate_card("total", str(reg["total"] or 0), None)
         self._set_gate_card("reg", str(n_reg),
-                            "#c0392b" if n_reg else None)
+                            _CC3["gate_red"] if n_reg else None)
         self._set_gate_card("imp", str(n_imp),
-                            "#2ea043" if n_imp else None)
+                            _SEM["success"] if n_imp else None)
         self._set_gate_card("same", str(reg["unchanged"] or 0), None)
         self.summary.setText(
             f"{reg['name']}: {rg.candidate_label(self.project_path, reg)}, "
@@ -271,9 +275,10 @@ class RegressionDialog(QDialog):
 
     def _set_gate_card(self, key: str, value: str, color: str | None):
         try:
+            from styles import COLORS as _CC4
             frame, val = self.gate_cards[key]
             val.setText(value)
-            border = color or "#3a3a3a"
+            border = color or _CC4["border_soft"]
             frame.setStyleSheet(
                 "#gateCard { border: 1px solid " + border
                 + "; border-radius: 8px; }")

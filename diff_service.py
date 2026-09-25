@@ -20,12 +20,17 @@ def word_diff_html(old: str | None, new: str | None) -> tuple:
             out_old.append(_html.escape(" ".join(wo[i1:i2])))
             out_new.append(_html.escape(" ".join(wn[j1:j2])))
         else:
+            from styles import DIFF as _D
             if i1 != i2:
-                out_old.append('<span style="background-color:#5a1a1a; color:#ffb3b3;">'
-                               + _html.escape(" ".join(wo[i1:i2])) + "</span>")
+                out_old.append(
+                    f'<span style="background-color:{_D["del_bg"]}; '
+                    f'color:{_D["del_text"]};">'
+                    + _html.escape(" ".join(wo[i1:i2])) + "</span>")
             if j1 != j2:
-                out_new.append('<span style="background-color:#1a4a22; color:#b3ffbf;">'
-                               + _html.escape(" ".join(wn[j1:j2])) + "</span>")
+                out_new.append(
+                    f'<span style="background-color:{_D["add_bg"]}; '
+                    f'color:{_D["add_text"]};">'
+                    + _html.escape(" ".join(wn[j1:j2])) + "</span>")
     html_old = " ".join(out_old) if old else "(пусто)"
     html_new = " ".join(out_new) if new else "(пусто)"
     return html_old, html_new

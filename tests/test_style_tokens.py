@@ -12,12 +12,14 @@ import ast
 import pathlib
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-ALLOW_RAW_HEX = 164
+# Остаток (27) — осознанные палитры: ui_compat/QSS-палитры тем и _chart_palette
+# в reports_screen. Их не трогаем (это и есть токены другого уровня).
+ALLOW_RAW_HEX = 27
 
 
 def _load_keys():
     out = {}
-    for name in ("COLORS", "SEMANTIC", "UI_TOKENS"):
+    for name in ("COLORS", "SEMANTIC", "UI_TOKENS", "DIFF", "CHART_SERIES"):
         node = next(n for n in ast.walk(ast.parse(
             (ROOT / "styles.py").read_text(encoding="utf-8")))
             if isinstance(n, ast.Assign) and any(
@@ -29,6 +31,7 @@ def _load_keys():
 def test_token_refs_valid():
     keys = _load_keys()
     assert keys["COLORS"] and keys["SEMANTIC"] and keys["UI_TOKENS"]
+    assert keys["DIFF"] and keys["CHART_SERIES"]
     bad = []
     for path in sorted(ROOT.glob("*.py")):
         if path.name == "styles.py":
@@ -36,7 +39,8 @@ def test_token_refs_valid():
         tree = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
             if isinstance(node, ast.Constant) and isinstance(node.value, str):
-                for mod in ("COLORS", "SEMANTIC", "UI_TOKENS"):
+                for mod in ("COLORS", "SEMANTIC", "UI_TOKENS", "DIFF",
+                            "CHART_SERIES"):
                     if "{" + mod + "[" in node.value:
                         bad.append(f"{path.name}: plain string with {mod}[")
             if isinstance(node, ast.Subscript):

@@ -366,45 +366,46 @@ class TableMixin:
 
         # Таблица
         self.cases_table = FTable()
-        self.cases_table.setStyleSheet("""
-            QTableWidget {
-                background-color: #0D150D;
-                border: 2px solid #00441A;
+        from styles import COLORS as _CC
+        self.cases_table.setStyleSheet(f"""
+            QTableWidget {{
+                background-color: {_CC['bg_card']};
+                border: 2px solid {_CC['border_dim']};
                 border-radius: 8px;
-                color: #e8e8e8;
+                color: {_CC['text_bright']};
                 font-size: 11px;
-                gridline-color: #00441A;
-            }
-            QTableWidget::item {
+                gridline-color: {_CC['border_dim']};
+            }}
+            QTableWidget::item {{
                 padding: 6px;
-            }
-            QTableWidget::indicator {
+            }}
+            QTableWidget::indicator {{
                 width: 18px;
                 height: 18px;
-            }
-            QTableWidget::indicator:unchecked {
-                border: 1px solid #888888;
+            }}
+            QTableWidget::indicator:unchecked {{
+                border: 1px solid {_CC['gray']};
                 border-radius: 4px;
                 background-color: transparent;
-            }
-            QTableWidget::indicator:checked {
-                border: 1px solid #00FF41;
+            }}
+            QTableWidget::indicator:checked {{
+                border: 1px solid {_CC['green_bright']};
                 border-radius: 4px;
-                background-color: #00AA2A;
-            }
-            QTableWidget::indicator:unchecked:hover {
-                border: 1px solid #00FF41;
-            }
-            QTableWidget::item:selected {
-                background-color: #1A3A1A;
-            }
-            QHeaderView::section {
-                background-color: #1A3A1A;
-                color: #e8e8e8;
-                border: 1px solid #007722;
+                background-color: {_CC['green_dark']};
+            }}
+            QTableWidget::indicator:unchecked:hover {{
+                border: 1px solid {_CC['green_bright']};
+            }}
+            QTableWidget::item:selected {{
+                background-color: {_CC['bg_active']};
+            }}
+            QHeaderView::section {{
+                background-color: {_CC['bg_active']};
+                color: {_CC['text_bright']};
+                border: 1px solid {_CC['green_dim']};
                 padding: 8px;
                 font-weight: bold;
-            }
+            }}
         """)
         self.cases_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.cases_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
@@ -594,10 +595,13 @@ class TableMixin:
             # Серый скрытых строк важнее раскраски: он применяется позже.
             try:
                 from PySide6.QtGui import QColor as _QC
+                from styles import SEMANTIC as _SEM, COLORS as _CC2
                 _STATUS_FG = {
-                    "good": _QC("#2ea043"), "bad": _QC("#da3633"),
-                    "uncertain": _QC("#bf8700"), "duplicate": _QC("#1f6feb"),
-                    "skip": _QC("#888888"),
+                    "good": _QC(_SEM["success"]),
+                    "bad": _QC(_SEM["danger"]),
+                    "uncertain": _QC(_SEM["warning"]),
+                    "duplicate": _QC(_SEM["info"]),
+                    "skip": _QC(_CC2["gray"]),
                 }
             except Exception:
                 _STATUS_FG = {}
@@ -672,8 +676,9 @@ class TableMixin:
                             pass
                     if _hidden:
                         try:
-                            from PySide6.QtGui import QColor as _QC
-                            item.setForeground(_QC("#888888"))
+                            from PySide6.QtGui import QColor as _QC2
+                            from styles import COLORS as _CC3
+                            item.setForeground(_QC2(_CC3["gray"]))
                         except Exception:
                             pass
                     self.cases_table.setItem(row, col_idx, item)

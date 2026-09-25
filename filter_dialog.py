@@ -62,11 +62,12 @@ class FilterDialog(QDialog):
         # Прокручиваемая область для контента
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
-        scroll.setStyleSheet("""
-            QScrollArea {
+        from styles import COLORS as _CC
+        scroll.setStyleSheet(f"""
+            QScrollArea {{
                 border: none;
-                background-color: #000000;
-            }
+                background-color: {_CC['bg_dark']};
+            }}
         """)
 
         content_widget = QWidget()

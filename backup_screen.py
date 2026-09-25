@@ -55,20 +55,21 @@ class BackupScreen(BaseScreen):
         layout.addWidget(list_label)
 
         self.backups_list = QListWidget()
-        self.backups_list.setStyleSheet("""
-            QListWidget {
-                background-color: #001A0A;
-                border: 2px solid #00FF41;
+        from styles import COLORS as _CC
+        self.backups_list.setStyleSheet(f"""
+            QListWidget {{
+                background-color: {_CC['bg_input']};
+                border: 2px solid {_CC['green_bright']};
                 border-radius: 4px;
-                color: #e8e8e8;
+                color: {_CC['text_bright']};
                 font-size: 14px;
-            }
-            QListWidget::item {
+            }}
+            QListWidget::item {{
                 padding: 10px;
-            }
-            QListWidget::item:selected {
-                background-color: #003315;
-            }
+            }}
+            QListWidget::item:selected {{
+                background-color: {_CC['green_deep']};
+            }}
         """)
         layout.addWidget(self.backups_list)
         clear_in_fluent(self.backups_list)

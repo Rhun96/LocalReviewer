@@ -1054,7 +1054,8 @@ class ReportsScreen(BaseScreen):
         fig, ax = plt.subplots(figsize=(10, 4), dpi=100)
         fig.patch.set_facecolor(pal["bg"])
         ax.set_facecolor(pal["bg"])
-        ax.plot(labels, rates, marker="o", color="#CC3333", linewidth=2)
+        from styles import CHART_SERIES as _CS2
+        ax.plot(labels, rates, marker="o", color=_CS2["bad"], linewidth=2)
         ax.set_ylabel("Bad-rate, %", color=pal["fg"])
         ax.set_title("Качество по версиям", color=pal["fg"], fontsize=14, pad=15)
         ax.tick_params(colors=pal["fg"])
@@ -1111,17 +1112,18 @@ class ReportsScreen(BaseScreen):
         """Круговая диаграмма распределения статусов с легендой."""
         plt = _plt()
         pal = _chart_palette()
+        from styles import CHART_SERIES as _CS, COLORS as _CC
         labels = []
         sizes = []
         colors = []
 
         status_data = [
-            ('Не проверено', report['unreviewed'], '#555555'),
-            ('Хорошо', report['good'], '#00CC44'),
-            ('Плохо', report['bad'], '#CC3333'),
-            ('Сомневаюсь', report['uncertain'], '#CCAA00'),
-            ('Дубль', report['duplicate'], '#CC7700'),
-            ('Пропущено', report['skip'], '#888888'),
+            ('Не проверено', report['unreviewed'], _CS['unreviewed']),
+            ('Хорошо', report['good'], _CS['good']),
+            ('Плохо', report['bad'], _CS['bad']),
+            ('Сомневаюсь', report['uncertain'], _CS['uncertain']),
+            ('Дубль', report['duplicate'], _CS['duplicate']),
+            ('Пропущено', report['skip'], _CS['skip']),
         ]
 
         for label, size, color in status_data:
@@ -1132,7 +1134,8 @@ class ReportsScreen(BaseScreen):
 
         if not sizes:
             lbl = QLabel("Нет данных для отображения")
-            lbl.setStyleSheet("color: #00AA2A; font-size: 14px;")
+            lbl.setStyleSheet(
+                f"color: {_CC['green_dark']}; font-size: 14px;")
             lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
             self.charts_layout.addWidget(lbl)
             return

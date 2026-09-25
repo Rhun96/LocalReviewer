@@ -30,29 +30,31 @@ class DatasetSelectDialog(QDialog):
 
         hint = QLabel("Выберите конкретный файл или все файлы:")
         if not FLUENT:
-            hint.setStyleSheet("color: #00AA2A; font-size: 13px;")
+            from styles import COLORS as _CC
+            hint.setStyleSheet(
+                f"color: {_CC['green_dark']}; font-size: 13px;")
         layout.addWidget(hint)
 
         # Список файлов
         self.files_list = QListWidget()
-        self.files_list.setStyleSheet("""
-            QListWidget {
-                background-color: #0D150D;
-                border: 2px solid #00441A;
+        self.files_list.setStyleSheet(f"""
+            QListWidget {{
+                background-color: {_CC['bg_card']};
+                border: 2px solid {_CC['border_dim']};
                 border-radius: 8px;
-                color: #e8e8e8;
+                color: {_CC['text_bright']};
                 font-size: 14px;
-            }
-            QListWidget::item {
+            }}
+            QListWidget::item {{
                 padding: 12px;
-                border-bottom: 1px solid #00441A;
-            }
-            QListWidget::item:selected {
-                background-color: #1A3A1A;
-            }
-            QListWidget::item:hover {
-                background-color: #0F2010;
-            }
+                border-bottom: 1px solid {_CC['border_dim']};
+            }}
+            QListWidget::item:selected {{
+                background-color: {_CC['bg_active']};
+            }}
+            QListWidget::item:hover {{
+                background-color: {_CC['bg_hover']};
+            }}
         """)
         layout.addWidget(self.files_list)
         clear_in_fluent(self.files_list)
@@ -65,7 +67,6 @@ class DatasetSelectDialog(QDialog):
         btn_all = FPushButton("📋 Все файлы")
         btn_all.setMinimumHeight(45)
         if not FLUENT:
-            from styles import COLORS as _CC
             btn_all.setStyleSheet(f"""
                 QPushButton {{
                     background-color: {_CC['bg_card']};
@@ -85,19 +86,19 @@ class DatasetSelectDialog(QDialog):
         btn_ok = FPrimaryButton("✅ Начать ревью")
         btn_ok.setMinimumHeight(45)
         if not FLUENT:
-            btn_ok.setStyleSheet("""
-                QPushButton {
-                    background-color: #0D150D;
-                    color: #e8e8e8;
-                    border: 2px solid #00FF41;
+            btn_ok.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {_CC['bg_card']};
+                    color: {_CC['text_bright']};
+                    border: 2px solid {_CC['green_bright']};
                     border-radius: 8px;
                     padding: 10px 20px;
                     font-size: 14px;
                     font-weight: bold;
-                }
-                QPushButton:hover {
-                    background-color: #003315;
-                }
+                }}
+                QPushButton:hover {{
+                    background-color: {_CC['green_deep']};
+                }}
             """)
         btn_ok.clicked.connect(self.on_accept)
 

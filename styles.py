@@ -33,6 +33,14 @@ COLORS = {
     # Светлый красный сайдбара (единственное место, оттенок свой).
     'red_light': '#FF6666',
     'red_border': '#662222',
+    # Кирпичный gate-карточек и подсветки (темнее danger, оттенок свой).
+    'gate_red': '#C0392B',
+    # Мягкая рамка (таблицы/карточки, где border_dim слишком зелёный).
+    'border_soft': '#3A3A3A',
+    # Жёлтый подсветки фрагментов (свой оттенок).
+    'highlight_yellow': '#E3B008',
+    'pure_white': '#FFFFFF',
+    'pure_black': '#000000',
     'yellow': '#FFD700',
     'orange': '#FF9900',
     # Янтарь предупреждений (#FFAA00 живёт в ~10 местах по экранам).
@@ -54,6 +62,24 @@ SEMANTIC = {
     'danger': '#da3633',
     'warning': '#bf8700',
     'info': '#1f6feb',
+}
+
+# Цвета diff-подсветки ответов (тёмные пары фон/текст, оттенки свои).
+DIFF = {
+    'del_bg': '#5a1a1a',
+    'del_text': '#ffb3b3',
+    'add_bg': '#1a4a22',
+    'add_text': '#b3ffbf',
+}
+
+# Серии круговых диаграмм (фиксированные, вне тем — как было).
+CHART_SERIES = {
+    'unreviewed': '#555555',
+    'good': '#00CC44',
+    'bad': '#CC3333',
+    'uncertain': '#CCAA00',
+    'duplicate': '#CC7700',
+    'skip': '#888888',
 }
 
 def apply_shadow(widget, color='#00FF41', blur=25, offset=4, alpha=50):

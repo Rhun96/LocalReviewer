@@ -24,15 +24,18 @@ class Sidebar(QWidget):
         self.layout.setSpacing(4)
         self.layout.setContentsMargins(8, 12, 8, 12)
         self.setFixedWidth(200)
+        from styles import COLORS as _CC
         if not FLUENT:
-            self.setStyleSheet("background-color: #0A0F0A; border-right: 1px solid #00441A;")
+            self.setStyleSheet(
+                f"background-color: {_CC['bg_panel']}; "
+                f"border-right: 1px solid {_CC['border_dim']};")
 
         # Логотип
         self.logo = QLabel("LOCAL\nREVIEWER")
         self.logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
         if not FLUENT:
-            self.logo.setStyleSheet("""
-                color: #e8e8e8;
+            self.logo.setStyleSheet(f"""
+                color: {_CC['text_bright']};
                 font-size: 14px;
                 font-weight: 900;
                 letter-spacing: 2px;
@@ -74,27 +77,28 @@ class Sidebar(QWidget):
         # Прогресс проекта
         self.progress_label = QLabel("Прогресс: 0%")
         if not FLUENT:
-            self.progress_label.setStyleSheet("color: #00AA2A; font-size: 11px; padding: 4px;")
+            self.progress_label.setStyleSheet(
+                f"color: {_CC['green_dark']}; font-size: 11px; padding: 4px;")
         self.layout.addWidget(self.progress_label)
 
         self.progress_bar = QProgressBar()
         self.progress_bar.setMaximumHeight(12)
         if not FLUENT:
-            self.progress_bar.setStyleSheet("""
-                QProgressBar {
-                    background-color: #0D150D;
-                    border: 1px solid #00441A;
+            self.progress_bar.setStyleSheet(f"""
+                QProgressBar {{
+                    background-color: {_CC['bg_card']};
+                    border: 1px solid {_CC['border_dim']};
                     border-radius: 6px;
                     text-align: center;
                     color: transparent;
-                }
-                QProgressBar::chunk {
+                }}
+                QProgressBar::chunk {{
                     background: qlineargradient(
                         x1:0, y1:0, x2:1, y2:0,
-                        stop:0 #00AA2A, stop:1 #00FF41
+                        stop:0 {_CC['green_dark']}, stop:1 {_CC['green_bright']}
                     );
                     border-radius: 5px;
-                }
+                }}
             """)
         self.layout.addWidget(self.progress_bar)
 
@@ -125,37 +129,39 @@ class Sidebar(QWidget):
         line = QLabel()
         line.setFixedHeight(1)
         if not FLUENT:
-            line.setStyleSheet("background-color: #00441A;")
+            from styles import COLORS as _CC2
+            line.setStyleSheet(f"background-color: {_CC2['border_dim']};")
         return line
 
     def _nav_style(self, active=False):
+        from styles import COLORS as _CC3
         if active:
-            return """
-                QPushButton {
-                    background-color: #1A3A1A;
-                    color: #e8e8e8;
-                    border: 1px solid #00FF41;
+            return f"""
+                QPushButton {{
+                    background-color: {_CC3['bg_active']};
+                    color: {_CC3['text_bright']};
+                    border: 1px solid {_CC3['green_bright']};
                     border-radius: 6px;
                     padding: 6px 12px;
                     font-size: 12px;
                     font-weight: bold;
                     text-align: left;
-                }
+                }}
             """
-        return """
-            QPushButton {
+        return f"""
+            QPushButton {{
                 background-color: transparent;
-                color: #00DD38;
+                color: {_CC3['green_main']};
                 border: 1px solid transparent;
                 border-radius: 6px;
                 padding: 6px 12px;
                 font-size: 12px;
                 text-align: left;
-            }
-            QPushButton:hover {
-                background-color: #0F2010;
-                border-color: #007722;
-            }
+            }}
+            QPushButton:hover {{
+                background-color: {_CC3['bg_hover']};
+                border-color: {_CC3['green_dim']};
+            }}
         """
 
     def _on_nav(self, key):

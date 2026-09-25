@@ -167,23 +167,24 @@ class ImportWizard(QWidget):
             self.preview_table.setItem(0, 0, _TI("📂 Выбери файл — здесь появится превью"))
         except Exception:
             pass
-        self.preview_table.setStyleSheet("""
-            QTableWidget {
-                background-color: #0D150D;
-                border: 2px solid #00441A;
+        from styles import COLORS as _CC
+        self.preview_table.setStyleSheet(f"""
+            QTableWidget {{
+                background-color: {_CC['bg_card']};
+                border: 2px solid {_CC['border_dim']};
                 border-radius: 8px;
-                color: #e8e8e8;
+                color: {_CC['text_bright']};
                 font-size: 11px;
-                gridline-color: #00441A;
-            }
-            QTableWidget::item { padding: 5px; }
-            QHeaderView::section {
-                background-color: #1A3A1A;
-                color: #e8e8e8;
-                border: 1px solid #007722;
+                gridline-color: {_CC['border_dim']};
+            }}
+            QTableWidget::item {{ padding: 5px; }}
+            QHeaderView::section {{
+                background-color: {_CC['bg_active']};
+                color: {_CC['text_bright']};
+                border: 1px solid {_CC['green_dim']};
                 padding: 6px;
                 font-weight: bold;
-            }
+            }}
         """)
         layout.addWidget(self.preview_table)
         clear_in_fluent(self.preview_table)
@@ -220,7 +221,9 @@ class ImportWizard(QWidget):
             "«Источник» — ссылка на статью БЗ (показывается в кейсе 🔗). "
             "Свои категории попадают в метаданные и становятся столбцами таблицы."
         )
-        hint.setStyleSheet("color: #00AA2A; font-size: 11px;")
+        from styles import COLORS as _CC
+        hint.setStyleSheet(
+            f"color: {_CC['green_dark']}; font-size: 11px;")
         hint.setWordWrap(True)
         layout.addWidget(hint)
 
@@ -242,12 +245,12 @@ class ImportWizard(QWidget):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setMinimumHeight(250)
-        scroll.setStyleSheet("""
-            QScrollArea {
-                border: 2px solid #00441A;
+        scroll.setStyleSheet(f"""
+            QScrollArea {{
+                border: 2px solid {_CC['border_dim']};
                 border-radius: 8px;
-                background-color: #0A0F0A;
-            }
+                background-color: {_CC['bg_panel']};
+            }}
         """)
         self.mapping_container = QWidget()
         self.mapping_layout = QFormLayout()
@@ -264,9 +267,10 @@ class ImportWizard(QWidget):
         btn_back.clicked.connect(self.on_back_step)
         btn_import = FPrimaryButton("🚀 Начать импорт")
         btn_import.setMinimumHeight(40)
-        btn_import.setStyleSheet("""
-            QPushButton { border-color: #00FF41; color: #e8e8e8; font-weight: bold; }
-            QPushButton:hover { background-color: #003315; }
+        btn_import.setStyleSheet(f"""
+            QPushButton {{ border-color: {_CC['green_bright']};
+                color: {_CC['text_bright']}; font-weight: bold; }}
+            QPushButton:hover {{ background-color: {_CC['green_deep']}; }}
         """)
         btn_import.clicked.connect(self.on_import)
         btn_cancel = FPushButton("❌ Отмена")

@@ -119,8 +119,11 @@ class BugReportsScreen(BaseScreen):
         # Цвет критичности (только foreground — делегат библиотеки).
         try:
             from PySide6.QtGui import QColor as _QC
-            _SEV_FG = {"Critical": _QC("#da3633"), "High": _QC("#da3633"),
-                       "Medium": _QC("#bf8700"), "Low": _QC("#888888")}
+            from styles import SEMANTIC as _SEM, COLORS as _CC
+            _SEV_FG = {"Critical": _QC(_SEM["danger"]),
+                       "High": _QC(_SEM["danger"]),
+                       "Medium": _QC(_SEM["warning"]),
+                       "Low": _QC(_CC["gray"])}
         except Exception:
             _SEV_FG = {}
         for i, r in enumerate(rows):
