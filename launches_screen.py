@@ -24,6 +24,17 @@ class LaunchesScreen(BaseScreen):
         title = QLabel("🚀 ЗАПУСКИ")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(title)
+        subtitle = QLabel("Замеры: baseline vs кандидат, вердикт gate "
+                          "(сырые ответы модели — в «Прогонах»)")
+        subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        try:
+            from styles import COLORS as _CC
+            subtitle.setStyleSheet(
+                f"font-size: 11px; color: {_CC['gray']};")
+        except Exception:
+            pass
+        subtitle.setWordWrap(True)
+        layout.addWidget(subtitle)
 
         filt = QHBoxLayout()
         filt.addWidget(QLabel("Gate:"))
