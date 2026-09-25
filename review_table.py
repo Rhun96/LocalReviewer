@@ -414,23 +414,27 @@ class TableMixin:
         return widget
 
     def open_bulk_menu(self):
-        """Меню массовых операций таблицы (тот же набор, что был рядом)."""
+        """Меню массовых операций таблицы (тот же набор, что был рядом).
+
+        Только текст без эмодзи: нативные пункты меню их кривят
+        (скрин; то же правило, что у ⋯ Ещё в кейсе).
+        """
         menu = QMenu(self)
-        a_all = menu.addAction("☑ Выбрать все по фильтру")
+        a_all = menu.addAction("Выбрать все по фильтру")
         a_all.triggered.connect(self.on_bulk_select_all)
-        a_clear = menu.addAction("☐ Снять выбор")
+        a_clear = menu.addAction("Снять выбор")
         a_clear.triggered.connect(self.on_bulk_clear)
-        a_run = menu.addAction("⚡ Массовое действие…")
+        a_run = menu.addAction("Массовое действие…")
         a_run.triggered.connect(self.on_bulk_run)
-        a_undo = menu.addAction("↩ Отменить последнюю")
+        a_undo = menu.addAction("Отменить последнюю")
         a_undo.triggered.connect(self.on_bulk_undo)
         menu.addSeparator()
-        a_hide = menu.addAction("👁 Скрыть выбранные")
+        a_hide = menu.addAction("Скрыть выбранные")
         a_hide.triggered.connect(self.on_bulk_hide)
-        a_unhide = menu.addAction("👁 Показать выбранные")
+        a_unhide = menu.addAction("Показать выбранные")
         a_unhide.triggered.connect(self.on_bulk_unhide)
         menu.addSeparator()
-        a_recheck = menu.addAction("🔄 Пересчитать проверки")
+        a_recheck = menu.addAction("Пересчитать проверки")
         a_recheck.triggered.connect(self.on_recheck_all)
         anchor = getattr(self, "btn_bulk_menu", None) or self
         try:

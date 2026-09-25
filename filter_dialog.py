@@ -218,7 +218,7 @@ class FilterDialog(QDialog):
             self._on_period_preset)
         period_layout.addWidget(self.period_preset)
         self.date_from = _QDE()
-        self.date_from.setDisplayFormat("yyyy-MM-dd")
+        self.date_from.setDisplayFormat("dd-MM-yyyy")
         self.date_from.setCalendarPopup(True)
         self.date_from.setDate(_QD.currentDate().addDays(-7))
         self.date_from.dateChanged.connect(
@@ -226,7 +226,7 @@ class FilterDialog(QDialog):
         period_layout.addWidget(QLabel("с:"))
         period_layout.addWidget(self.date_from)
         self.date_to = _QDE()
-        self.date_to.setDisplayFormat("yyyy-MM-dd")
+        self.date_to.setDisplayFormat("dd-MM-yyyy")
         self.date_to.setCalendarPopup(True)
         self.date_to.setDate(_QD.currentDate())
         self.date_to.dateChanged.connect(
