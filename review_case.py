@@ -137,6 +137,25 @@ class CaseMixin:
         self._nobug_hidden_for = None
         layout.addWidget(self.nobug_widget)
 
+        # Пилот шаг 2: двухколоночный низ (референс Проверка — контент
+        # слева, решение справа). Текст кейса и навигация остаются
+        # во всю ширину сверху; делятся только низовые панели.
+        # Логика та же, меняется лишь родитель виджетов.
+        content_row = QHBoxLayout()
+        content_row.setSpacing(8)
+        content_row.setContentsMargins(0, 0, 0, 0)
+        left_col = QVBoxLayout()
+        left_col.setSpacing(8)
+        left_col.setContentsMargins(0, 0, 0, 0)
+        right_col = QVBoxLayout()
+        right_col.setSpacing(6)
+        right_col.setContentsMargins(0, 0, 0, 0)
+        right_wrap = QWidget()
+        right_wrap.setLayout(right_col)
+        right_wrap.setMaximumWidth(360)
+        content_row.addLayout(left_col, 3)
+        content_row.addWidget(right_wrap, 1)
+
         # === 3. Автопроверки ===
         self.checks_group = QGroupBox("⚠️ Автопроверки")
         self.checks_label = QLabel("✅ Нет предупреждений")
@@ -153,7 +172,7 @@ class CaseMixin:
         self.verdicts_widget.setLayout(self.verdicts_layout)
         checks_layout.addWidget(self.verdicts_widget)
         self.checks_group.setLayout(checks_layout)
-        layout.addWidget(self.checks_group)
+        left_col.addWidget(self.checks_group)
 
         # === 4. Статус (кнопки строятся из профиля — коды произвольные) ===
         status_group = QGroupBox("🎯 Статус")
@@ -165,7 +184,7 @@ class CaseMixin:
         for _c in range(3):
             self.status_layout.setColumnStretch(_c, 1)
         status_group.setLayout(self.status_layout)
-        layout.addWidget(status_group)
+        right_col.addWidget(status_group)
 
         # === 5. Комментарий ===
         comment_group = QGroupBox("💬 Комментарий")
@@ -216,14 +235,16 @@ class CaseMixin:
             f"color: {_CC4['green_dark']}; font-size: 10px;")
         comment_layout.addWidget(self.save_indicator)
         comment_group.setLayout(comment_layout)
-        layout.addWidget(comment_group)
+        left_col.addWidget(comment_group)
 
-        # === 6. Теги (раскрывающиеся) ===
+        # === 6. Действия (пилот шаг 2: вертикальный рельс справа,
+        # как правая панель референса; те же 9 кнопок, те же слоты) ===
         self.btn_toggle_tags = FPushButton("🏷️ Теги (нажмите для раскрытия)")
         self.btn_toggle_tags.setMinimumHeight(30)
         self.btn_toggle_tags.setStyleSheet(accent_button_style())
         self.btn_toggle_tags.clicked.connect(self.toggle_tags)
-        tags_row = QHBoxLayout()
+        tags_row = QVBoxLayout()
+        tags_row.setSpacing(6)
         tags_row.addWidget(self.btn_toggle_tags)
         self.btn_more = FPushButton("⋯ Ещё")
         self.btn_more.setMinimumHeight(30)
@@ -266,13 +287,16 @@ class CaseMixin:
             "Копировать контекст кейса: клик — Markdown, Shift+клик — Plain")
         self.btn_context.clicked.connect(self.copy_case_context)
         tags_row.addWidget(self.btn_context)
-        layout.addLayout(tags_row)
+        tags_row.addStretch()
+        right_col.addLayout(tags_row)
         self.tags_group = QGroupBox("🏷️ Теги")
         self.tags_layout = QGridLayout()
         self.tags_layout.setSpacing(4)
         self.tags_group.setLayout(self.tags_layout)
         self.tags_group.setVisible(False)  # Скрыты по умолчанию
-        layout.addWidget(self.tags_group)
+        left_col.addWidget(self.tags_group)
+
+        layout.addLayout(content_row)
 
         widget.setLayout(layout)
         return widget
