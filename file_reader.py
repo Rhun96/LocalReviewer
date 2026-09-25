@@ -11,6 +11,38 @@ logger = logging.getLogger(__name__)
 
 MAX_PREVIEW_BYTES = 200 * 1024 * 1024
 
+# Ошибки вычисления формул (EN + RU): закэшированное значение ячейки.
+# Показывать их в ревью как есть — мусор («REP!» из жалобы); втягиваем
+# пустыми, а количество отдаём в stats для предпроверки импорта.
+# Совпадение строго целой ячейкой — «#1» и прочие тексты не трогаем.
+EXCEL_ERRORS = frozenset({
+    "#DIV/0!", "#N/A", "#NAME?", "#NULL!", "#NUM!", "#REF!", "#VALUE!",
+    "#GETTING_DATA", "#SPILL!", "#CALC!", "#FIELD!", "#CONNECT!",
+    "#BLOCKED!", "#UNKNOWN!",
+    "#ДЕЛ/0!", "#Н/Д", "#ИМЯ?", "#ПУСТО!", "#ЧИСЛО!", "#ССЫЛКА!",
+    "#ЗНАЧ!", "#ПОЛУЧЕНИЕ_ДАННЫХ",
+})
+
+
+def is_excel_error(value) -> bool:
+    """Ячейка — код ошибки формулы (а не данные)."""
+    try:
+        return isinstance(value, str) and value.strip().upper() in EXCEL_ERRORS
+    except Exception:
+        return False
+
+
+def _clean_cell(value, stats: dict | None):
+    """Ошибка формулы -> '' (+счётчик), остальное как есть."""
+    if is_excel_error(value):
+        if stats is not None:
+            try:
+                stats["formula_errors"] = int(stats.get("formula_errors", 0)) + 1
+            except Exception:
+                pass
+        return ""
+    return value
+
 
 def _check_size(file_path: str) -> None:
     size = Path(file_path).stat().st_size
@@ -78,7 +110,7 @@ class FileReader:
         return doc, tables[0]
 
     @staticmethod
-    def _ods_rows(table, max_rows: int = 0) -> list:
+    def _ods_rows(table, max_rows: int = 0, stats: dict | None = None) -> list:
         """Строки листа как списки строк (с учётом repeated)."""
         from odf.table import TableRow as _Row, TableCell as _Cell
         from odf.text import P as _P
@@ -101,6 +133,7 @@ class FileReader:
                             parts.append(node.data)
                     texts.append("".join(parts).strip())
                 value = "\n".join(t for t in texts if t)
+                value = _clean_cell(value, stats)
                 cells.extend([value] * min(repeat, 256))
             out.append(cells)
         return out
@@ -136,10 +169,11 @@ class FileReader:
             raise ValueError(f"Не удалось прочитать ODS-файл: {e}") from e
 
     @staticmethod
-    def read_ods_data(file_path: str, sheet_name: str, header_row: int = 0) -> list:
+    def read_ods_data(file_path: str, sheet_name: str, header_row: int = 0,
+                       stats: dict | None = None) -> list:
         try:
             _doc, table = FileReader._ods_table(file_path, sheet_name)
-            rows = FileReader._ods_rows(table)
+            rows = FileReader._ods_rows(table, 0, stats)
             if not rows or header_row >= len(rows):
                 return []
             headers = [h if h else f"col_{i}" for i, h in enumerate(rows[header_row])]
@@ -147,7 +181,7 @@ class FileReader:
             for row in rows[header_row + 1:]:
                 if all((c or "").strip() == "" for c in row):
                     continue
-                data.append({h: (row[i] if i < len(row) else "")
+                data.append({h: _clean_cell(row[i] if i < len(row) else "", stats)
                              for i, h in enumerate(headers)})
             return data
         except ValueError:
@@ -167,7 +201,10 @@ class FileReader:
             for i, row in enumerate(ws.iter_rows(values_only=True)):
                 if i >= max_rows:
                     break
-                rows.append([str(cell) if cell is not None else "" for cell in row])
+                # Превью маппинга — тоже без мусора формул (счётчик не нужен:
+                # он в data-пути и показывается в предпроверке импорта).
+                rows.append([("" if cell is None else str(_clean_cell(cell, None)))
+                             for cell in row])
             if not rows:
                 return {"headers": [], "rows": []}
             return {"headers": rows[0], "rows": rows[1:]}
@@ -254,7 +291,8 @@ class FileReader:
             raise ValueError(f"Не удалось прочитать JSONL-файл: {e}") from e
 
     @staticmethod
-    def read_excel_data(file_path: str, sheet_name: str, header_row: int = 0) -> list:
+    def read_excel_data(file_path: str, sheet_name: str, header_row: int = 0,
+                        stats: dict | None = None) -> list:
         _check_size(file_path)
         wb = openpyxl.load_workbook(file_path, read_only=True, data_only=True)
         try:
@@ -282,6 +320,10 @@ class FileReader:
                 for j, header in enumerate(headers):
                     v = row[j] if j < len(row) else None
                     if v is None:
+                        row_dict[header] = ""
+                        continue
+                    v = _clean_cell(v, stats)
+                    if v == "":
                         row_dict[header] = ""
                         continue
                     try:

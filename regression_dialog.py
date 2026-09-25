@@ -8,7 +8,6 @@ from ui_compat import (FComboBox, FLineEdit, FPrimaryButton, FPushButton,
                        FSpinBox, clear_in_fluent, confirm, notify,
                        polish_table)
 import regression_service as rg
-import model_run_service as mruns
 
 
 class RegressionDialog(QDialog):
@@ -30,7 +29,7 @@ class RegressionDialog(QDialog):
         self.base_combo = FComboBox()
         form.addRow("Baseline (эталон):", self.base_combo)
         self.cand_combo = FComboBox()
-        form.addRow("Кандидат (прогон):", self.cand_combo)
+        form.addRow("Кандидат (прогон или версия):", self.cand_combo)
         gate_row = QHBoxLayout()
         self.gate_crit = FSpinBox()
         self.gate_crit.setRange(0, 100000)
@@ -171,18 +170,19 @@ class RegressionDialog(QDialog):
 
     def _reload_lists(self):
         try:
-            bases = rg.list_baseline_candidates(self.project_path)
-            runs = mruns.list_runs(self.project_path)
+            pool = rg.list_baseline_candidates(self.project_path)
         except Exception as e:
             notify(self, "error", "Ошибка", str(e))
             return
         self.base_combo.clear()
-        for b in bases:
+        for b in pool:
             mark = "" if b.get("frozen", True) else " ⚠ не заморожен"
             self.base_combo.addItem(b["label"] + mark, (b["type"], b["id"]))
+        # Кандидат — тот же пул: прогон или версия датасета (v20).
         self.cand_combo.clear()
-        for r in runs:
-            self.cand_combo.addItem(f"{r['name']} ({r['model_name']})", r["run_id"])
+        for b in pool:
+            mark = "" if b.get("frozen", True) else " ⚠ не заморожен"
+            self.cand_combo.addItem(b["label"] + mark, (b["type"], b["id"]))
         self._reload_past()
 
     def _reload_past(self):
@@ -208,7 +208,7 @@ class RegressionDialog(QDialog):
             return
         try:
             rid = rg.run_regression(
-                self.project_path, name, base[0], base[1], cand,
+                self.project_path, name, base[0], base[1], cand[0], cand[1],
                 gate_max_critical=self.gate_crit.value(),
                 gate_max_rate=self.gate_rate.value() / 100)
         except ValueError as e:
@@ -265,7 +265,8 @@ class RegressionDialog(QDialog):
                             "#2ea043" if n_imp else None)
         self._set_gate_card("same", str(reg["unchanged"] or 0), None)
         self.summary.setText(
-            f"{reg['name']}: rate {reg['regression_rate']:.1%}."
+            f"{reg['name']}: {rg.candidate_label(self.project_path, reg)}, "
+            f"rate {reg['regression_rate']:.1%}."
             f" ⚖️ Баланс: {balance} (по числу кейсов; решает gate).")
 
     def _set_gate_card(self, key: str, value: str, color: str | None):
@@ -455,10 +456,13 @@ class RegressionDialog(QDialog):
         self._reload_assertions()
 
     def _assert_run(self):
-        run_id = self.cand_combo.currentData()
-        if not run_id:
-            notify(self, "warning", "Внимание", "Выбери кандидата")
+        cand = self.cand_combo.currentData() or (None, None)
+        if cand[0] != "run" or not cand[1]:
+            notify(self, "warning", "Внимание",
+                   "Проверки — только для кандидата-прогона "
+                   "(у версий нет текстов ответов)")
             return
+        run_id = cand[1]
         import regression_assertion_service as ra
         asserts = [a for a in ra.list_assertions(self.project_path)
                    if a.get("enabled")]

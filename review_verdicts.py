@@ -657,6 +657,10 @@ class VerdictsMixin:
                 parts.append(f"крит.: {','.join(self.filters['error_severities'])}")
             if self.filters.get('search_text'):
                 parts.append(f"поиск: '{self.filters['search_text']}'")
+            _pf = (self.filters.get('reviewed_from') or '').strip()
+            _pt = (self.filters.get('reviewed_to') or '').strip()
+            if _pf or _pt:
+                parts.append(f"период: {_pf or '…'}–{_pt or '…'}")
             base = ("⚠️ Фильтры: " + " | ".join(parts)) if parts else "Фильтры не применены"
         # Всегда показываем размер выборки — видно, что фильтр сработал
         self._filter_base = f"{base}  |  Найдено: {len(self.case_ids)}"

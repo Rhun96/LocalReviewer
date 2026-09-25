@@ -86,6 +86,41 @@ def test_delete_version_and_file_lookup():
         delete_version(tmp, v2)
 
 
+def test_delete_dataset_cleans_versions_and_keeps_marks():
+    import tempfile
+    from database import init_database, db
+    from dataset_service import (create_dataset, create_version,
+                                 delete_dataset, list_datasets,
+                                 set_dataset_locked)
+    from importer import import_file
+    import pytest as _pytest
+    tmp = tempfile.mkdtemp()
+    init_database(tmp)
+    import_file(tmp, "f.xlsx", "excel", "S", 0, {"q": "primary_text"},
+                [{"q": "раз"}])
+    ds = create_dataset(tmp, "D")
+    v1 = create_version(tmp, ds)
+    v2 = create_version(tmp, ds)
+    assert len(list_datasets(tmp)) == 1
+    done = delete_dataset(tmp, ds)
+    assert done["versions"] == 2
+    assert list_datasets(tmp) == []
+    with db(tmp) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM dataset_versions").fetchone()[0] == 0
+        assert conn.execute("SELECT COUNT(*) FROM dataset_cases").fetchone()[0] == 0
+        assert conn.execute("SELECT COUNT(*) FROM cases").fetchone()[0] == 1
+    # запертый — только через отпирание
+    ds2 = create_dataset(tmp, "L")
+    create_version(tmp, ds2)
+    set_dataset_locked(tmp, ds2, True)
+    with _pytest.raises(ValueError):
+        delete_dataset(tmp, ds2)
+    set_dataset_locked(tmp, ds2, False)
+    delete_dataset(tmp, ds2)
+    assert list_datasets(tmp) == []
+    _ = v1, v2
+
+
 def test_tag_create_delete_rules():
     from tag_service import create_tag, delete_tag, list_tags, usage_count
     import pytest as _pytest

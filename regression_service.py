@@ -166,40 +166,45 @@ def classify(project_path: str, baseline_status: str | None,
 
 
 def run_regression(project_path: str, name: str, baseline_type: str,
-                   baseline_id: int, candidate_run_id: int,
+                   baseline_id: int, candidate_type: str, candidate_id: int,
                    gate_max_critical: int = 0,
                    gate_max_rate: float = 0.02) -> int:
-    """Считает и сохраняет запуск регрессии. Возвращает regression_id."""
+    """Считает и сохраняет запуск регрессии. Возвращает regression_id.
+
+    Кандидат — прогон или версия датасета (v20). Матрица и gate одинаковые;
+    у версий нет текстов ответов (только статусы) — в экспорте пусто.
+    """
     name = (name or "").strip()
     if not name or len(name) > 128:
         raise ValueError("Название 1–128 символов")
+    if candidate_type not in ("dataset_version", "run"):
+        raise ValueError(f"Плохой кандидат: {candidate_type!r}")
     if gate_max_critical < 0 or not 0 <= gate_max_rate <= 1:
         raise ValueError("Плохие пороги gate")
     base = get_baseline_statuses(project_path, baseline_type, baseline_id)
-    with db(project_path) as conn:
-        cur = conn.cursor()
-        if not cur.execute("SELECT 1 FROM model_runs WHERE run_id=?",
-                           (candidate_run_id,)).fetchone():
-            raise ValueError("Кандидат-прогон не найден")
-        cand_answers = {r["stable_key"]: r["answer_text"] for r in cur.execute(
-            "SELECT stable_key, answer_text FROM run_answers WHERE run_id=?",
-            (candidate_run_id,)).fetchall()}
-        cand_reviews = {}
-        for r in cur.execute("SELECT stable_key, status, case_id FROM output_reviews "
-                             "WHERE run_id=?", (candidate_run_id,)).fetchall():
-            cand_reviews[r["stable_key"]] = {"status": r["status"],
-                                             "case_id": r["case_id"]}
+    cand = get_baseline_statuses(project_path, candidate_type, candidate_id)
+    if candidate_type == "run":
+        with db(project_path) as conn:
+            cur = conn.cursor()
+            if not cur.execute("SELECT 1 FROM model_runs WHERE run_id=?",
+                               (candidate_id,)).fetchone():
+                raise ValueError("Кандидат-прогон не найден")
+            cand_answers = {r["stable_key"]: r["answer_text"] for r in cur.execute(
+                "SELECT stable_key, answer_text FROM run_answers WHERE run_id=?",
+                (candidate_id,)).fetchall()}
+    else:
+        cand_answers = {k: "" for k in cand}
     rows = []
     counts = {"total": 0, "regressions": 0, "improvements": 0, "unchanged": 0}
     both = 0
     for key in sorted(set(base) | set(cand_answers)):
         in_base, in_cand = key in base, key in cand_answers
         b_status = base[key]["status"] if in_base else None
-        c_status = cand_reviews.get(key, {}).get("status")
+        c_status = cand.get(key, {}).get("status")
         result, severity = classify(project_path, b_status, c_status, in_cand)
         if in_base and in_cand:
             both += 1
-        case_id = (cand_reviews.get(key, {}).get("case_id")
+        case_id = (cand.get(key, {}).get("case_id")
                    or (base[key]["case_id"] if in_base else None))
         rows.append((key, case_id, b_status, c_status, result, severity))
         counts["total"] += 1
@@ -217,11 +222,14 @@ def run_regression(project_path: str, name: str, baseline_type: str,
         cur = conn.cursor()
         cur.execute("""
             INSERT INTO regression_runs
-                (name, baseline_type, baseline_id, candidate_run_id,
+                (name, baseline_type, baseline_id, candidate_type,
+                 candidate_run_id, candidate_version_id,
                  gate_max_critical, gate_max_rate, gate_result,
                  total, regressions, improvements, unchanged, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (name, baseline_type, baseline_id, candidate_run_id,
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (name, baseline_type, baseline_id, candidate_type,
+              candidate_id if candidate_type == "run" else None,
+              candidate_id if candidate_type == "dataset_version" else None,
               gate_max_critical, gate_max_rate,
               "PASS" if gate_pass else "FAIL",
               counts["total"], counts["regressions"], counts["improvements"],
@@ -244,13 +252,47 @@ def list_regressions(project_path: str) -> list:
     with db(project_path) as conn:
         rows = conn.cursor().execute("""
             SELECT regression_id, name, baseline_type, baseline_id,
-                   candidate_run_id, gate_max_critical, gate_max_rate,
+                   candidate_type, candidate_run_id, candidate_version_id,
+                   gate_max_critical, gate_max_rate,
                    gate_result, total, regressions, improvements, unchanged,
                    created_at
             FROM regression_runs
             ORDER BY regression_id DESC
         """).fetchall()
-        return [dict(r) for r in rows]
+        out = []
+        for r in rows:
+            d = dict(r)
+            # Совместимость: старые запуски (до v20) без candidate_type.
+            if not d.get("candidate_type"):
+                d["candidate_type"] = "run"
+            out.append(d)
+        return out
+
+
+def candidate_label(project_path: str, reg: dict) -> str:
+    """Подпись кандидата: прогон или версия датасета."""
+    ctype = (reg or {}).get("candidate_type") or "run"
+    try:
+        if ctype == "dataset_version":
+            vid = (reg or {}).get("candidate_version_id")
+            with db(project_path) as conn:
+                row = conn.execute("""
+                    SELECT d.name, v.version_number, v.status
+                    FROM dataset_versions v
+                    JOIN datasets d ON d.dataset_id = v.dataset_id
+                    WHERE v.version_id = ?
+                """, (vid,)).fetchone()
+            if row:
+                return (f"Датасет «{row['name']}» v{row['version_number']} "
+                        f"[{row['status']}]")
+            return f"Версия #{vid} (удалена)"
+        rid = (reg or {}).get("candidate_run_id")
+        with db(project_path) as conn:
+            row = conn.execute("SELECT name FROM model_runs WHERE run_id=?",
+                               (rid,)).fetchone()
+        return f"Прогон «{row['name']}»" if row else f"Прогон #{rid} (удалён)"
+    except Exception:
+        return "—"
 
 
 def get_regression(project_path: str, regression_id: int) -> dict | None:
@@ -323,9 +365,10 @@ def export_regressions_xlsx(project_path: str, regression_id: int,
     cand_answers = {}
     with db(project_path) as conn:
         cur = conn.cursor()
-        for r in cur.execute("SELECT stable_key, answer_text FROM run_answers "
-                             "WHERE run_id=?", (reg["candidate_run_id"],)).fetchall():
-            cand_answers[r["stable_key"]] = r["answer_text"]
+        if reg.get("candidate_type", "run") == "run" and reg.get("candidate_run_id"):
+            for r in cur.execute("SELECT stable_key, answer_text FROM run_answers "
+                                 "WHERE run_id=?", (reg["candidate_run_id"],)).fetchall():
+                cand_answers[r["stable_key"]] = r["answer_text"]
         base_answers = {}
         if reg["baseline_type"] == "run":
             for r in cur.execute("SELECT stable_key, answer_text FROM run_answers "
@@ -366,9 +409,11 @@ def bug_prefill(project_path: str, regression_id: int, stable_key: str) -> dict:
         raise ValueError("Строка не найдена")
     with db(project_path) as conn:
         cur = conn.cursor()
-        cand = cur.execute("SELECT answer_text FROM run_answers "
-                           "WHERE run_id=? AND stable_key=?",
-                           (reg["candidate_run_id"], stable_key)).fetchone()
+        cand = None
+        if reg.get("candidate_type", "run") == "run" and reg.get("candidate_run_id"):
+            cand = cur.execute("SELECT answer_text FROM run_answers "
+                               "WHERE run_id=? AND stable_key=?",
+                               (reg["candidate_run_id"], stable_key)).fetchone()
         cand_ans = cand["answer_text"] if cand else ""
         base_ans = ""
         if reg["baseline_type"] == "run":
@@ -389,9 +434,11 @@ def bug_prefill(project_path: str, regression_id: int, stable_key: str) -> dict:
                                "WHERE c.case_id=?", (row["case_id"],)).fetchone()
         else:
             case = None
-        cand_meta = cur.execute("SELECT model_name, model_version, prompt_version,"
-                                " system_prompt_version FROM model_runs WHERE run_id=?",
-                                (reg["candidate_run_id"],)).fetchone()
+        cand_meta = None
+        if reg.get("candidate_type", "run") == "run" and reg.get("candidate_run_id"):
+            cand_meta = cur.execute("SELECT model_name, model_version, prompt_version,"
+                                    " system_prompt_version FROM model_runs WHERE run_id=?",
+                                    (reg["candidate_run_id"],)).fetchone()
     import json as _json
     case = dict(case) if case else {}
     try:

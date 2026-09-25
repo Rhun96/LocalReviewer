@@ -87,7 +87,7 @@ def test_leaderboard_and_management_report():
     rg.set_output_review(p, b, "src:k2", "good", None)
     rg.set_output_review(p, b, "src:k3", "good", None)
     m.set_preference(p, a, b, "src:k1", "a_better", 1, 2, None)
-    rg.run_regression(p, "r1", "run", a, b)
+    rg.run_regression(p, "r1", "run", a, "run", b)
     board = {r["run_id"]: r for r in get_model_leaderboard(p)}
     assert (board[a]["answers"], board[a]["reviewed"]) == (3, 3)
     assert (board[a]["good"], board[a]["bad"]) == (2, 1)

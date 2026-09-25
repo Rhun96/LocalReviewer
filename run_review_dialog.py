@@ -40,6 +40,10 @@ class RunReviewDialog(QDialog):
         self.prompt_label = QLabel("")
         self.prompt_label.setWordWrap(True)
         right.addWidget(self.prompt_label)
+        self.verdict_label = QLabel("")
+        self.verdict_label.setWordWrap(True)
+        self.verdict_label.setStyleSheet("font-size: 13px; font-weight: bold;")
+        right.addWidget(self.verdict_label)
         self.ref_label = QLabel("")
         self.ref_label.setWordWrap(True)
         self.ref_label.setStyleSheet("color: #00AA2A; font-size: 12px;")
@@ -164,6 +168,21 @@ class RunReviewDialog(QDialog):
                 btn.setChecked(code == cur_st)
             except Exception:
                 pass
+        try:
+            from run_marks_io_service import split_comment as _split
+            _sev, _body = _split(row.get("review_comment") or "")
+            _names = {s.get("code"): s.get("name", s.get("code"))
+                      for s in self._statuses()}
+            _st_name = _names.get(cur_st, cur_st)
+            _emo = self.EMOJI.get(cur_st, "")
+            if cur_st == "unreviewed":
+                self.verdict_label.setText("Оценка: —")
+            else:
+                self.verdict_label.setText(
+                    f"Оценка: {_emo} {_st_name}".strip()
+                    + (f" · Критичность: {_sev}" if _sev else ""))
+        except Exception:
+            pass
 
     def _set_status(self, status: str):
         row = self._current()

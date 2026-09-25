@@ -14,6 +14,43 @@ import model_run_service as runs
 from model_run_service import VERDICT_NAMES
 from diff_service import word_diff_html as _diff_html  # noqa: F401 (совместимость)
 
+_SEV_RU = {"high": "высокая", "medium": "средняя", "low": "низкая",
+           "critical": "критическая", "высокая": "высокая",
+           "средняя": "средняя", "низкая": "низкая",
+           "критическая": "критическая"}
+_SEV_HIGH = {"high", "critical", "высокая", "критическая"}
+_SIDE_EMOJI = {"good": "✅", "bad": "❌", "uncertain": "❓",
+               "duplicate": "🔄", "skip": "⏭️", "unreviewed": "⬜"}
+
+
+def _side_severity(comment: str, case_severity: str) -> str:
+    """Тяжесть стороны: префикс комментария, иначе тяжесть кейса."""
+    try:
+        from run_marks_io_service import split_comment as _split
+        sev, _body = _split(comment or "")
+        if sev:
+            return sev
+    except Exception:
+        pass
+    raw = (case_severity or "").strip()
+    if not raw:
+        return ""
+    return _SEV_RU.get(raw, _SEV_RU.get(raw.lower(), raw))
+
+
+def _side_is_bad(project_path: str, status: str) -> bool:
+    try:
+        from review_profile_service import code_to_base
+        base = code_to_base(project_path).get(status, status)
+    except Exception:
+        base = status
+    return base == "bad"
+
+
+def _side_is_high(severity: str) -> bool:
+    s = (severity or "").strip().lower()
+    return s in _SEV_HIGH or _SEV_RU.get(s, "") in _SEV_HIGH
+
 
 class CompareDialog(QDialog):
     def __init__(self, project_path: str, run_a: int, run_b: int, parent=None):
@@ -132,13 +169,7 @@ class CompareDialog(QDialog):
         self._rows = data["rows"]
         c = data["counts"]
         self.title.setText(f"⚖️ {ra['name']}  vs  {rb['name']}")
-        total = len(self._rows)
-        judged = total - c["no_verdict"]
-        self.stats.setText(
-            f"Кейсов: {total} (оба: {c['both']}, только A: {c['only_a']}, "
-            f"только B: {c['only_b']}) | Оценено: {judged} | "
-            f"A лучше: {c['a_better']}, B лучше: {c['b_better']}, "
-            f"одинаково: {c['tie']}")
+        self.stats.setText(self._stats_text(c))
         self.keys_list.clear()
         for row in self._rows:
             mark = {"a_better": "◀", "b_better": "▶", "tie": "＝"}.get(
@@ -154,6 +185,41 @@ class CompareDialog(QDialog):
             self._show_row()
         else:
             self.prompt_label.setText("Нет общих и раздельных ключей.")
+
+    def _side_summary(self) -> str:
+        """Итоги по тяжести сторон: плохих и тяжёлых у A и B."""
+        try:
+            bad_a = bad_b = high_a = high_b = 0
+            for r in self._rows:
+                sa = _side_severity(r.get("comment_a") or "",
+                                    r.get("case_severity") or "")
+                sb = _side_severity(r.get("comment_b") or "",
+                                    r.get("case_severity") or "")
+                if _side_is_bad(self.project_path,
+                                r.get("status_a") or "unreviewed"):
+                    bad_a += 1
+                    if _side_is_high(sa):
+                        high_a += 1
+                if _side_is_bad(self.project_path,
+                                r.get("status_b") or "unreviewed"):
+                    bad_b += 1
+                    if _side_is_high(sb):
+                        high_b += 1
+            if not (bad_a or bad_b):
+                return ""
+            return (f" | Плохих A: {bad_a} (тяжёлых: {high_a}), "
+                    f"B: {bad_b} (тяжёлых: {high_b})")
+        except Exception:
+            return ""
+
+    def _stats_text(self, c: dict) -> str:
+        total = len(self._rows)
+        judged = total - c["no_verdict"]
+        return (
+            f"Кейсов: {total} (оба: {c['both']}, только A: {c['only_a']}, "
+            f"только B: {c['only_b']}) | Оценено: {judged} | "
+            f"A лучше: {c['a_better']}, B лучше: {c['b_better']}, "
+            f"одинаково: {c['tie']}{self._side_summary()}")
 
     def _current(self) -> dict | None:
         if 0 <= self._idx < len(self._rows):
@@ -188,8 +254,25 @@ class CompareDialog(QDialog):
             f"\n🆔 {row.get('source_id') or row['stable_key']}"
             + (f"\n🏷️ {prod}" if prod else ""))
         html_a, html_b = _diff_html(row["answer_a"], row["answer_b"])
-        self.pane_a.setHtml(f"<b>[{name_a}]</b><br><br>{html_a}")
-        self.pane_b.setHtml(f"<b>[{name_b}]</b><br><br>{html_b}")
+        try:
+            from review_profile_service import status_display_name as _sdn
+            _na = _sdn(self.project_path, row.get("status_a") or "unreviewed")
+            _nb = _sdn(self.project_path, row.get("status_b") or "unreviewed")
+        except Exception:
+            _na = row.get("status_a") or "unreviewed"
+            _nb = row.get("status_b") or "unreviewed"
+        _sa = _side_severity(row.get("comment_a") or "",
+                             row.get("case_severity") or "")
+        _sb = _side_severity(row.get("comment_b") or "",
+                             row.get("case_severity") or "")
+        _la = f"{_SIDE_EMOJI.get(row.get('status_a') or 'unreviewed', '')} {_na}"
+        if _sa:
+            _la += f" · Критичность: {_sa}"
+        _lb = f"{_SIDE_EMOJI.get(row.get('status_b') or 'unreviewed', '')} {_nb}"
+        if _sb:
+            _lb += f" · Критичность: {_sb}"
+        self.pane_a.setHtml(f"<b>[{name_a}]</b> {_la}<br><br>{html_a}")
+        self.pane_b.setHtml(f"<b>[{name_b}]</b> {_lb}<br><br>{html_b}")
         st = row.get("case_status") or "unreviewed"
         try:
             from review_profile_service import status_display_name
@@ -266,12 +349,7 @@ class CompareDialog(QDialog):
         try:
             data = runs.compare_runs(self.project_path, self.run_a, self.run_b)
             c = data["counts"]
-            total = len(self._rows)
-            self.stats.setText(
-                f"Кейсов: {total} (оба: {c['both']}, только A: {c['only_a']}, "
-                f"только B: {c['only_b']}) | Оценено: {total - c['no_verdict']} | "
-                f"A лучше: {c['a_better']}, B лучше: {c['b_better']}, "
-                f"одинаково: {c['tie']}")
+            self.stats.setText(self._stats_text(c))
         except Exception:
             pass
 

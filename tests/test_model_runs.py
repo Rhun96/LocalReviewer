@@ -156,3 +156,35 @@ def test_import_cancel_rolls_back():
         m.import_run_rows(p, a, [{"source_id": "k1", "answer": "x"}],
                           cancel_event=ev)
     assert m.list_answers(p, a) == []
+
+
+def test_compare_side_marks_and_severity():
+    """Сравнение отдаёт статусы/комменты сторон и тяжесть кейса."""
+    import regression_service as rg
+    p = _proj()
+    a = m.create_run(p, "A", "mx")
+    b = m.create_run(p, "B", "mx")
+    m.import_run_rows(p, a, [{"source_id": "k1", "answer": "a1"}])
+    m.import_run_rows(p, b, [{"source_id": "k1", "answer": "b1"}])
+    rg.set_output_review(p, a, "src:k1", "bad", "Критичность: высокая\nплохо")
+    rg.set_output_review(p, b, "src:k1", "good", "норм")
+    data = m.compare_runs(p, a, b)
+    row = next(r for r in data["rows"] if r["stable_key"] == "src:k1")
+    assert row["status_a"] == "bad" and row["status_b"] == "good"
+    assert "высокая" in (row["comment_a"] or "")
+    from compare_dialog import _side_severity, _side_is_high, _side_is_bad
+    assert _side_severity(row["comment_a"], "") == "высокая"
+    assert _side_severity("", "high") == "высокая"
+    assert _side_is_high("высокая") and _side_is_high("high")
+    assert not _side_is_high("низкая")
+    assert _side_is_bad(p, "bad") and not _side_is_bad(p, "good")
+    from PySide6.QtWidgets import QApplication
+    QApplication.instance() or QApplication([])
+    from compare_dialog import CompareDialog
+    dlg = CompareDialog(p, a, b, None)
+    try:
+        dlg.show()
+        assert "Критичность: высокая" in dlg.pane_a.toPlainText()
+        assert "Плохих A: 1" in dlg.stats.text(), dlg.stats.text()
+    finally:
+        dlg.close()

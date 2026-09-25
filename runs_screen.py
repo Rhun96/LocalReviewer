@@ -19,7 +19,44 @@ RUN_ROLES = [
     ("source_id", "Идентификатор"),
     ("prompt", "Промпт / запрос"),
     ("product", "Продукт"),
+    ("mark_status", "Оценка: статус"),
+    ("mark_comment", "Оценка: комментарий"),
+    ("mark_severity", "Оценка: тяжесть"),
 ]
+
+RUNIMPORT_MAP_KEY = "runimport_last_mapping"
+
+
+def load_runimport_mapping(project_path: str) -> dict:
+    """Последний маппинг импорта ответов (без миграции — свободный ключ)."""
+    try:
+        import json as _json
+        from database import db as _db
+        with _db(project_path) as conn:
+            row = conn.execute("SELECT value FROM settings WHERE key=?",
+                               (RUNIMPORT_MAP_KEY,)).fetchone()
+            if row and row["value"]:
+                m = _json.loads(row["value"])
+                if isinstance(m, dict):
+                    return {str(k): str(v or "") for k, v in m.items()}
+    except Exception:
+        pass
+    return {}
+
+
+def save_runimport_mapping(project_path: str, mapping: dict) -> None:
+    try:
+        import json as _json
+        from database import db as _db, utcnow as _now
+        with _db(project_path) as conn:
+            conn.execute(
+                "INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET value=excluded.value, "
+                "updated_at=excluded.updated_at",
+                (RUNIMPORT_MAP_KEY, _json.dumps(mapping, ensure_ascii=False),
+                 _now()))
+    except Exception:
+        pass
 
 
 def _guess_roles(headers: list) -> dict:
@@ -64,6 +101,30 @@ class RunMetaDialog(QDialog):
         self.accept()
 
 
+def apply_marks_after_import(project_path: str, run_id: int,
+                             raw_rows: list, id_header: str,
+                             marks_cols: dict) -> str:
+    """Оценки заодно с импортом ответов (Merge, только пустое).
+
+    Возвращает строку для уведомления. Значения — из сохранённого маппинга
+    «Оценок из Excel», иначе встроенные. Чужие правки не трогаем.
+    """
+    import run_marks_io_service as _mio
+    saved = _mio.load_mapping(project_path)
+    mapping = {"id": id_header,
+               "status": marks_cols.get("mark_status", ""),
+               "comment": marks_cols.get("mark_comment", ""),
+               "severity": marks_cols.get("mark_severity", ""),
+               "status_values": saved.get("status_values", {}),
+               "severity_values": saved.get("severity_values", {})}
+    if not mapping["status"]:
+        return "Оценки пропущены: нет колонки статуса."
+    rep = _mio.preview_marks(project_path, run_id, raw_rows, mapping)
+    done = _mio.apply_marks(project_path, run_id, rep, "merge")
+    return (f"Оценки заодно: применено {done['applied']}, не найдено "
+            f"{done['not_found']}, ошибки {done['errors']}.")
+
+
 def collect_run_metadata(row: dict, custom_map: dict) -> dict:
     """Метаданные ответа из custom-колонок: {колонка: категория} -> {категория: текст}.
 
@@ -92,6 +153,7 @@ class RunImportDialog(QDialog):
         self.preview = None
         self.combos = {}
         self.result_rows = None
+        self._persisted_roles = load_runimport_mapping(project_path)
         self._init_ui()
 
     def _init_ui(self):
@@ -113,6 +175,8 @@ class RunImportDialog(QDialog):
                       "одной колонки (можно без неё — тогда размечаются сами "
                       "вопросы), «Идентификатор» и «Промпт» — для "
                       "сопоставления с кейсами, «Продукт» — подпись в сравнении. "
+                      "Роли «Оценка: …» — сразу положить и разметку ответов "
+                      "(Merge, только пустое; значения — как в «Оценках из Excel»). "
                       "Кнопка «+ Своя категория…» создаёт именованную категорию — "
                       "значение уйдёт в метаданные ответа под этим именем. "
                       "Роли подставляются сами "
@@ -218,7 +282,8 @@ class RunImportDialog(QDialog):
         headers = (self.preview or {}).get("headers", [])
         rows = (self.preview or {}).get("rows", []) or []
         roles = list(RUN_ROLES) + custom_roles(self.project_path)
-        restored = reapply_mapping(headers, roles, saved)
+        restored = reapply_mapping(
+            headers, roles, {**(self._persisted_roles or {}), **saved})
         guessed = _guess_roles(headers)
         for idx, header in enumerate(headers):
             samples = []
@@ -358,7 +423,26 @@ class RunImportDialog(QDialog):
         if not rows:
             notify(self, "warning", "Внимание", "Нет строк для импорта")
             return
+        try:
+            save_runimport_mapping(
+                self.project_path,
+                {h: (r or "ignore") for h, r in mapping.items()})
+        except Exception:
+            pass
         self.result_rows = rows
+        # Оценки заодно (если назначены роли «Оценка: …»): сырые строки
+        # и заголовки — для mio.preview/apply после импорта ответов.
+        marks_cols = {}
+        for h, r in mapping.items():
+            if r in ("mark_status", "mark_comment", "mark_severity"):
+                marks_cols[r] = h
+        if marks_cols and cols.get("source_id"):
+            self.result_marks = {"cols": marks_cols,
+                                 "id_header": cols["source_id"],
+                                 "raw": [r for r in data
+                                         if isinstance(r, dict)]}
+        else:
+            self.result_marks = None
         self.accept()
 
 
@@ -398,11 +482,16 @@ class ModelRunsScreen(BaseScreen):
         btn_import.clicked.connect(self._import_answers)
         btn_review = FPushButton("📝 Разметить ответы")
         btn_review.clicked.connect(self._review_answers)
+        btn_marks = FPushButton("📥 Оценки из Excel")
+        btn_marks.setToolTip("Импорт разметки ответов из таблицы: маппинг "
+                             "колонок задаётся один раз и запоминается")
+        btn_marks.clicked.connect(self._import_marks)
         btn_del = FPushButton("🗑 Удалить")
         btn_del.clicked.connect(self._delete_run)
         row.addWidget(btn_new)
         row.addWidget(btn_import)
         row.addWidget(btn_review)
+        row.addWidget(btn_marks)
         row.addWidget(btn_del)
         layout.addLayout(row)
         self.detail = QLabel("Выбери прогон")
@@ -473,9 +562,18 @@ class ModelRunsScreen(BaseScreen):
             self.detail.setText(f"Ошибка: {e}")
             return
         matched = sum(1 for a in answers if a["case_id"])
+        try:
+            import regression_service as _rg
+            _st = _rg.output_review_stats(self.project_path, self._run_id)
+            marked = f", размечено: {_st['reviewed']}/{_st['total']}"
+        except Exception:
+            marked = ""
         self.detail.setText(
             f"Ответов: {len(answers)}, сопоставлено с кейсами: {matched}, "
-            f"новых: {len(answers) - matched}.")
+            f"новых: {len(answers) - matched}{marked}."
+            + (" ⚠️ Ответы не привязаны к кейсам: импортируй вопросы "
+               "с этими ID — привязка встанет сама." if answers and not matched
+               else ""))
 
     def _new_run(self):
         dlg = RunMetaDialog(self)
@@ -549,10 +647,24 @@ class ModelRunsScreen(BaseScreen):
             msg = (f"Всего: {res['total']}, сопоставлено: {res['matched']}, "
                    f"новых: {res['new']}")
             if res["dups"]:
-                msg += f"\n⚠ Дублей ключа в файле: {res['dups']} (взят первый)."
+                msg += (f"\n⚠ Дублей ключа в файле: {res['dups']} "
+                        "(взят первый).")
             if res["no_key"]:
                 msg += (f"\n⚠ Без ID и промпта: {res['no_key']} — сопоставить "
                         "нельзя (ТЗ §53).")
+            msg += ("\nДальше: оценки — кнопка «Оценки из Excel» "
+                    "(этот же файл подхватится сам).")
+            # Оценки заодно: роли «Оценка: …» назначены — кладём Merge
+            # (только пустое, чужие правки не трогаем). Значения — из
+            # сохранённого маппинга «Оценок», иначе встроенные.
+            try:
+                _mk = getattr(dlg, "result_marks", None)
+                if _mk:
+                    msg += "\n" + apply_marks_after_import(
+                        self.project_path, run_id, _mk["raw"],
+                        _mk["id_header"], _mk["cols"])
+            except Exception as _e:
+                msg += f"\n⚠ Оценки не легли: {_e}"
             notify(self, "success", "Импорт ответов", msg)
             try:
                 runs_list = runs.get_run(self.project_path, run_id)
@@ -638,6 +750,22 @@ class ModelRunsScreen(BaseScreen):
             return
         from run_review_dialog import RunReviewDialog
         RunReviewDialog(self.project_path, self._run_id, self).exec()
+        self._on_run_selected()
+
+    def _import_marks(self):
+        if self._run_id is None:
+            notify(self, "warning", "Внимание", "Сначала выбери прогон")
+            return
+        try:
+            import model_run_service as _m
+            run = _m.get_run(self.project_path, self._run_id)
+            name = (run.get("name") or "") if run else ""
+            src = (run.get("source_file") or "") if run else ""
+        except Exception:
+            name, src = "", ""
+        from run_marks_import_dialog import ImportRunMarksDialog
+        ImportRunMarksDialog(self.project_path, self._run_id, name,
+                             self, initial_file=src).exec()
         self._on_run_selected()
 
     def _regression(self):

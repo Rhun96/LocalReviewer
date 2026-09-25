@@ -516,14 +516,15 @@ class ImportWizard(QWidget):
 
         try:
             errors = []
+            read_stats: dict = {}
             if self.file_type == 'excel':
                 data = self.file_reader.read_excel_data(
                     self.file_path, self.sheet_name,
-                    header_row=self.header_spin.value())
+                    header_row=self.header_spin.value(), stats=read_stats)
             elif self.file_type == 'ods':
                 data = self.file_reader.read_ods_data(
                     self.file_path, self.sheet_name,
-                    header_row=self.header_spin.value())
+                    header_row=self.header_spin.value(), stats=read_stats)
             elif self.file_type == 'csv':
                 enc, delim = self._csv_options()
                 data = self.file_reader.read_csv_data(
@@ -543,7 +544,7 @@ class ImportWizard(QWidget):
 
             # Предимпортная проверка (ТЗ §80-81): строки, покрытие ID,
             # дубли ID, пустые запросы. При проблемах — подтверждение.
-            if not self._precheck_and_confirm(mapping, data):
+            if not self._precheck_and_confirm(mapping, data, read_stats):
                 return
             # Вопрос о дубле файла — на этапе попытки импорта, отдельно.
             if not self._confirm_file_dup():
@@ -612,7 +613,8 @@ class ImportWizard(QWidget):
         """Считает покрытие ID/запроса и дубли ID по данным и маппингу."""
         return precheck_stats(mapping, data)
 
-    def _precheck_and_confirm(self, mapping: dict, data: list) -> bool:
+    def _precheck_and_confirm(self, mapping: dict, data: list,
+                                read_stats: dict | None = None) -> bool:
         """Возвращает False, если пользователь остановил импорт."""
         from ui_compat import confirm
         try:
@@ -620,6 +622,14 @@ class ImportWizard(QWidget):
         except Exception:
             return True
         lines = [f"Строк: {st['total']}."]
+        try:
+            n_err = int((read_stats or {}).get("formula_errors", 0) or 0)
+        except Exception:
+            n_err = 0
+        if n_err:
+            lines.append(
+                f"⚠ Ячеек с ошибками формул (#REF! и т.п.): {n_err} — "
+                "втянутся пустыми. Почини файл, если там данные.")
         if st["sid_mapped"]:
             lines.append(f"ID заполнен: {st['sid_filled']} из {st['total']} "
                          f"(пустых: {st['sid_empty']}).")
@@ -637,7 +647,8 @@ class ImportWizard(QWidget):
             lines.append(f"⚠ Пустых запросов: {st['primary_empty']}.")
         has_problem = (st["sid_dups"] > 0 or not st["sid_mapped"]
                        or st["primary_empty"] > 0
-                       or (st["sid_mapped"] and st["sid_filled"] == 0))
+                       or (st["sid_mapped"] and st["sid_filled"] == 0)
+                       or n_err > 0)
         if not has_problem:
             return True
         return confirm(

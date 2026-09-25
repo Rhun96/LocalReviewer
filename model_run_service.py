@@ -31,6 +31,115 @@ def _prompt_hash(prompt: str) -> str:
     return hashlib.sha256(_norm(prompt).encode("utf-8")).hexdigest()
 
 
+def rematch_run_answers(project_path: str, run_id: int | None = None) -> dict:
+    """Перепривязка ответов без кейса (case_id NULL) к появившимся кейсам.
+
+    Сценарий-ловушка: ответы импортированы ДО вопросов. Раньше лечилось
+    только повторным импортом; теперь привязка встаёт сама — после импорта
+    вопросов (импортёр зовёт сам) и по кнопке нигде (кнопки нет, и не надо).
+    Правила те же, что при импорте (src точно + регистр-прощение, иначе
+    текст при единственном кандидате). Ключ нормализуем к src: — иначе
+    старый и новый прогоны не спарятся в сравнении.
+    Разметка/ранги переезжают со старого ключа на новый (дубль на новом
+    выигрывает, сирота удаляется — счётчики в отчёте, молча ничего).
+    """
+    done = {"relinked": 0, "moved_reviews": 0, "dropped_dup_reviews": 0,
+            "moved_prefs": 0, "dropped_dup_prefs": 0, "still_unlinked": 0}
+    with db(project_path) as conn:
+        cur = conn.cursor()
+        by_src, by_text = _base_index(cur, need_text=True)
+        by_src_low = {}
+        for k, cid in by_src.items():
+            by_src_low.setdefault(k.lower(), (k, cid))
+        scope = "WHERE a.case_id IS NULL"
+        params: list = []
+        if run_id is not None:
+            scope += " AND a.run_id = ?"
+            params.append(run_id)
+        rows = cur.execute(f"""
+            SELECT a.run_id, a.stable_key, a.prompt_text FROM run_answers a
+            {scope}
+        """, params).fetchall()
+        for r in rows:
+            old_key = r["stable_key"] or ""
+            cid = None
+            if old_key.startswith("src:"):
+                sid = old_key[4:]
+                if ("src:" + sid) in by_src:
+                    cid = by_src["src:" + sid]
+                elif ("src:" + sid).lower() in by_src_low:
+                    _canon, cid = by_src_low[("src:" + sid).lower()]
+            elif old_key.startswith("phash:"):
+                cands = by_text.get(_norm(r["prompt_text"]), [])
+                if len(cands) == 1:
+                    cid = cands[0]
+            else:
+                done["still_unlinked"] += 1
+                continue
+            if cid is None:
+                done["still_unlinked"] += 1
+                continue
+            db_sid = cur.execute("SELECT source_id FROM cases WHERE case_id=?",
+                                 (cid,)).fetchone()
+            new_key = ("src:" + (db_sid["source_id"] or "").strip()
+                       if db_sid and (db_sid["source_id"] or "").strip()
+                       else old_key)
+            if new_key == old_key:
+                cur.execute("UPDATE run_answers SET case_id=? "
+                            "WHERE run_id=? AND stable_key=?",
+                            (cid, r["run_id"], old_key))
+                cur.execute("UPDATE output_reviews SET case_id=? "
+                            "WHERE run_id=? AND stable_key=?",
+                            (cid, r["run_id"], old_key))
+                done["relinked"] += 1
+                continue
+            # ключ меняется: переносим разметку и ранги, потом сам ответ
+            has_new_rev = cur.execute(
+                "SELECT 1 FROM output_reviews WHERE run_id=? AND stable_key=?",
+                (r["run_id"], new_key)).fetchone()
+            has_old_rev = cur.execute(
+                "SELECT 1 FROM output_reviews WHERE run_id=? AND stable_key=?",
+                (r["run_id"], old_key)).fetchone()
+            if has_old_rev and not has_new_rev:
+                cur.execute("UPDATE output_reviews SET stable_key=?, case_id=? "
+                            "WHERE run_id=? AND stable_key=?",
+                            (new_key, cid, r["run_id"], old_key))
+                done["moved_reviews"] += 1
+            elif has_old_rev:
+                cur.execute("DELETE FROM output_reviews WHERE run_id=? "
+                            "AND stable_key=?", (r["run_id"], old_key))
+                done["dropped_dup_reviews"] += 1
+            # ранги едут следом (та же логика дублей)
+            olds = cur.execute(
+                "SELECT run_a_id, run_b_id FROM run_preferences WHERE stable_key=?",
+                (old_key,)).fetchall()
+            for o in olds:
+                exists = cur.execute(
+                    "SELECT 1 FROM run_preferences WHERE run_a_id=? AND run_b_id=? "
+                    "AND stable_key=?",
+                    (o["run_a_id"], o["run_b_id"], new_key)).fetchone()
+                if exists:
+                    cur.execute(
+                        "DELETE FROM run_preferences WHERE run_a_id=? AND run_b_id=? "
+                        "AND stable_key=?",
+                        (o["run_a_id"], o["run_b_id"], old_key))
+                    done["dropped_dup_prefs"] += 1
+                else:
+                    cur.execute(
+                        "UPDATE run_preferences SET stable_key=?, case_id=? "
+                        "WHERE run_a_id=? AND run_b_id=? AND stable_key=?",
+                        (new_key, cid, o["run_a_id"], o["run_b_id"],
+                         old_key))
+                    done["moved_prefs"] += 1
+            cur.execute("UPDATE run_answers SET stable_key=?, case_id=? "
+                        "WHERE run_id=? AND stable_key=?",
+                        (new_key, cid, r["run_id"], old_key))
+            done["relinked"] += 1
+    if done["relinked"]:
+        logger.info("rematched answers: %s", done)
+    return done
+
+
 def create_run(project_path: str, name: str, model_name: str,
                model_version: str = "", prompt_version: str = "",
                system_prompt_version: str = "", description: str = "") -> int:
@@ -260,6 +369,12 @@ def compare_runs(project_path: str, run_a: int, run_b: int) -> dict:
                 FROM run_preferences WHERE run_a_id=? AND run_b_id=?
             """, (run_a, run_b)).fetchall():
             prefs[r["stable_key"]] = dict(r)
+        revs = {}
+        for r in cur.execute("""
+                SELECT run_id, stable_key, status, comment
+                FROM output_reviews WHERE run_id IN (?, ?)
+            """, (run_a, run_b)).fetchall():
+            revs[(r["run_id"], r["stable_key"])] = dict(r)
         ctx = {}
         all_case_ids = {r["case_id"] for r in list(rows_a.values())
                         + list(rows_b.values()) if r["case_id"]}
@@ -267,10 +382,18 @@ def compare_runs(project_path: str, run_a: int, run_b: int) -> dict:
             ph = ",".join(["?"] * len(all_case_ids))
             for r in cur.execute(f"""
                     SELECT c.case_id, c.source_id, c.primary_text,
-                           c.metadata_json,
-                           COALESCE(an.status, 'unreviewed') AS case_status
+                            c.metadata_json,
+                            COALESCE(an.status, 'unreviewed') AS case_status,
+                            e.severity AS case_severity,
+                            ec.name AS case_category,
+                            es.name AS case_subcategory
                     FROM cases c
                     LEFT JOIN annotations an ON an.case_id = c.case_id
+                    LEFT JOIN case_errors e ON e.case_id = c.case_id
+                    LEFT JOIN error_categories ec
+                      ON ec.category_id = e.category_id
+                    LEFT JOIN error_categories es
+                      ON es.category_id = e.subcategory_id
                     WHERE c.case_id IN ({ph})
                 """, list(all_case_ids)).fetchall():
                 ctx[r["case_id"]] = dict(r)
@@ -300,6 +423,15 @@ def compare_runs(project_path: str, run_a: int, run_b: int) -> dict:
             "source_id": info.get("source_id"),
             "primary_text": info.get("primary_text"),
             "case_status": info.get("case_status", "unreviewed"),
+            "case_severity": info.get("case_severity") or "",
+            "case_category": info.get("case_category") or "",
+            "case_subcategory": info.get("case_subcategory") or "",
+            "status_a": (revs.get((run_a, key)) or {}).get("status")
+            or "unreviewed",
+            "comment_a": (revs.get((run_a, key)) or {}).get("comment") or "",
+            "status_b": (revs.get((run_b, key)) or {}).get("status")
+            or "unreviewed",
+            "comment_b": (revs.get((run_b, key)) or {}).get("comment") or "",
             "product_a": ((ra or {}).get("product") or "").strip(),
             "product_b": ((rb or {}).get("product") or "").strip(),
             "prompt_a": (ra or {}).get("prompt_text") or "",

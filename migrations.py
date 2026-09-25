@@ -755,3 +755,59 @@ def migrate_to_v19(cursor) -> None:
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_cases_hidden "
                    "ON cases(hidden)")
     logger.info("migrated to v19 (case hidden flag)")
+
+
+def migrate_to_v20(cursor) -> None:
+    """Кандидат регрессии: прогон ИЛИ версия датасета (было только прогон).
+
+    Пересборка regression_runs по образцу v11 (перед миграцией init_database
+    делает autobackup): +candidate_type/+candidate_version_id, candidate_run_id
+    становится NULL-able (у версий прогона нет). Данные копируются 1-в-1,
+    старые запуски получают candidate_type='run'. FK выключаем только на
+    время DROP (regression_results ссылается CASCADE).
+    """
+    cols = {r[1] for r in cursor.execute("PRAGMA table_info(regression_runs)").fetchall()}
+    if "candidate_type" in cols:
+        return
+    cursor.execute("PRAGMA foreign_keys=OFF")
+    try:
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS regression_runs_new (
+                regression_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                baseline_type TEXT NOT NULL
+                    CHECK (baseline_type IN ('dataset_version', 'run')),
+                baseline_id INTEGER NOT NULL,
+                candidate_type TEXT NOT NULL DEFAULT 'run'
+                    CHECK (candidate_type IN ('dataset_version', 'run')),
+                candidate_run_id INTEGER,
+                candidate_version_id INTEGER,
+                gate_max_critical INTEGER NOT NULL DEFAULT 0,
+                gate_max_rate REAL NOT NULL DEFAULT 0.02,
+                gate_result TEXT DEFAULT '',
+                total INTEGER DEFAULT 0,
+                regressions INTEGER DEFAULT 0,
+                improvements INTEGER DEFAULT 0,
+                unchanged INTEGER DEFAULT 0,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (candidate_run_id) REFERENCES model_runs(run_id)
+                    ON DELETE CASCADE
+            )
+        """)
+        cursor.execute("""
+            INSERT OR IGNORE INTO regression_runs_new
+                (regression_id, name, baseline_type, baseline_id,
+                 candidate_type, candidate_run_id, candidate_version_id,
+                 gate_max_critical, gate_max_rate, gate_result,
+                 total, regressions, improvements, unchanged, created_at)
+            SELECT regression_id, name, baseline_type, baseline_id,
+                 'run', candidate_run_id, NULL,
+                 gate_max_critical, gate_max_rate, gate_result,
+                 total, regressions, improvements, unchanged, created_at
+            FROM regression_runs
+        """)
+        cursor.execute("DROP TABLE regression_runs")
+        cursor.execute("ALTER TABLE regression_runs_new RENAME TO regression_runs")
+    finally:
+        cursor.execute("PRAGMA foreign_keys=ON")
+    logger.info("migrated to v20 (regression candidate: run or dataset version)")

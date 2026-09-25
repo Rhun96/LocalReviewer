@@ -269,4 +269,13 @@ def import_file(
                            sorted(dup_source_ids)[:5])
         logger.info("import file_id=%s imported=%s skipped=%s dup_source_ids=%s",
                     file_id, imported, skipped, len(dup_source_ids))
-        return file_id, imported, skipped
+        result = (file_id, imported, skipped)
+    # with вышел — данные закоммичены: перепривязываем ответы прогонов,
+    # импортированные ДО вопросов (иначе висят с case_id NULL навсегда
+    # и требуют повторного импорта — ловушка для нешарящих).
+    try:
+        import model_run_service as _mrs
+        _mrs.rematch_run_answers(project_path)
+    except Exception as _e:
+        logger.warning("rematch after import failed: %s", _e)
+    return result

@@ -323,6 +323,37 @@ def delete_version(project_path: str, version_id: int) -> None:
         cur.execute("DELETE FROM dataset_versions WHERE version_id=?", (version_id,))
 
 
+def delete_dataset(project_path: str, dataset_id: int) -> dict:
+    """Удалить датасет целиком: версии + их слепки + сам датасет.
+
+    Разметка кейсов НЕ трогается (слепки — копии). Запертый сначала отопри:
+    удаление мимо замка ломало бы дисциплину golden. Старые запуски
+    регрессии на эти версии сохраняют свои цифры (baseline_id без FK).
+    Возвращает {versions, snapshots}.
+    """
+    with db(project_path) as conn:
+        cur = conn.cursor()
+        row = cur.execute("SELECT name FROM datasets WHERE dataset_id=?",
+                          (dataset_id,)).fetchone()
+        if not row:
+            raise ValueError("Датасет не найден")
+        if _dataset_locked(cur, dataset_id):
+            raise ValueError("Датасет заперт (locked): сначала отопри его")
+        vers = cur.execute("SELECT version_id FROM dataset_versions "
+                           "WHERE dataset_id=?", (dataset_id,)).fetchall()
+        snaps = 0
+        for v in vers:
+            cur.execute("DELETE FROM dataset_cases WHERE version_id=?",
+                        (v["version_id"],))
+            snaps += cur.rowcount or 0
+            cur.execute("DELETE FROM dataset_versions WHERE version_id=?",
+                        (v["version_id"],))
+        cur.execute("DELETE FROM datasets WHERE dataset_id=?", (dataset_id,))
+    logger.info("deleted dataset %s versions=%s snapshots=%s",
+                dataset_id, len(vers), snaps)
+    return {"versions": len(vers), "snapshots": snaps}
+
+
 def _version_map(cursor, version_id: int) -> dict:
     """stable_key -> список [dict(case_id, status, comment, error..., tags, text_hash)]."""
     cols = _dataset_case_columns(cursor)

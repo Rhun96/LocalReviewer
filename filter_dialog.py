@@ -33,6 +33,8 @@ class FilterDialog(QDialog):
             'check_severities': [],
             'error_category_id': None,
             'error_severities': [],
+            'reviewed_from': '',
+            'reviewed_to': '',
         }
 
         self.status_checkboxes = {}
@@ -199,6 +201,40 @@ class FilterDialog(QDialog):
         search_group.setLayout(search_layout)
         layout.addWidget(search_group)
 
+        # Период проверки (аналитика): даты разметки, не импорта.
+        period_group = QGroupBox("Период проверки")
+        period_layout = QHBoxLayout()
+        from PySide6.QtWidgets import QDateEdit as _QDE
+        from PySide6.QtCore import QDate as _QD
+        self.period_preset = FComboBox()
+        self.period_preset.addItem("Всё время", "")
+        self.period_preset.addItem("Сегодня", "today")
+        self.period_preset.addItem("7 дней", "7d")
+        self.period_preset.addItem("14 дней", "14d")
+        self.period_preset.addItem("30 дней", "30d")
+        self.period_preset.addItem("Вручную", "manual")
+        self.period_preset.currentIndexChanged.connect(
+            self._on_period_preset)
+        period_layout.addWidget(self.period_preset)
+        self.date_from = _QDE()
+        self.date_from.setDisplayFormat("yyyy-MM-dd")
+        self.date_from.setCalendarPopup(True)
+        self.date_from.setDate(_QD.currentDate().addDays(-7))
+        self.date_from.dateChanged.connect(
+            lambda _d: self._on_period_manual())
+        period_layout.addWidget(QLabel("с:"))
+        period_layout.addWidget(self.date_from)
+        self.date_to = _QDE()
+        self.date_to.setDisplayFormat("yyyy-MM-dd")
+        self.date_to.setCalendarPopup(True)
+        self.date_to.setDate(_QD.currentDate())
+        self.date_to.dateChanged.connect(
+            lambda _d: self._on_period_manual())
+        period_layout.addWidget(QLabel("по:"))
+        period_layout.addWidget(self.date_to)
+        period_group.setLayout(period_layout)
+        layout.addWidget(period_group)
+
         content_widget.setLayout(layout)
         scroll.setWidget(content_widget)
         main_layout.addWidget(scroll)
@@ -275,7 +311,6 @@ class FilterDialog(QDialog):
         self.filters['statuses'] = [
             code for code, cb in self.status_checkboxes.items() if cb.isChecked()
         ]
-
         self.filters['file_id'] = self.file_combo.currentData()
         self.filters['has_comment'] = self.comment_combo.currentData()
 
@@ -295,8 +330,60 @@ class FilterDialog(QDialog):
         ]
 
         self.filters['search_text'] = self.search_input.text().strip()
+        _preset, _pf, _pt = self._period_dates()
+        _ = _preset
+        self.filters['reviewed_from'] = _pf
+        self.filters['reviewed_to'] = _pt
 
         self.accept()
+
+    @staticmethod
+    def _iso_today() -> str:
+        from datetime import date as _d
+        return _d.today().isoformat()
+
+    @staticmethod
+    def _iso_days_ago(n: int) -> str:
+        from datetime import date as _d, timedelta as _td
+        return (_d.today() - _td(days=n)).isoformat()
+
+    def _on_period_preset(self):
+        """Пресет ставит даты; ручная правка дат переключает на «Вручную»."""
+        mode = self.period_preset.currentData() or ""
+        if not mode or mode == "manual":
+            return
+        from PySide6.QtCore import QDate as _QD
+        today = _QD.currentDate()
+        if mode == "today":
+            self.date_from.setDate(today)
+            self.date_to.setDate(today)
+        elif mode in ("7d", "14d", "30d"):
+            self.date_from.setDate(today.addDays(-int(mode[:-1])))
+            self.date_to.setDate(today)
+
+    def _on_period_manual(self):
+        for i in range(self.period_preset.count()):
+            if self.period_preset.itemData(i) == "manual":
+                self.period_preset.blockSignals(True)
+                self.period_preset.setCurrentIndex(i)
+                self.period_preset.blockSignals(False)
+                break
+
+    def _period_dates(self) -> tuple:
+        """(preset, from, to): '' = без ограничения."""
+        mode = self.period_preset.currentData() or ""
+        if not mode:
+            return "", "", ""
+        if mode == "today":
+            t = self._iso_today()
+            return mode, t, t
+        if mode in ("7d", "14d", "30d"):
+            return mode, self._iso_days_ago(int(mode[:-1])), self._iso_today()
+        f = self.date_from.date().toString("yyyy-MM-dd")
+        t = self.date_to.date().toString("yyyy-MM-dd")
+        if f > t:
+            f, t = t, f
+        return mode, f, t
 
     def on_reset(self):
         for cb in self.status_checkboxes.values():
@@ -320,6 +407,7 @@ class FilterDialog(QDialog):
             pass
 
         self.search_input.clear()
+        self.period_preset.setCurrentIndex(0)
 
     def get_filters(self):
         import copy
@@ -359,6 +447,8 @@ class FilterDialog(QDialog):
             "error_severities": [c for c, cb in self.err_sev_checkboxes.items()
                                  if cb.isChecked()],
             "search_text": self.search_input.text().strip(),
+            "reviewed_from": self._period_dates()[1],
+            "reviewed_to": self._period_dates()[2],
         }
 
     def on_saved_apply(self):
@@ -466,3 +556,24 @@ class FilterDialog(QDialog):
             pass
 
         self.search_input.setText(filters.get('search_text', ''))
+        try:
+            from PySide6.QtCore import QDate as _QD
+            pf = (filters.get('reviewed_from') or '').strip()
+            pt = (filters.get('reviewed_to') or '').strip()
+            if pf or pt:
+                if pf:
+                    self.date_from.setDate(_QD.fromString(pf, "yyyy-MM-dd"))
+                if pt:
+                    self.date_to.setDate(_QD.fromString(pt, "yyyy-MM-dd"))
+                for i in range(self.period_preset.count()):
+                    if self.period_preset.itemData(i) == "manual":
+                        self.period_preset.blockSignals(True)
+                        self.period_preset.setCurrentIndex(i)
+                        self.period_preset.blockSignals(False)
+                        break
+            else:
+                self.period_preset.blockSignals(True)
+                self.period_preset.setCurrentIndex(0)
+                self.period_preset.blockSignals(False)
+        except Exception:
+            pass

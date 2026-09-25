@@ -176,7 +176,7 @@ def test_regression_bug_prefill():
         {"source_id": "k2", "answer": "ответ два"}])
     rg.set_output_review(p, c, "src:k1", "bad")
     rg.set_output_review(p, c, "src:k2", "good")
-    rid = rg.run_regression(p, "rel", "dataset_version", v, c)
+    rid = rg.run_regression(p, "rel", "dataset_version", v, "run", c)
     pre = rg.bug_prefill(p, rid, "src:k1")
     assert pre["model_response"] == "новый ответ"
     assert pre["review_status"] == "bad"

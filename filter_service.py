@@ -45,6 +45,15 @@ def filter_from(filters: dict):
     elif has_comment is False:
         conditions.append("(a.comment IS NULL OR a.comment = '')")
 
+    # Кейсы с зафиксированной ошибкой (drill-down «С ошибками»).
+    has_errors = (filters or {}).get("has_errors")
+    if has_errors is True:
+        conditions.append("EXISTS (SELECT 1 FROM case_errors e "
+                          "WHERE e.case_id = c.case_id)")
+    elif has_errors is False:
+        conditions.append("NOT EXISTS (SELECT 1 FROM case_errors e "
+                          "WHERE e.case_id = c.case_id)")
+
     tags = (filters or {}).get("tags", [])
     if tags:
         placeholders = ",".join(["?"] * len(tags))
@@ -97,6 +106,35 @@ def filter_from(filters: dict):
         conditions.append("(lower_ru(c.primary_text) LIKE ? ESCAPE '\\' "
                            "OR lower_ru(c.response_text) LIKE ? ESCAPE '\\')")
         params.extend([f"%{esc}%", f"%{esc}%"])
+
+    # Период проверки (аналитика, ТЗ Analytics §4.1): даты ISO YYYY-MM-DD
+    # по annotations.updated_at. Строго: строки без разметки не подходят
+    # (updated_at NULL), т.е. период всегда означает «размечено в период».
+    # Совместимо со всеми ключами: статусы/теги/причины + период = И.
+    reviewed_from = str((filters or {}).get("reviewed_from") or "").strip()
+    reviewed_to = str((filters or {}).get("reviewed_to") or "").strip()
+    if reviewed_from:
+        conditions.append("substr(a.updated_at, 1, 10) >= ?")
+        params.append(reviewed_from[:10])
+    if reviewed_to:
+        conditions.append("substr(a.updated_at, 1, 10) <= ?")
+        params.append(reviewed_to[:10])
+
+    # Явный набор кейсов (drill-down из аналитики/багов, в диалоге нет —
+    # только программно). Чанкуем IN по 500 (лимит переменных SQLite).
+    case_ids = (filters or {}).get("case_ids") or []
+    try:
+        case_ids = [int(c) for c in case_ids]
+    except Exception:
+        case_ids = []
+    if case_ids:
+        chunks = [case_ids[i:i + 500] for i in range(0, len(case_ids), 500)]
+        ors = []
+        for ch in chunks:
+            ph = ",".join(["?"] * len(ch))
+            ors.append(f"c.case_id IN ({ph})")
+            params.extend(ch)
+        conditions.append("(" + " OR ".join(ors) + ")")
 
     return extra_joins, conditions, params
 

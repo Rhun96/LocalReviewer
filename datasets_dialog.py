@@ -5,8 +5,9 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt
 from dataset_service import (
-    compare_versions, create_dataset, create_version, delete_version,
-    freeze_version, list_datasets, list_versions, set_dataset_locked,
+    compare_versions, create_dataset, create_version, delete_dataset,
+    delete_version, freeze_version, list_datasets, list_versions,
+    set_dataset_locked,
 )
 from ui_compat import FComboBox, FPrimaryButton, FPushButton, clear_in_fluent, notify
 
@@ -52,6 +53,12 @@ class DatasetsDialog(QDialog):
                             "создавать и удалять версии")
         btn_lock.clicked.connect(self._toggle_lock)
         row_ds.addWidget(btn_lock)
+        btn_del_ds = FPushButton("🗑")
+        btn_del_ds.setMaximumWidth(44)
+        btn_del_ds.setToolTip("Удалить выбранный датасет целиком "
+                              "(версии и слепки; разметка кейсов цела)")
+        btn_del_ds.clicked.connect(self._delete_dataset)
+        row_ds.addWidget(btn_del_ds)
         left.addLayout(row_ds)
         top.addLayout(left, 2)
 
@@ -268,6 +275,32 @@ class DatasetsDialog(QDialog):
             freeze_version(self.project_path, item.data(Qt.ItemDataRole.UserRole))
             notify(self, "success", "Freeze", "Версия заморожена (неизменяема)")
             self._on_dataset_selected()
+        except Exception as e:
+            notify(self, "error", "Ошибка", str(e))
+
+    def _delete_dataset(self):
+        ds_id = self._current_ds()
+        if not ds_id:
+            notify(self, "warning", "Внимание", "Выбери датасет")
+            return
+        try:
+            cur = next(d for d in list_datasets(self.project_path)
+                       if d["dataset_id"] == ds_id)
+        except StopIteration:
+            return
+        from ui_compat import confirm
+        if not confirm(self, "Удалить датасет",
+                       f"Удалить датасет «{cur['name']}» целиком "
+                       f"({cur.get('versions', '?')} верс.)? Слепки пропадут, "
+                       "разметка кейсов НЕ пострадает. "
+                       "Запертый сначала отопри.",
+                       ok_text="Удалить", cancel_text="Отмена"):
+            return
+        try:
+            done = delete_dataset(self.project_path, ds_id)
+            notify(self, "success", "Датасет",
+                   f"Удалён: версий {done['versions']}")
+            self.reload_datasets()
         except Exception as e:
             notify(self, "error", "Ошибка", str(e))
 
