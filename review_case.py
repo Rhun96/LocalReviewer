@@ -10,7 +10,8 @@ from PySide6.QtCore import Qt
 from database import db
 from ui_compat import (
     FLUENT, FPrimaryButton, FPushButton, accent_button_style,
-    clear_in_fluent, confirm, notify,
+    clear_in_fluent, confirm, danger_button_style, notify,
+    warning_button_style,
 )
 import json
 import logging
@@ -76,10 +77,7 @@ class CaseMixin:
         btn_prev.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         btn_prev.clicked.connect(self.prev_case)
         btn_filters = FPushButton("🎛️ Фильтры")
-        btn_filters.setStyleSheet("""
-            QPushButton { border-color: #FFAA00; color: #FFAA00; }
-            QPushButton:hover { background-color: #332200; }
-        """)
+        btn_filters.setStyleSheet(warning_button_style())
         btn_filters.setMinimumHeight(30)
         btn_filters.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         btn_filters.clicked.connect(self.open_filters)
@@ -116,8 +114,9 @@ class CaseMixin:
         # V2.1 §14: тихая подсказка «нет Bug Report» (не модалка, не авто-баг).
         self.nobug_widget = QWidget()
         self.nobug_widget.setObjectName("nobugHint")
+        from styles import COLORS as _CC
         self.nobug_widget.setStyleSheet(
-            "#nobugHint { border: 1px solid #FFAA00; border-radius: 6px; "
+            f"#nobugHint {{ border: 1px solid {_CC['amber']}; border-radius: 6px; "
             "background-color: rgba(255,170,0,0.08); }")
         _nb_lay = QHBoxLayout()
         _nb_lay.setContentsMargins(0, 0, 0, 0)
@@ -181,10 +180,7 @@ class CaseMixin:
         btn_add_template.setMinimumHeight(28)
         btn_add_template.clicked.connect(self.add_new_template)
         btn_del_template = FPushButton("🗑️ Удалить")
-        btn_del_template.setStyleSheet("""
-            QPushButton { border-color: #FF3B3B; color: #FF3B3B; }
-            QPushButton:hover { background-color: #330000; }
-        """)
+        btn_del_template.setStyleSheet(danger_button_style())
         btn_del_template.setMinimumHeight(28)
         btn_del_template.clicked.connect(self.delete_template)
         btn_save_comment = FPrimaryButton("💾 Сохранить")
@@ -204,11 +200,12 @@ class CaseMixin:
         self.comment_edit = QTextEdit()
         self.comment_edit.setMaximumHeight(60)
         # Выделение мышью видно в любой теме: яркий фон + тёмный текст.
-        self.comment_edit.setStyleSheet("""
-            QTextEdit {
-                selection-background-color: #00AAFF;
+        from styles import COLORS as _CC
+        self.comment_edit.setStyleSheet(f"""
+            QTextEdit {{
+                selection-background-color: {_CC['blue']};
                 selection-color: #000000;
-            }
+            }}
         """)
         comment_layout.addWidget(self.comment_edit)
         self.save_indicator = QLabel("")
@@ -627,7 +624,9 @@ class CaseMixin:
                 Qt.TextInteractionFlag.TextSelectableByMouse
                 | Qt.TextInteractionFlag.TextSelectableByKeyboard)
             src_text.setOpenExternalLinks(False)
-            src_text.setStyleSheet("font-size: 13px; padding: 6px; color: #00AAFF;")
+            from styles import COLORS as _CC
+            src_text.setStyleSheet(
+                f"font-size: 13px; padding: 6px; color: {_CC['blue']};")
             lay.addWidget(src_text)
         self.case_layout.addWidget(box, 2)
 

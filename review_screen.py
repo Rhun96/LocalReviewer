@@ -302,7 +302,9 @@ class ReviewScreen(BaseScreen, ProfileMixin, CaseMixin, TableMixin, BulkMixin, V
         # Пилюля буфера (V2.2 §3): видна только пока тикает автоочистка.
         # Общая для кейса и таблицы (шапка вне view_stack).
         self.clip_pill = QLabel("")
-        self.clip_pill.setStyleSheet("font-size: 12px; color: #00AAFF; font-weight: bold;")
+        from styles import COLORS as _CC
+        self.clip_pill.setStyleSheet(
+            f"font-size: 12px; color: {_CC['blue']}; font-weight: bold;")
         self.clip_pill.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.clip_pill.setVisible(False)
         layout.addWidget(self.clip_pill)

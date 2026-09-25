@@ -65,19 +65,20 @@ class DatasetSelectDialog(QDialog):
         btn_all = FPushButton("📋 Все файлы")
         btn_all.setMinimumHeight(45)
         if not FLUENT:
-            btn_all.setStyleSheet("""
-                QPushButton {
-                    background-color: #0D150D;
-                    color: #00AAFF;
-                    border: 2px solid #00AAFF;
+            from styles import COLORS as _CC
+            btn_all.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {_CC['bg_card']};
+                    color: {_CC['blue']};
+                    border: 2px solid {_CC['blue']};
                     border-radius: 8px;
                     padding: 10px 20px;
                     font-size: 14px;
                     font-weight: bold;
-                }
-                QPushButton:hover {
-                    background-color: #002233;
-                }
+                }}
+                QPushButton:hover {{
+                    background-color: {_CC['accent_hover']};
+                }}
             """)
         btn_all.clicked.connect(self.on_all_files)
 
@@ -103,19 +104,19 @@ class DatasetSelectDialog(QDialog):
         btn_cancel = FPushButton("❌ Отмена")
         btn_cancel.setMinimumHeight(45)
         if not FLUENT:
-            btn_cancel.setStyleSheet("""
-                QPushButton {
-                    background-color: #0D150D;
-                    color: #FF3B3B;
-                    border: 2px solid #FF3B3B;
+            btn_cancel.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {_CC['bg_card']};
+                    color: {_CC['red']};
+                    border: 2px solid {_CC['red']};
                     border-radius: 8px;
                     padding: 10px 20px;
                     font-size: 14px;
                     font-weight: bold;
-                }
-                QPushButton:hover {
-                    background-color: #330000;
-                }
+                }}
+                QPushButton:hover {{
+                    background-color: {_CC['danger_hover']};
+                }}
             """)
         btn_cancel.clicked.connect(self.reject)
 

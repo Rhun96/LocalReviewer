@@ -104,16 +104,17 @@ class Sidebar(QWidget):
         self.btn_home = FPushButton("🏠 На главную")
         self.btn_home.setMinimumHeight(36)
         if not FLUENT:
-            self.btn_home.setStyleSheet("""
-                QPushButton {
+            from styles import COLORS as _CC
+            self.btn_home.setStyleSheet(f"""
+                QPushButton {{
                     background-color: transparent;
-                    color: #FF6666;
-                    border: 1px solid #662222;
+                    color: {_CC['red_light']};
+                    border: 1px solid {_CC['red_border']};
                     border-radius: 6px;
                     padding: 6px 12px;
                     font-size: 12px;
-                }
-                QPushButton:hover { background-color: #330000; }
+                }}
+                QPushButton:hover {{ background-color: {_CC['danger_hover']}; }}
             """)
         self.btn_home.clicked.connect(self._on_home)
         self.layout.addWidget(self.btn_home)

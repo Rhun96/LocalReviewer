@@ -12,7 +12,7 @@ import ast
 import pathlib
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-ALLOW_RAW_HEX = 196
+ALLOW_RAW_HEX = 164
 
 
 def _load_keys():

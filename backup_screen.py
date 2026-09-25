@@ -5,7 +5,8 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, Signal
 from backup_service import create_backup, get_backups_list, restore_backup, delete_backup
 from ui_base import BaseScreen
-from ui_compat import FPrimaryButton, FPushButton, clear_in_fluent, confirm, notify
+from ui_compat import (FPrimaryButton, FPushButton, clear_in_fluent,
+                        confirm, notify, warning_button_style)
 from workers import run_in_background
 
 
@@ -77,10 +78,7 @@ class BackupScreen(BaseScreen):
 
         btn_restore = FPushButton("Восстановить выбранную копию")
         btn_restore.setMinimumHeight(50)
-        btn_restore.setStyleSheet("""
-            QPushButton { border-color: #FFAA00; color: #FFAA00; }
-            QPushButton:hover { background-color: #332200; }
-        """)
+        btn_restore.setStyleSheet(warning_button_style())
         btn_restore.clicked.connect(self.on_restore_backup)
 
         btn_delete = FPushButton("Удалить выбранную копию")

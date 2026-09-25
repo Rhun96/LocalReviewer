@@ -5,7 +5,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt
 from database import db
-from styles import apply_shadow
+from styles import COLORS, apply_shadow
 from ui_base import BaseScreen
 from ui_compat import (FPrimaryButton, FPushButton, accent_button_style,
                         confirm, notify)
@@ -63,7 +63,7 @@ class ProjectScreen(BaseScreen):
         btn_delete_file.setMinimumHeight(45)
         btn_delete_file.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         btn_delete_file.clicked.connect(self.on_delete_file)
-        apply_shadow(btn_delete_file, color='#FF3B3B')
+        apply_shadow(btn_delete_file, color=COLORS['red'])
 
         file_buttons.addWidget(btn_add_file)
         file_buttons.addWidget(btn_delete_file)
@@ -72,7 +72,7 @@ class ProjectScreen(BaseScreen):
         btn_health.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         btn_health.setToolTip("Сироты удалённых файлов: проверка и чистка")
         btn_health.clicked.connect(self.on_integrity)
-        apply_shadow(btn_health, color='#FFAA00')
+        apply_shadow(btn_health, color=COLORS['amber'])
         file_buttons.addWidget(btn_health)
         files_layout.addLayout(file_buttons)
         files_group.setLayout(files_layout)
@@ -123,7 +123,7 @@ class ProjectScreen(BaseScreen):
         btn_backup.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         btn_backup.setMinimumHeight(45)
         btn_backup.clicked.connect(self.on_backup)
-        apply_shadow(btn_backup, color='#00AAFF')
+        apply_shadow(btn_backup, color=COLORS['blue'])
 
         buttons_grid.addWidget(btn_start_review, 0, 0)
         buttons_grid.addWidget(btn_reports, 0, 1)
@@ -136,14 +136,14 @@ class ProjectScreen(BaseScreen):
         btn_settings.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         btn_settings.setMinimumHeight(45)
         btn_settings.clicked.connect(self.on_settings)
-        apply_shadow(btn_settings, color='#00AAFF')
+        apply_shadow(btn_settings, color=COLORS['blue'])
 
         btn_back = FPushButton("🚪 Назад")
         btn_back.setObjectName("danger")
         btn_back.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         btn_back.setMinimumHeight(45)
         btn_back.clicked.connect(self.on_back)
-        apply_shadow(btn_back, color='#FF3B3B')
+        apply_shadow(btn_back, color=COLORS['red'])
 
         btn_datasets = FPushButton("🗂 Датасеты")
         btn_datasets.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)

@@ -13,7 +13,7 @@ from filter_service import get_filtered_case_ids, get_all_case_ids
 from ui_compat import (
     FCheckBox, FComboBox, FLineEdit, FPushButton, FTable,
     accent_button_style, clear_in_fluent,
-    confirm, notify, polish_table,
+    confirm, notify, polish_table, warning_button_style,
 )
 import json
 import logging
@@ -287,10 +287,7 @@ class TableMixin:
         self.value_search.returnPressed.connect(self.on_value_search)
         self.btn_table_filters = FPushButton("🎛️ Фильтры")
         self.btn_table_filters.setMinimumHeight(30)
-        self.btn_table_filters.setStyleSheet("""
-            QPushButton { border-color: #FFAA00; color: #FFAA00; }
-            QPushButton:hover { background-color: #332200; }
-        """)
+        self.btn_table_filters.setStyleSheet(warning_button_style())
         self.btn_table_filters.clicked.connect(self.open_table_filters)
         controls_layout.addWidget(self.btn_select_columns)
         controls_layout.addWidget(self.column_filter_combo)

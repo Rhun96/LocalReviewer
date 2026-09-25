@@ -172,14 +172,28 @@ def accent_button_style(extra: str = "") -> str:
 
     extra — добавка внутрь правила QPushButton (например padding).
     """
+    return _colored_button("blue", "accent_hover", extra)
+
+
+def _colored_button(color_key: str, hover_key: str, extra: str = "") -> str:
     from styles import COLORS as _C
-    inner = f"border-color: {_C['blue']}; color: {_C['blue']};"
+    inner = f"border-color: {_C[color_key]}; color: {_C[color_key]};"
     if extra.strip():
         inner += f" {extra.strip()}"
     return (
         f"QPushButton {{ {inner} }} "
-        f"QPushButton:hover {{ background-color: {_C['accent_hover']}; }}"
+        f"QPushButton:hover {{ background-color: {_C[hover_key]}; }}"
     )
+
+
+def warning_button_style(extra: str = "") -> str:
+    """Янтарная кнопка (была в 3 местах, 1-в-1)."""
+    return _colored_button("amber", "amber_hover", extra)
+
+
+def danger_button_style(extra: str = "") -> str:
+    """Красная кнопка (1-в-1)."""
+    return _colored_button("red", "danger_hover", extra)
 
 
 def notify(parent, kind: str, title: str, text: str) -> None:
