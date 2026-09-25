@@ -50,6 +50,7 @@ class Sidebar(QWidget):
 
         # Кнопки навигации
         nav_items = [
+            ("dashboard", "🏠 Главная"),
             ("project",   "📁 Проект"),
             ("review",    "🔍 Ревью"),
             ("runs",      "🏃 Прогоны"),

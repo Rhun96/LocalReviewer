@@ -171,6 +171,7 @@ class ProjectWindow(QWidget):
     def init_ui(self):
         # Создаём все экраны
         from project_screen import ProjectScreen
+        from dashboard_screen import DashboardScreen
         from review_screen import ReviewScreen
         from runs_screen import ModelRunsScreen
         from bug_reports_screen import BugReportsScreen
@@ -182,6 +183,7 @@ class ProjectWindow(QWidget):
         from settings_screen import SettingsScreen
 
         self.screens['project'] = ProjectScreen(self.project_path, self)
+        self.screens['dashboard'] = DashboardScreen(self.project_path, self)
         self.screens['review'] = ReviewScreen(self.project_path, self, filters=None)
         self.screens['runs'] = ModelRunsScreen(self.project_path, self)
         self.screens['bugs'] = BugReportsScreen(self.project_path, self)
@@ -210,8 +212,8 @@ class ProjectWindow(QWidget):
         for screen in self.screens.values():
             self._stack.addWidget(screen)
 
-        self._stack.setCurrentWidget(self.screens['project'])
-        self.sidebar.set_active('project')
+        self._stack.setCurrentWidget(self.screens['dashboard'])
+        self.sidebar.set_active('dashboard')
 
         layout.addWidget(self._stack)
         self.setLayout(layout)
@@ -260,6 +262,7 @@ class MainWindow(_BaseWindow):
     """Главное окно приложения (классика + Fluent-навигация)."""
 
     NAV_ITEMS = [
+        ("dashboard", "HOME", "Главная"),
         ("project", "FOLDER", "Проект"),
         ("review", "SEARCH", "Ревью"),
         ("runs", "SYNC", "Прогоны"),
@@ -285,7 +288,7 @@ class MainWindow(_BaseWindow):
             self.stack = self.stackedWidget
             self.start_screen = StartScreen(self)
             self.start_screen.setObjectName("start")
-            self.addSubInterface(self.start_screen, FIF.HOME, "Главная")
+            self.addSubInterface(self.start_screen, FIF.HOME, "Проекты")
             self.stackedWidget.currentChanged.connect(self._on_page_changed)
         else:
             self.stack = QStackedWidget()
@@ -352,7 +355,7 @@ class MainWindow(_BaseWindow):
                 screen = self.project_window.screens[key]
                 screen.setObjectName(f"screen_{key}")
                 self.addSubInterface(screen, self._nav_icon(icon_name), text)
-            self.switchTo(self.project_window.screens["project"])
+            self.switchTo(self.project_window.screens["dashboard"])
         else:
             self.stack.addWidget(self.project_window)
             self.stack.setCurrentWidget(self.project_window)
