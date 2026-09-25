@@ -784,7 +784,7 @@ QLineEdit, QTextEdit, QPlainTextEdit, LineEdit, TextEdit {{
     selection-background-color: {sel_bg};
     selection-color: {sel_text};
 }}
-QSpinBox, SpinBox, QComboBox, ComboBox {{
+QSpinBox, SpinBox, QComboBox, ComboBox, QDateEdit, QTimeEdit, QDateTimeEdit {{
     background-color: {bg_input};
     color: {text};
     border: 1px solid {border};
