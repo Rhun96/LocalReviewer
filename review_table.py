@@ -2,7 +2,7 @@
 
 
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel,
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QMenu,
     QTableWidget, QTableWidgetItem, QDialog, QAbstractItemView,
 )
 from PySide6.QtCore import Qt
@@ -318,48 +318,23 @@ class TableMixin:
         layout.addLayout(controls_layout)
         self.update_column_filter_combo()
 
-        # Панель массовых операций (ТЗ §5-7)
+        # Панель массовых операций (ТЗ §5-7; пилот шаг 4: 7 кнопок
+        # свернуты в одно меню — как ⋯ Ещё в кейсе; ряд был в 2 строки).
+        # Методы on_bulk_*/on_recheck_all те же, тесты дёргают их напрямую.
         bulk_layout = QHBoxLayout()
         self.bulk_label = QLabel("Выбрано: 0")
         self.bulk_label.setStyleSheet("font-size: 12px; font-weight: bold;")
-        btn_bulk_all = FPushButton("☑ Выбрать все по фильтру")
-        btn_bulk_all.setMinimumHeight(30)
-        btn_bulk_all.clicked.connect(self.on_bulk_select_all)
-        btn_bulk_clear = FPushButton("☐ Снять выбор")
-        btn_bulk_clear.setMinimumHeight(30)
-        btn_bulk_clear.clicked.connect(self.on_bulk_clear)
-        btn_bulk_run = FPushButton("⚡ Массовое действие…")
-        btn_bulk_run.setMinimumHeight(30)
-        btn_bulk_run.clicked.connect(self.on_bulk_run)
-        btn_bulk_undo = FPushButton("↩ Отменить последнюю")
-        btn_bulk_undo.setMinimumHeight(30)
-        btn_bulk_undo.clicked.connect(self.on_bulk_undo)
-        btn_hide = FPushButton("👁 Скрыть выбранные")
-        btn_hide.setMinimumHeight(30)
-        btn_hide.setToolTip("Убрать из ревью (не удаление!)")
-        btn_hide.clicked.connect(self.on_bulk_hide)
-        btn_unhide = FPushButton("👁 Показать выбранные")
-        btn_unhide.setMinimumHeight(30)
-        btn_unhide.setToolTip("Вернуть скрытые в ревью")
-        btn_unhide.clicked.connect(self.on_bulk_unhide)
-        btn_recheck = FPushButton("🔄 Пересчитать проверки")
-        btn_recheck.setMinimumHeight(30)
-        btn_recheck.setToolTip("Записать автопроверки в БД: нужно для фильтров "
-                               "по проверкам и проблемной очереди")
-        btn_recheck.clicked.connect(self.on_recheck_all)
+        self.btn_bulk_menu = FPushButton("☑ Массовые действия…")
+        self.btn_bulk_menu.setMinimumHeight(30)
+        self.btn_bulk_menu.setToolTip("Выбор, массовые правки, скрытие, проверки")
+        self.btn_bulk_menu.clicked.connect(self.open_bulk_menu)
         self.queue_combo = FComboBox()
         self.queue_combo.addItem("Очередь: обычная", "normal")
         self.queue_combo.addItem("Очередь: непроверенные", "unreviewed")
         self.queue_combo.addItem("Очередь: проблемные", "problematic")
         self.queue_combo.currentIndexChanged.connect(self.on_queue_changed)
         bulk_layout.addWidget(self.bulk_label)
-        bulk_layout.addWidget(btn_bulk_all)
-        bulk_layout.addWidget(btn_bulk_clear)
-        bulk_layout.addWidget(btn_bulk_run)
-        bulk_layout.addWidget(btn_bulk_undo)
-        bulk_layout.addWidget(btn_hide)
-        bulk_layout.addWidget(btn_unhide)
-        bulk_layout.addWidget(btn_recheck)
+        bulk_layout.addWidget(self.btn_bulk_menu)
         bulk_layout.addWidget(self.queue_combo)
         bulk_layout.addStretch()
         layout.addLayout(bulk_layout)
@@ -437,6 +412,31 @@ class TableMixin:
 
         widget.setLayout(layout)
         return widget
+
+    def open_bulk_menu(self):
+        """Меню массовых операций таблицы (тот же набор, что был рядом)."""
+        menu = QMenu(self)
+        a_all = menu.addAction("☑ Выбрать все по фильтру")
+        a_all.triggered.connect(self.on_bulk_select_all)
+        a_clear = menu.addAction("☐ Снять выбор")
+        a_clear.triggered.connect(self.on_bulk_clear)
+        a_run = menu.addAction("⚡ Массовое действие…")
+        a_run.triggered.connect(self.on_bulk_run)
+        a_undo = menu.addAction("↩ Отменить последнюю")
+        a_undo.triggered.connect(self.on_bulk_undo)
+        menu.addSeparator()
+        a_hide = menu.addAction("👁 Скрыть выбранные")
+        a_hide.triggered.connect(self.on_bulk_hide)
+        a_unhide = menu.addAction("👁 Показать выбранные")
+        a_unhide.triggered.connect(self.on_bulk_unhide)
+        menu.addSeparator()
+        a_recheck = menu.addAction("🔄 Пересчитать проверки")
+        a_recheck.triggered.connect(self.on_recheck_all)
+        anchor = getattr(self, "btn_bulk_menu", None) or self
+        try:
+            menu.exec(anchor.mapToGlobal(anchor.rect().bottomLeft()))
+        except Exception:
+            menu.exec()
 
     def load_table_data(self):
         """Загружает данные в таблицу."""
