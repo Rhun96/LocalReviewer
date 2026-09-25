@@ -54,6 +54,7 @@ class Sidebar(QWidget):
             ("review",    "🔍 Ревью"),
             ("runs",      "🏃 Прогоны"),
             ("bugs",      "🐞 Баги"),
+            ("launches",  "🚀 Запуски"),
             ("reports",   "📈 Отчёты"),
             ("history",   "🕐 История"),
             ("backup",    "💾 Бэкапы"),

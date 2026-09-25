@@ -11,7 +11,7 @@ import regression_service as rg
 
 
 class RegressionDialog(QDialog):
-    def __init__(self, project_path: str, parent=None):
+    def __init__(self, project_path: str, parent=None, regression_id=None):
         super().__init__(parent)
         self.project_path = project_path
         self.setWindowTitle("Регрессионное тестирование")
@@ -19,6 +19,15 @@ class RegressionDialog(QDialog):
         self._reg_id = None
         self._init_ui()
         self._reload_lists()
+        # Открытие готового запуска (экран Запуски): preselect + показ.
+        if regression_id is not None:
+            try:
+                idx = self.past_combo.findData(regression_id)
+                if idx >= 0:
+                    self.past_combo.setCurrentIndex(idx)
+                    self._load_past()
+            except Exception:
+                pass
 
     def _init_ui(self):
         layout = QVBoxLayout()
