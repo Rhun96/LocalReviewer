@@ -97,3 +97,26 @@ def test_ui_toggle_and_bulk():
         assert len(w.case_ids) == 4
     finally:
         w.close()
+
+
+def test_hide_undo_in_case_mode():
+    """Скрыл в кейсе — Ctrl+Z вернул без похода в таблицу."""
+    from PySide6.QtWidgets import QApplication
+    QApplication.instance() or QApplication([])
+    from review_screen import ReviewScreen
+    p = _proj()
+    w = ReviewScreen(p)
+    try:
+        w.show()
+        cid = w.current_case_id
+        assert len(w.case_ids) == 4
+        w.toggle_hide_current()
+        assert len(w.case_ids) == 3
+        assert vis.hidden_count(p) == 1
+        assert w._last_single is not None and w._last_single["kind"] == "hide"
+        w.undo_single()
+        assert vis.hidden_count(p) == 0
+        assert len(w.case_ids) == 4
+        assert cid in w.case_ids
+    finally:
+        w.close()

@@ -1039,7 +1039,10 @@ class CaseMixin:
             else:
                 n = _vis.hide_cases(self.project_path, [self.current_case_id])
                 notify(self, "success", "Скрытие",
-                       f"Кейс скрыт из ревью ({n}). Вернуть: таблица → 👁 → bulk.")
+                       f"Кейс скрыт из ревью ({n}). Вернуть: Ctrl+Z или "
+                       "таблица → 👁 → bulk.")
+                self._last_single = {"kind": "hide",
+                                     "case_id": self.current_case_id}
             self.current_case["hidden"] = 0 if hidden else 1
             self.update_info_label()
             self.update_queue_indicator()
@@ -1089,6 +1092,12 @@ class CaseMixin:
                                              old_value, new_value, created_at)
                         VALUES (?, 'comment_changed', 'comment', ?, ?, ?)
                     """, (cid, act["new"], act["old"], now))
+                elif act["kind"] == "hide":
+                    import visibility_service as _vis2
+                    _vis2.unhide_cases(self.project_path, [cid])
+                elif act["kind"] == "unhide":
+                    import visibility_service as _vis3
+                    _vis3.hide_cases(self.project_path, [cid])
                 elif act["kind"] == "tag":
                     if act["added"]:
                         cur.execute("DELETE FROM case_tags WHERE case_id=? AND tag_id=?",
@@ -1115,6 +1124,14 @@ class CaseMixin:
         self._last_single = None
         self._review_finished = False
         notify(self, "success", "Отмена", "Действие отменено")
+        if act["kind"] in ("hide", "unhide"):
+            # Возвращённый кейс снова в ротации: пересобрать выборку.
+            try:
+                self.load_case_ids()
+                self.update_queue_indicator()
+                self.update_filter_indicator()
+            except Exception:
+                pass
         if self.case_ids and cid in self.case_ids:
             self.load_case(self.case_ids.index(cid))
             self.update_queue_indicator()

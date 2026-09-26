@@ -53,10 +53,18 @@ def test_cards_values():
 
 
 def test_chart_and_recent():
+    import time as _t
     pytest.importorskip("matplotlib")
     w = _win(_proj())
     try:
         w.show()
+        for _ in range(100):
+            app = QApplication.instance()
+            app.processEvents()
+            pix = w.chart_label.pixmap()
+            if pix is not None and not pix.isNull():
+                break
+            _t.sleep(0.05)
         pix = w.chart_label.pixmap()
         assert pix is not None and not pix.isNull()
         assert w.recent_list.count() >= 3
@@ -154,5 +162,30 @@ def test_period_combo_filters():
         w.refresh()
         v, _s = _text(w, "reviewed")
         assert v == "3"
+    finally:
+        w.close()
+
+
+def test_chart_lazy_renders_on_show():
+    """График не рендерится в refresh (старт!), только после показа."""
+    import time as _t
+
+    import pytest
+    pytest.importorskip("matplotlib")
+    w = _win(_proj())
+    try:
+        assert w._chart_dirty
+        pix0 = w.chart_label.pixmap()
+        assert pix0 is None or pix0.isNull()
+        w.show()
+        for _ in range(100):
+            app = QApplication.instance()
+            app.processEvents()
+            if not w._chart_dirty and w.chart_label.pixmap() is not None:
+                break
+            _t.sleep(0.05)
+        assert not w._chart_dirty
+        assert w.chart_label.pixmap() is not None
+        assert not w.chart_label.pixmap().isNull()
     finally:
         w.close()

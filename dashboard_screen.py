@@ -43,8 +43,29 @@ class DashboardScreen(BaseScreen):
         self.project_path = project_path
         self.parent_window = parent
         self._cards: dict = {}
+        self._chart_dirty = True
+        self._last_dyn: list = []
         self._init_ui()
         self.refresh()
+
+    def showEvent(self, event):
+        # График тяжёлый (холодный matplotlib ~2с): рисуем после показа,
+        # чтобы не тормозить открытие проекта и анимацию навигации.
+        super().showEvent(event)
+        try:
+            from PySide6.QtCore import QTimer as _QT
+            _QT.singleShot(100, self._maybe_render_chart)
+        except Exception:
+            pass
+
+    def _maybe_render_chart(self):
+        try:
+            if not self._chart_dirty or not self.isVisible():
+                return
+            self._chart_dirty = False
+            self._draw_chart(self._last_dyn)
+        except Exception:
+            pass
 
     def _init_ui(self):
         outer = QVBoxLayout()
@@ -220,7 +241,14 @@ class DashboardScreen(BaseScreen):
                  f"создано за 7 дн: {created7}")
         else:
             _set("bugs", "0", "багов пока нет")
-        self._draw_chart(dyn)
+        self._last_dyn = dyn
+        self._chart_dirty = True
+        try:
+            if self.isVisible():
+                from PySide6.QtCore import QTimer as _QT
+                _QT.singleShot(100, self._maybe_render_chart)
+        except Exception:
+            pass
         self._load_recent()
 
     def _draw_chart(self, dyn):
