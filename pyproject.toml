@@ -1,10 +1,10 @@
 [project]
 name = "localreviewer"
-version = "0.8.1"
+version = "0.9.0"
 description = "Локальное десктоп-приложение для ревью и разметки датасетов"
 requires-python = ">=3.11"
 dependencies = [
-  "PySide6==6.7.2",
+  "PySide6==6.11.2",
   "PySide6-Fluent-Widgets==1.11.3",
   "openpyxl==3.1.5",
   "odfpy==1.4.1",

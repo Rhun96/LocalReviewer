@@ -13,7 +13,7 @@
 ![Qt](https://img.shields.io/badge/Interface-PySide6_Fluent-41CD52?logo=qt&logoColor=white)
 ![Windows](https://img.shields.io/badge/OS-Windows_10%2F11-0078D6?logo=windows&logoColor=white)
 ![SQLite](https://img.shields.io/badge/Storage-SQLite-003B57?logo=sqlite&logoColor=white)
-![Version](https://img.shields.io/badge/Version-0.8.1-0b7a34)
+![Version](https://img.shields.io/badge/Version-0.9.0-0b7a34)
 
 ---
 
@@ -87,10 +87,17 @@
 - v0.8: импорт оценок прогона из Excel, автоперепривязка ответов,
   регрессия датасет-vs-датасет, удаление датасетов, универсальная
   аналитика (Сводка/Качество, drill-down цифра→кейсы, CSV/XLSX)
+- v0.9: рескин по референсу — 🏠 Главная (карточки, динамика, действия),
+  🚀 Запуски (история регрессий), 🗂 Датасеты отдельным экраном,
+  двухколоночное ревью, карточка бага с автосейвом, палитра Референс,
+  единые даты ДД-ММ-ГГГГ, адаптив под окно
 
 ### 🎨 Оформление
 - Fluent-дизайн (Windows 11): светлая, тёмная и системная темы, переключаются
   в Настройках без перезапуска; без библиотеки — классическая тема
+- Палитры: Классика и Референс (тёмная сине-серая) — переключатель в Настройках,
+  применяется после перезапуска
+- Оконный режим: таблицы и кейс подстраиваются под размер окна
 
 ---
 
@@ -148,6 +155,10 @@ LocalReviewer/
 │
 ├── main.py                   # Точка входа, FluentWindow + навигация
 │
+├── dashboard_screen.py       # 🏠 Главная: карточки, динамика, действия
+├── launches_screen.py        # 🚀 Запуски: история регрессий
+├── datasets_screen.py        # 🗂 Датасеты отдельным экраном
+│
 ├── database.py               # Схема, подключение, PRAGMA, индексы
 ├── migrations.py             # Миграции v1–v17 без потери данных
 ├── constants.py              # Статусы, роли маппинга, проверки
@@ -190,7 +201,7 @@ LocalReviewer/
 ├── tag_service.py            # Системные и свои теги
 │
 ├── dataset_service.py        # Датасеты, полные слепки, freeze, сравнение
-├── datasets_dialog.py        # Диалог датасетов
+├── datasets_dialog.py        # Виджет датасетов + тонкий диалог
 ├── dataset_select_dialog.py  # Выбор скоупа для ревью
 ├── model_run_service.py      # Прогоны: импорт, сопоставление, сравнение
 ├── runs_screen.py            # Экран прогонов + импорт ответов
@@ -201,8 +212,8 @@ LocalReviewer/
 │
 ├── bug_report_service.py     # Баги: хранение, связь баг-кейс
 ├── bug_export_service.py     # Копипаст Jira/Markdown/Plain
-├── bug_report_dialog.py      # Диалог создания бага
-├── bug_reports_screen.py     # Экран багов
+├── bug_report_dialog.py      # Виджет карточки бага + тонкий диалог
+├── bug_reports_screen.py     # Экран багов (таблица + карточка с автосейвом)
 ├── history_service.py        # Поиск по истории (даты/поле/diff)
 ├── diff_service.py           # Visual Diff ответов
 ├── annotation_io_service.py  # Импорт/экспорт разметки (JSONL)
@@ -229,7 +240,7 @@ LocalReviewer/
 │
 ├── docs/USER_GUIDE.md        # Подробная инструкция пользователя
 ├── SECURITY.md               # Политика безопасности
-├── tests/                    # pytest (216 тестов: все подсистемы)
+├── tests/                    # pytest (250 тестов: все подсистемы)
 └── requirements.txt
 ```
 
