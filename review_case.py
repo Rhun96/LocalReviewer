@@ -46,6 +46,11 @@ class CaseMixin:
         right_wrap.setMaximumWidth(360)
         content_row.addLayout(left_col, 3)
         content_row.addWidget(right_wrap, 1)
+        # Якоря адаптива (узкое окно — рельс под контентом).
+        self._case_content_row = content_row
+        self._case_left_col = left_col
+        self._case_right_wrap = right_wrap
+        self._case_stacked = False
 
         # === 1. Текст кейса (плоский контейнер: вложенные группы
         # криво рисуют заголовки, проверено на скринах) ===
@@ -296,6 +301,46 @@ class CaseMixin:
 
         widget.setLayout(layout)
         return widget
+
+    def _refit_case_layout(self):
+        """Адаптив кейса: узко — рельс решений под контентом, широко — сбоку.
+
+        Вызывает оболочка из resizeEvent (виртуалки миксинов Qt не видит).
+        """
+        try:
+            scr = getattr(self, "_review_scroll", None)
+            row = getattr(self, "_case_content_row", None)
+            wrap = getattr(self, "_case_right_wrap", None)
+            left = getattr(self, "_case_left_col", None)
+            if scr is None or row is None or wrap is None or left is None:
+                return
+            avail = scr.viewport().width()
+            if avail <= 0:
+                return
+            # need всегда по БОКОВОМУ рельсу (360), а не текущему max:
+            # после стэкинга max=16777215 и назад уже не разложиться.
+            need = (left.totalMinimumSize().width() + 360 + row.spacing())
+            stacked = bool(getattr(self, "_case_stacked", False))
+            if not stacked and avail < need:
+                main = self.case_view.layout()
+                row.removeWidget(wrap)
+                main.addWidget(wrap)
+                wrap.setMaximumWidth(16777215)
+                self._case_stacked = True
+            elif stacked and avail >= need + 40:
+                main = self.case_view.layout()
+                main.removeWidget(wrap)
+                row.addWidget(wrap, 1)
+                wrap.setMaximumWidth(360)
+                self._case_stacked = False
+            else:
+                return
+            try:
+                self.case_view.updateGeometry()
+            except Exception:
+                pass
+        except Exception:
+            pass
 
     def open_more_menu(self):
         """Редкие инструменты кейса — одним меню вместо ряда кнопок."""

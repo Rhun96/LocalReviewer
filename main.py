@@ -262,7 +262,7 @@ class MainWindow(_BaseWindow):
     """Главное окно приложения (классика + Fluent-навигация)."""
 
     NAV_ITEMS = [
-        ("dashboard", "HOME", "Главная"),
+        ("dashboard", "SPEED_HIGH", "Главная"),
         ("project", "FOLDER", "Проект"),
         ("review", "SEARCH", "Ревью"),
         ("runs", "SYNC", "Прогоны"),

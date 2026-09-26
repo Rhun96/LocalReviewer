@@ -183,3 +183,37 @@ def test_table_fits_viewport_footer_visible():
         assert foot_y <= scr.viewport().height(), (foot_y, scr.viewport().height())
     finally:
         w.close()
+
+
+def test_case_stacks_on_narrow_window():
+    """Адаптив кейса: узко — рельс под контентом, широко — сбоку."""
+    from PySide6.QtWidgets import QApplication
+
+    from database import init_database
+    from importer import import_file
+
+    tmp = tempfile.mkdtemp()
+    init_database(tmp)
+    mapping = {"q": "primary_text", "a": "response_text"}
+    import_file(tmp, "f.xlsx", "excel", "S", 0, mapping,
+                [{"q": f"q{i}", "a": f"a{i}"} for i in range(5)])
+    QApplication.instance() or QApplication([])
+    w = ReviewScreen(tmp)
+    try:
+        app = QApplication.instance()
+        w.show()
+        w.resize(1000, 700)
+        app.processEvents()
+        w.view_stack.setCurrentIndex(0)
+        w._refit_case_layout()
+        app.processEvents()
+        assert w._case_stacked
+        assert w.case_view.layout().indexOf(w._case_right_wrap) >= 0
+        w.resize(1750, 900)
+        app.processEvents()
+        w._refit_case_layout()
+        app.processEvents()
+        assert not w._case_stacked
+        assert w._case_content_row.indexOf(w._case_right_wrap) >= 0
+    finally:
+        w.close()

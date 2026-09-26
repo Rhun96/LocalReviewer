@@ -305,6 +305,18 @@ class SettingsScreen(BaseScreen):
         checks_group.setLayout(checks_layout)
         layout.addWidget(checks_group)
 
+        # Оконный режим: подписи форм переносятся (иначе min = вся строка).
+        for _form in (review_layout, prio_layout, ui_layout,
+                      session_layout, privacy_layout, checks_layout):
+            try:
+                for _i in range(_form.count()):
+                    _lab = _form.itemAt(_i, QFormLayout.ItemRole.LabelRole)
+                    _w = _lab.widget() if _lab is not None else None
+                    if isinstance(_w, QLabel):
+                        _w.setWordWrap(True)
+            except Exception:
+                pass
+
         # Кнопки
         buttons_layout = QHBoxLayout()
 

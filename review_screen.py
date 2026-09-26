@@ -115,9 +115,13 @@ class ReviewScreen(BaseScreen, ProfileMixin, CaseMixin, TableMixin, BulkMixin, V
             notify(self, "warning", "Внимание", "Нет кейсов, соответствующих фильтрам")
 
     def resizeEvent(self, event):
-        """Форвардер рефита таблицы (виртуалки из миксинов Qt не вызывает)."""
+        """Форвардер рефитов (виртуалки из миксинов Qt не вызывает)."""
         try:
             self._refit_on_resize()
+        except Exception:
+            pass
+        try:
+            self._refit_case_layout()
         except Exception:
             pass
         try:

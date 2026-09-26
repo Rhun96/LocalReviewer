@@ -277,7 +277,7 @@ class VerdictsMixin:
                 cursor = conn.cursor()
                 cursor.execute("SELECT tag_id, tag_name, tag_code FROM tags ORDER BY tag_name")
                 all_tags = cursor.fetchall()
-            columns = 5
+            columns = 3
             row, col = 0, 0
             for tag in all_tags:
                 tag_id = tag['tag_id']
