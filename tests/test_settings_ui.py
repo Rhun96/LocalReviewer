@@ -72,3 +72,25 @@ def test_connect_check_changed_both_widgets():
         connect_check_changed(sw, lambda *_a: hits.append("switch"))
         sw.setChecked(True)
         assert hits == ["box", "switch"]
+
+
+def test_palette_combo_snapshot():
+    from PySide6.QtCore import QSettings
+    qs = QSettings("LocalReviewer", "LocalReviewer")
+    old = qs.value("ui/palette", None)
+    w, _p = _win()
+    try:
+        w.show()
+        assert w.palette_combo.count() == 2
+        for i in range(w.palette_combo.count()):
+            if w.palette_combo.itemData(i) == "ref":
+                w.palette_combo.setCurrentIndex(i)
+                break
+        from ui_compat import get_palette_mode
+        assert get_palette_mode() == "ref"
+    finally:
+        w.close()
+        if old is None:
+            qs.remove("ui/palette")
+        else:
+            qs.setValue("ui/palette", old)

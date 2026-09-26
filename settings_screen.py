@@ -127,6 +127,22 @@ class SettingsScreen(BaseScreen):
         self.theme_combo.addItem("Тёмная", "dark")
         self.theme_combo.currentIndexChanged.connect(self.on_theme_changed)
         ui_layout.addRow("Тема:", self.theme_combo)
+        self.palette_combo = FComboBox()
+        self.palette_combo.addItem("Классика", "classic")
+        self.palette_combo.addItem("Референс", "ref")
+        try:
+            from ui_compat import get_palette_mode as _gpm
+            _cur = _gpm()
+            for i in range(self.palette_combo.count()):
+                if self.palette_combo.itemData(i) == _cur:
+                    self.palette_combo.blockSignals(True)
+                    self.palette_combo.setCurrentIndex(i)
+                    self.palette_combo.blockSignals(False)
+                    break
+        except Exception:
+            pass
+        self.palette_combo.currentIndexChanged.connect(self.on_palette_changed)
+        ui_layout.addRow("Палитра:", self.palette_combo)
         self.fluent_hint = QLabel()
         self.fluent_hint.setWordWrap(True)
         ui_layout.addRow(self.fluent_hint)
@@ -504,6 +520,12 @@ class SettingsScreen(BaseScreen):
             self.fluent_hint.setText(
                 "Fluent-библиотека не установлена (pip install PySide6-Fluent-Widgets) — "
                 "используется классическая тема.")
+
+    def on_palette_changed(self):
+        from ui_compat import set_palette_mode
+        set_palette_mode(self.palette_combo.currentData() or "classic")
+        notify(self, "warning", "Палитра",
+               "Применится после перезапуска приложения.")
 
     def _collect_settings(self) -> list:
         # 1-в-1 с autocheck_service.DEFAULTS: каждый ключ — свой чекбокс.

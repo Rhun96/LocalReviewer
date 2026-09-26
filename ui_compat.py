@@ -352,6 +352,32 @@ def set_theme_mode(mode: str) -> str:
         return "system"
 
 
+PALETTE_MODES = ("classic", "ref")
+PALETTE_NAMES = {"classic": "Классика", "ref": "Референс"}
+
+
+def get_palette_mode() -> str:
+    """Палитра из настроек (применяется при старте, нужен перезапуск)."""
+    try:
+        from PySide6.QtCore import QSettings
+        mode = QSettings("LocalReviewer", "LocalReviewer").value(
+            "ui/palette", "classic")
+        return mode if mode in PALETTE_MODES else "classic"
+    except Exception:
+        return "classic"
+
+
+def set_palette_mode(mode: str) -> str:
+    try:
+        from PySide6.QtCore import QSettings
+        if mode not in PALETTE_MODES:
+            mode = "classic"
+        QSettings("LocalReviewer", "LocalReviewer").setValue("ui/palette", mode)
+        return mode
+    except Exception:
+        return "classic"
+
+
 def _resolve_effective(mode: str) -> str:
     """system -> light/dark по ОС (через darkdetect из зависимостей Fluent)."""
     if mode in ("light", "dark"):

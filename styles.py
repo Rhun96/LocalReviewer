@@ -181,6 +181,97 @@ UI_TOKENS = {
     "radius_m": 8,
 }
 
+# === Референс-палитра (старый визуал ChatGPT, hex — лучшее чтение
+# со скрина, править построчно при сверке; кегли НЕ трогаем:
+# веб-масштаб 20/24 ломает десктопные шапки) ===
+REF_COLORS = {
+    'bg_dark': '#0d1117',
+    'bg_panel': '#12181d',
+    'bg_card': '#1a2129',
+    'bg_card_hover': '#212a33',
+    'bg_input': '#161d24',
+    'bg_hover': '#1f2933',
+    'bg_active': '#28323d',
+    'bg_sidebar': '#0b0f14',
+    'green_bright': '#00ff41',
+    'text_bright': '#e6edf3',
+    'green_main': '#00ff41',
+    'green_dark': '#00cc33',
+    'green_dim': '#0a5c2a',
+    'red': '#ff4d4f',
+    'red_dark': '#b32b2b',
+    'danger_hover': '#2a0d0d',
+    'amber_hover': '#332a00',
+    'red_light': '#ff8080',
+    'red_border': '#5a2a2a',
+    'gate_red': '#C0392B',
+    'border_soft': '#30363d',
+    'highlight_yellow': '#E3B008',
+    'pure_white': '#FFFFFF',
+    'pure_black': '#000000',
+    'yellow': '#f5c518',
+    'orange': '#FF9900',
+    'amber': '#f5c518',
+    'blue': '#4da3ff',
+    'accent_hover': '#0f1e2e',
+    'gray': '#8b949e',
+    'border': '#00ff41',
+    'border_dim': '#24313a',
+    'green_deep': '#0f2e1c',
+}
+
+REF_FLUENT_DARK = {
+    'bg': '#12181d',
+    'bg_card': '#1a2129',
+    'bg_input': '#161d24',
+    'text': '#e6edf3',
+    'text_dim': '#8b949e',
+    'border': '#30363d',
+    'accent': '#00ff41',
+    'accent_soft': '#0f2e1c',
+    'header_bg': '#161d24',
+    'sel_bg': '#00cc33',
+    'sel_text': '#ffffff',
+}
+
+REF_CHART_DARK = {
+    'style': 'dark_background',
+    'bg': '#12181d',
+    'fg': '#e6edf3',
+    'spine': '#30363d',
+    'bar_total': '#1d4a30',
+    'bar_done': '#00cc33',
+    'pct_stroke': '#000000',
+}
+
+
+def _palette_variant() -> str:
+    """classic | ref: env LR_PALETTE важнее QSettings ui/palette."""
+    try:
+        import os as _os
+        v = (_os.environ.get("LR_PALETTE") or "").strip().lower()
+        if v in ("classic", "ref"):
+            return v
+    except Exception:
+        pass
+    try:
+        from PySide6.QtCore import QSettings as _QS
+        v = str(_QS("LocalReviewer", "LocalReviewer").value(
+            "ui/palette", "classic") or "classic")
+        return "ref" if v.strip().lower() == "ref" else "classic"
+    except Exception:
+        return "classic"
+
+
+# Переключатель, НЕ замена: литералы выше целы (гард токенов парсит
+# их как есть), мутация in-place — все потребители видят один объект.
+# Светлая тема и SEMANTIC/DIFF/серии — общие для обоих вариантов.
+if _palette_variant() == "ref":
+    COLORS.update(REF_COLORS)
+    FLUENT_DARK.update(REF_FLUENT_DARK)
+    CHART_DARK.update(REF_CHART_DARK)
+    UI_TOKENS.update({"radius_s": 8, "radius_m": 12})
+
 # Глобальный стиль приложения
 APP_STYLE = f"""
 /* === ОБЩИЕ НАСТРОЙКИ === */
