@@ -73,6 +73,15 @@ class DashboardScreen(BaseScreen):
             pass
         self.scope_combo.currentIndexChanged.connect(self.refresh)
         scope_row.addWidget(self.scope_combo, 1)
+        scope_row.addWidget(QLabel("Период:"))
+        self.period_combo = FComboBox()
+        self.period_combo.addItem("Всё время", "")
+        self.period_combo.addItem("Сегодня", "today")
+        self.period_combo.addItem("7 дней", "7d")
+        self.period_combo.addItem("14 дней", "14d")
+        self.period_combo.addItem("30 дней", "30d")
+        self.period_combo.currentIndexChanged.connect(self.refresh)
+        scope_row.addWidget(self.period_combo, 1)
         layout.addLayout(scope_row)
 
         from styles import SEMANTIC as _SEM
@@ -149,6 +158,17 @@ class DashboardScreen(BaseScreen):
                 scope = {"file_id": int(fid)}
         except Exception:
             scope = {}
+        try:
+            mode = self.period_combo.currentData() or ""
+            today = _date.today()
+            if mode == "today":
+                scope["reviewed_from"] = scope["reviewed_to"] = today.isoformat()
+            elif mode and mode.endswith("d"):
+                scope["reviewed_from"] = (
+                    today - _td(days=int(mode[:-1]))).isoformat()
+                scope["reviewed_to"] = today.isoformat()
+        except Exception:
+            pass
         try:
             cards = an.card_counts(self.project_path, scope)["cards"]
             pcts = an.percentages({"cards": cards})
@@ -231,6 +251,8 @@ class DashboardScreen(BaseScreen):
                     color=_SEM["success"], linewidth=2, label="Проверено")
             ax.plot(days, bad, marker="o", markersize=3,
                     color=_SEM["danger"], linewidth=2, label="Плохих")
+            ax.grid(True, alpha=0.25, linestyle="--")
+            ax.set_axisbelow(True)
             ax.tick_params(colors=pal["text"], labelsize=9)
             for tick in ax.get_xticklabels():
                 tick.set_rotation(30)
@@ -260,6 +282,16 @@ class DashboardScreen(BaseScreen):
         except Exception:
             fid = None
         try:
+            mode = self.period_combo.currentData() or ""
+            today = _date.today()
+            dfrom = dto = None
+            if mode == "today":
+                dfrom = dto = today.isoformat()
+            elif mode and mode.endswith("d"):
+                dfrom = (today - _td(days=int(mode[:-1]))).isoformat()
+        except Exception:
+            dfrom = dto = None
+        try:
             if fid is not None:
                 from database import db as _db
                 with _db(self.project_path) as conn:
@@ -267,9 +299,11 @@ class DashboardScreen(BaseScreen):
                         "SELECT case_id FROM cases WHERE file_id = ?",
                         (int(fid),)).fetchall()]
                 events = hs.search_history(
-                    self.project_path, case_ids=cids, limit=8) if cids else []
+                    self.project_path, case_ids=cids, limit=8,
+                    date_from=dfrom, date_to=dto) if cids else []
             else:
-                events = hs.search_history(self.project_path, limit=8)
+                events = hs.search_history(
+                    self.project_path, limit=8, date_from=dfrom, date_to=dto)
         except Exception:
             events = []
         self.recent_list.clear()

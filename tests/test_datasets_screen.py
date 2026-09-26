@@ -61,3 +61,13 @@ def test_project_has_no_dup_entries():
         assert any("Начать ревью" in t for t in labels), labels
     finally:
         w.close()
+
+
+def test_totals_footer():
+    _app()
+    w = DatasetsScreen(_proj(), None)
+    try:
+        w.show()
+        assert "Всего датасетов: 1" in w.body.totals_label.text()
+    finally:
+        w.close()

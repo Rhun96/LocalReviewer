@@ -1,5 +1,5 @@
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QGroupBox,
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QGroupBox, QGridLayout,
     QFileDialog, QTableWidget, QTableWidgetItem,
     QTabWidget, QScrollArea
 )
@@ -215,8 +215,9 @@ class ReportsScreen(BaseScreen):
             f"QScrollArea {{ border: none; background-color: {_CC['bg_dark']}; }}")
 
         self.charts_container = QWidget()
-        self.charts_layout = QVBoxLayout()
-        self.charts_layout.setSpacing(20)
+        # Компактная сетка 2 колонки (референс: графики рядом, не простынёй).
+        self.charts_layout = QGridLayout()
+        self.charts_layout.setSpacing(16)
         self.charts_container.setLayout(self.charts_layout)
         scroll.setWidget(self.charts_container)
         layout.addWidget(scroll)
@@ -1053,13 +1054,15 @@ class ReportsScreen(BaseScreen):
         labels = [f"{p['dataset']} v{p['version']}" for p in pts]
         rates = [p["bad_rate"] * 100 for p in pts]
         plt.style.use(pal["style"])
-        fig, ax = plt.subplots(figsize=(10, 4), dpi=100)
+        fig, ax = plt.subplots(figsize=(7, 3.6), dpi=100)
         fig.patch.set_facecolor(pal["bg"])
         ax.set_facecolor(pal["bg"])
         from styles import CHART_SERIES as _CS_DARK
         from styles import CHART_SERIES_LIGHT as _CS_LIGHT
         _CS2 = _CS_LIGHT if effective_theme() != "dark" else _CS_DARK
         ax.plot(labels, rates, marker="o", color=_CS2["bad"], linewidth=2)
+        ax.grid(True, alpha=0.25, linestyle="--")
+        ax.set_axisbelow(True)
         ax.set_ylabel("Bad-rate, %", color=pal["fg"])
         ax.set_title("Качество по версиям", color=pal["fg"], fontsize=14, pad=15)
         ax.tick_params(colors=pal["fg"])
@@ -1082,10 +1085,20 @@ class ReportsScreen(BaseScreen):
             Qt.TransformationMode.SmoothTransformation
         ))
         lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.charts_layout.addWidget(lbl)
+        self._add_chart(lbl)
+
+    def _add_chart(self, widget):
+        """Следующая ячейка сетки 2×N."""
+        pos = getattr(self, "_chart_pos", 0)
+        try:
+            self.charts_layout.addWidget(widget, pos // 2, pos % 2)
+        except Exception:
+            self.charts_layout.addWidget(widget)
+        self._chart_pos = pos + 1
 
     def refresh_charts(self):
         """Обновляет графики."""
+        self._chart_pos = 0
         while self.charts_layout.count():
             item = self.charts_layout.takeAt(0)
             if item.widget():
@@ -1143,15 +1156,15 @@ class ReportsScreen(BaseScreen):
             lbl.setStyleSheet(
                 f"color: {_CC['green_dark']}; font-size: 14px;")
             lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.charts_layout.addWidget(lbl)
+            self._add_chart(lbl)
             return
 
         plt.style.use(pal["style"])
-        fig, ax = plt.subplots(figsize=(10, 6), dpi=100)
+        fig, ax = plt.subplots(figsize=(7, 4.5), dpi=100)
         fig.patch.set_facecolor(pal["bg"])
         ax.set_facecolor(pal["bg"])
 
-        # Круговая диаграмма БЕЗ подписей на секторах.
+        # Кольцо как в референсе (донат с итогом в центре).
         # Проценты — цветом темы с обводкой: читаются на любом секторе в обеих темах.
         import matplotlib.patheffects as _pe
         wedges, texts, autotexts = ax.pie(
@@ -1159,11 +1172,14 @@ class ReportsScreen(BaseScreen):
             colors=colors,
             autopct='%1.1f%%',
             startangle=90,
-            pctdistance=0.75,
+            pctdistance=0.82,
+            wedgeprops=dict(width=0.45, edgecolor=pal["bg"]),
             textprops={'color': pal["fg"], 'fontsize': 11, 'fontweight': 'bold'},
         )
         for t in autotexts:
             t.set_path_effects([_pe.withStroke(linewidth=3, foreground=pal["pct_stroke"])])
+        ax.text(0, 0, str(sum(sizes)), ha="center", va="center",
+                fontsize=16, fontweight="bold", color=pal["fg"])
 
         # Убираем подписи на секторах, оставляем только проценты
         for text in texts:
@@ -1201,7 +1217,7 @@ class ReportsScreen(BaseScreen):
             Qt.TransformationMode.SmoothTransformation
         ))
         lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.charts_layout.addWidget(lbl)
+        self._add_chart(lbl)
 
     def _create_files_bar_chart(self, files):
         """Столбчатая диаграмма по файлам."""
@@ -1212,7 +1228,7 @@ class ReportsScreen(BaseScreen):
         reviewed = [f['reviewed_count'] for f in files]
 
         plt.style.use(pal["style"])
-        fig, ax = plt.subplots(figsize=(10, 6), dpi=100)
+        fig, ax = plt.subplots(figsize=(7, 4.5), dpi=100)
         fig.patch.set_facecolor(pal["bg"])
         ax.set_facecolor(pal["bg"])
 
@@ -1251,7 +1267,7 @@ class ReportsScreen(BaseScreen):
             Qt.TransformationMode.SmoothTransformation
         ))
         lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.charts_layout.addWidget(lbl)
+        self._add_chart(lbl)
 
     def _create_tags_bar_chart(self, tags):
         """Горизонтальная диаграмма тегов."""
@@ -1261,7 +1277,7 @@ class ReportsScreen(BaseScreen):
         counts = [t['cases_count'] for t in tags]
 
         plt.style.use(pal["style"])
-        fig, ax = plt.subplots(figsize=(10, max(4, len(tags) * 0.5)), dpi=100)
+        fig, ax = plt.subplots(figsize=(7, max(3.5, len(tags) * 0.45)), dpi=100)
         fig.patch.set_facecolor(pal["bg"])
         ax.set_facecolor(pal["bg"])
 
@@ -1294,7 +1310,7 @@ class ReportsScreen(BaseScreen):
             Qt.TransformationMode.SmoothTransformation
         ))
         lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.charts_layout.addWidget(lbl)
+        self._add_chart(lbl)
 
     def on_export_results(self):
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")

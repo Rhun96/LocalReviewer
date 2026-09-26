@@ -141,3 +141,18 @@ def test_review_cards_follow_file_filter():
         assert w._stat_cards["total"][1].text() == "в файле"
     finally:
         w.close()
+
+
+def test_period_combo_filters():
+    w = _win(_proj())
+    try:
+        w.show()
+        for i in range(w.period_combo.count()):
+            if w.period_combo.itemData(i) == "7d":
+                w.period_combo.setCurrentIndex(i)
+                break
+        w.refresh()
+        v, _s = _text(w, "reviewed")
+        assert v == "3"
+    finally:
+        w.close()

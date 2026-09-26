@@ -105,6 +105,9 @@ class DatasetsWidget(QWidget):
         self.cmp_details.setMaximumHeight(140)
         layout.addWidget(self.cmp_details)
         clear_in_fluent(self.cmp_details)
+        self.totals_label = QLabel("")
+        self.totals_label.setStyleSheet("font-size: 11px;")
+        layout.addWidget(self.totals_label)
         self.setLayout(layout)
 
     def _current_ds(self) -> int | None:
@@ -129,6 +132,18 @@ class DatasetsWidget(QWidget):
         else:
             self.ver_list.clear()
             self.cmp_result.setText("Датасетов пока нет — нажми «＋ Датасет».")
+        try:
+            n_ver = 0
+            n_rec = 0
+            for ds in datasets:
+                vers = list_versions(self.project_path, ds["dataset_id"])
+                n_ver += len(vers)
+                n_rec += sum(int(v.get("case_count") or 0) for v in vers)
+            self.totals_label.setText(
+                f"Всего датасетов: {len(datasets)} · "
+                f"версий: {n_ver} · записей: {n_rec}")
+        except Exception:
+            pass
 
     def _on_dataset_selected(self):
         ds_id = self._current_ds()
