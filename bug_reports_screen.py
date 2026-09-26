@@ -1,6 +1,6 @@
 """Экран «Баги» (ТЗ V2 §21): таблица, фильтры, поиск, создание/правка."""
 from PySide6.QtWidgets import (
-    QVBoxLayout, QHBoxLayout, QLabel, QTableWidget, QTableWidgetItem,
+    QVBoxLayout, QHBoxLayout, QLabel, QTableWidget, QTableWidgetItem, QWidget,
 )
 from PySide6.QtCore import Qt
 from database import db
@@ -57,19 +57,45 @@ class BugReportsScreen(BaseScreen):
         search_row.addWidget(btn_find)
         layout.addLayout(search_row)
 
+        from PySide6.QtWidgets import QSplitter
+        splitter = QSplitter(Qt.Orientation.Horizontal)
         self.table = QTableWidget()
-        layout.addWidget(self.table, 2)
+        splitter.addWidget(self.table)
         try:
             clear_in_fluent(self.table)
             polish_table(self.table, stretch_last=True)
         except Exception:
             pass
+        splitter.setStretchFactor(0, 3)
+
+        card_wrap = QWidget()
+        card_layout = QVBoxLayout()
+        card_layout.setContentsMargins(0, 0, 0, 0)
+        self.card_title = QLabel("Карточка бага")
+        self.card_title.setStyleSheet("font-size: 13px; font-weight: bold;")
+        self.card_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        card_layout.addWidget(self.card_title)
+        self.card_host = QVBoxLayout()
+        self.card_host.setContentsMargins(0, 0, 0, 0)
+        card_layout.addLayout(self.card_host, 1)
+        card_wrap.setLayout(card_layout)
+        splitter.addWidget(card_wrap)
+        splitter.setStretchFactor(1, 2)
+        try:
+            splitter.setSizes([900, 460])
+        except Exception:
+            pass
+        layout.addWidget(splitter, 2)
+        self.card_widget = None
+        self.card_id = None
+        self._placeholder_card()
 
         btns = QHBoxLayout()
         btn_new = FPrimaryButton("＋ Баг")
-        btn_new.setToolTip("Пустой баг (кейсы привяжешь внутри)")
+        btn_new.setToolTip("Пустой баг в карточке справа (кейсы привяжешь внутри)")
         btn_new.clicked.connect(self._new_bug)
         btn_open = FPushButton("📝 Открыть")
+        btn_open.setToolTip("Показать выбранный баг в карточке справа")
         btn_open.clicked.connect(self._open_bug)
         btn_copy = FPushButton("📋 Копировать")
         btn_copy.setToolTip("Скопировать выбранный баг без открытия карточки "
@@ -85,6 +111,10 @@ class BugReportsScreen(BaseScreen):
         layout.addLayout(btns)
         self.setLayout(layout)
         self.table.itemDoubleClicked.connect(lambda _i: self._open_bug())
+        try:
+            self.table.itemSelectionChanged.connect(self._on_selection)
+        except Exception:
+            pass
 
     def refresh(self):
         has_ext = None
@@ -110,6 +140,10 @@ class BugReportsScreen(BaseScreen):
                     "SELECT category_id, name FROM error_categories").fetchall()}
         except Exception:
             cats = {}
+        try:
+            self.table.blockSignals(True)
+        except Exception:
+            pass
         self.table.clear()
         self.table.setColumnCount(8)
         self.table.setRowCount(len(rows))
@@ -161,6 +195,10 @@ class BugReportsScreen(BaseScreen):
             from ui_compat import format_dt as _fdt
             self.table.setItem(i, 7, QTableWidgetItem(_fdt(r["updated_at"])))
             self.table.item(i, 0).setData(Qt.ItemDataRole.UserRole, r["bug_id"])
+        try:
+            self.table.blockSignals(False)
+        except Exception:
+            pass
         self.table.resizeColumnsToContents()
 
     def _selected_id(self) -> int | None:
@@ -171,32 +209,102 @@ class BugReportsScreen(BaseScreen):
         row_item = self.table.item(item.row(), 0)
         return row_item.data(Qt.ItemDataRole.UserRole) if row_item else None
 
+    def _clear_card(self):
+        while self.card_host.count():
+            item = self.card_host.takeAt(0)
+            w = item.widget()
+            if w is not None:
+                w.deleteLater()
+        self.card_widget = None
+
+    def _placeholder_card(self):
+        self._clear_card()
+        self.card_id = None
+        try:
+            self.card_title.setText("Карточка бага")
+        except Exception:
+            pass
+        hint = QLabel("Выбери баг слева — карточка откроется здесь")
+        hint.setWordWrap(True)
+        hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.card_host.addWidget(hint)
+        self.card_widget = hint
+
+    def open_card(self, bug_id: int | None):
+        """Карточка справа: существующий баг или пустая (None)."""
+        from bug_report_dialog import BugReportWidget
+        if bug_id == self.card_id and self.card_widget is not None:
+            try:
+                self.card_widget.title_edit.setFocus()
+            except Exception:
+                pass
+            return
+        self._clear_card()
+        self.card_id = bug_id
+        try:
+            self.card_title.setText(
+                f"Баг #{bug_id}" if bug_id is not None else "Новый баг")
+        except Exception:
+            pass
+        w = BugReportWidget(self.project_path, None, bug_id, self)
+        try:
+            w.saved.connect(self._on_card_saved)
+            w.goto_case.connect(self._on_card_goto)
+        except Exception:
+            pass
+        self.card_host.addWidget(w)
+        self.card_widget = w
+
+    def _on_selection(self):
+        try:
+            item = self.table.currentItem()
+            if item is None:
+                return
+            row_item = self.table.item(item.row(), 0)
+            bid = row_item.data(Qt.ItemDataRole.UserRole) if row_item else None
+            if bid is None:
+                return
+            self.open_card(int(bid))
+        except Exception:
+            pass
+
+    def _on_card_saved(self, rid: int):
+        try:
+            self.refresh()
+            for r in range(self.table.rowCount()):
+                item = self.table.item(r, 0)
+                if item is not None and item.data(Qt.ItemDataRole.UserRole) == rid:
+                    self.table.setCurrentCell(r, 0)
+                    break
+            self.open_card(int(rid))
+        except Exception:
+            pass
+
+    def _on_card_goto(self, cid: int):
+        try:
+            mw = getattr(getattr(self, "parent_window", None),
+                         "main_window", None)
+            if mw is None or not hasattr(mw, "show_screen"):
+                return
+            mw.show_screen("review")
+            scr = mw.project_window.screens.get("review")
+            if scr is not None:
+                scr.ensure_visible_case(int(cid))
+        except Exception:
+            pass
+
     def _new_bug(self):
-        from bug_report_dialog import BugReportDialog
-        dlg = BugReportDialog(self.project_path, None, None, self)
-        dlg.exec()
-        self.refresh()
+        self.open_card(None)
+        try:
+            self.card_widget.title_edit.setFocus()
+        except Exception:
+            pass
 
     def _open_bug(self):
         bid = self._selected_id()
         if bid is None:
             return
-        from bug_report_dialog import BugReportDialog
-        dlg = BugReportDialog(self.project_path, None, bid, self)
-        dlg.exec()
-        self.refresh()
-        cid = getattr(dlg, "result_case_id", None)
-        if cid:
-            try:
-                mw = getattr(getattr(self, "parent_window", None),
-                             "main_window", None)
-                if mw is not None and hasattr(mw, "show_screen"):
-                    mw.show_screen("review")
-                    scr = mw.project_window.screens.get("review")
-                    if scr is not None and cid in (scr.case_ids or []):
-                        scr.load_case(scr.case_ids.index(cid))
-            except Exception:
-                pass
+        self.open_card(int(bid))
 
     def _copy_menu(self):
         """V2.2 §16: копия бага из списка без открытия карточки."""
@@ -244,6 +352,7 @@ class BugReportsScreen(BaseScreen):
             return
         try:
             bugs.delete_bug(self.project_path, bid)
+            self._placeholder_card()
             self.refresh()
         except ValueError as e:
             notify(self, "warning", "Ошибка", str(e))

@@ -3,14 +3,22 @@ from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QListWidget,
     QListWidgetItem, QFormLayout, QInputDialog, QScrollArea, QWidget,
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from ui_compat import (FComboBox, FLineEdit, FPrimaryButton, FPushButton,
                        FTextEdit, clear_in_fluent, notify)
 import bug_report_service as bugs
 
 
-class BugReportDialog(QDialog):
-    """Создание (bug_id=None) или редактирование бага."""
+class BugReportWidget(QWidget):
+    """Тело карточки бага (панель списка и диалог делят один код).
+
+    В отличие от диалога никуда не закрывается: saved/goto_case —
+    сигналы хозяину. После создания bug_id подхватывается, чтобы
+    повторный «Сохранить» правил, а не дублировал.
+    """
+
+    saved = Signal(int)
+    goto_case = Signal(int)
 
     def __init__(self, project_path: str, prefill: dict | None = None,
                  bug_id: int | None = None, parent=None):
@@ -21,8 +29,6 @@ class BugReportDialog(QDialog):
         self.result_id = None
         self.result_case_id = None
         self._linked: list = []
-        self.setWindowTitle("Bug Report" if bug_id is None else f"Баг #{bug_id}")
-        self.setMinimumSize(640, 620)
         self._init_ui()
         self._load()
 
@@ -123,12 +129,9 @@ class BugReportDialog(QDialog):
         btn_copy = FPushButton("📋 Копировать")
         btn_copy.setToolTip("Jira / Markdown / Plain Text в буфер обмена")
         btn_copy.clicked.connect(self._copy_menu)
-        cancel = FPushButton("Отмена")
-        cancel.clicked.connect(self.reject)
         btns.addWidget(ok)
         btns.addWidget(btn_copy)
         btns.addStretch()
-        btns.addWidget(cancel)
         outer.addLayout(btns)
         self.setLayout(outer)
         self.cat_combo.currentIndexChanged.connect(self._reload_subs)
@@ -352,7 +355,7 @@ class BugReportDialog(QDialog):
             notify(self, "warning", "Ошибка", str(e))
             return
         self.result_case_id = cid
-        self.accept()
+        self.goto_case.emit(cid)
 
     def _save(self):
         data = self._collect()
@@ -363,6 +366,8 @@ class BugReportDialog(QDialog):
             if self.bug_id is None:
                 self.result_id = bugs.create_bug(
                     self.project_path, data.pop("title"), self._linked, **data)
+                # Подхват id: повторный «Сохранить» правит, а не дублирует.
+                self.bug_id = self.result_id
             else:
                 data.pop("title", None)
                 bugs.update_bug(self.project_path, self.bug_id, title=
@@ -373,7 +378,7 @@ class BugReportDialog(QDialog):
             notify(self, "warning", "Ошибка", str(e))
             return
         notify(self, "success", "Баг", f"Сохранён #{self.result_id}")
-        self.accept()
+        self.saved.emit(self.result_id)
 
 
 class QuickBugDialog(QDialog):
@@ -453,4 +458,34 @@ class QuickBugDialog(QDialog):
         except ValueError as e:
             notify(self, "warning", "Ошибка", str(e))
             return
+        self.accept()
+
+
+class BugReportDialog(QDialog):
+    """Тонкая модалка поверх BugReportWidget (старые вызовы целы)."""
+
+    def __init__(self, project_path: str, prefill: dict | None = None,
+                 bug_id: int | None = None, parent=None):
+        super().__init__(parent)
+        self.project_path = project_path
+        self.setWindowTitle("Bug Report" if bug_id is None else f"Баг #{bug_id}")
+        self.setMinimumSize(640, 620)
+        layout = QVBoxLayout()
+        self.body = BugReportWidget(project_path, prefill, bug_id, self)
+        self.body.saved.connect(self._on_saved)
+        self.body.goto_case.connect(self._on_goto)
+        layout.addWidget(self.body, 1)
+        btn_close = FPushButton("Отмена")
+        btn_close.clicked.connect(self.reject)
+        layout.addWidget(btn_close)
+        self.setLayout(layout)
+        self.result_id = None
+        self.result_case_id = None
+
+    def _on_saved(self, rid: int):
+        self.result_id = rid
+        self.accept()
+
+    def _on_goto(self, cid: int):
+        self.result_case_id = cid
         self.accept()
