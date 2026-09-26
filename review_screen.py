@@ -196,12 +196,20 @@ class ReviewScreen(BaseScreen, ProfileMixin, CaseMixin, TableMixin, BulkMixin, V
             pass
 
     def update_stat_cards(self):
-        """Пересчёт карточек шапки (проект, base-семантика, скрытые вне счёта)."""
+        """Пересчёт карточек шапки (base-семантика, скрытые вне счёта).
+
+        Правило охвата: при фильтре по файлу карточки показывают файл,
+        иначе проект (индикатор фильтров сообщает о скоупе).
+        """
         if not hasattr(self, "_stat_cards"):
             return
         try:
+            fid = (self.filters or {}).get("file_id")
+        except Exception:
+            fid = None
+        try:
             from report_service import get_overall_report
-            rep = get_overall_report(self.project_path)
+            rep = get_overall_report(self.project_path, fid)
         except Exception:
             return
         try:
@@ -220,7 +228,7 @@ class ReviewScreen(BaseScreen, ProfileMixin, CaseMixin, TableMixin, BulkMixin, V
                 vlab, slab = slot
                 vlab.setText(f"{val:,}".replace(",", " "))
                 if key == "total":
-                    slab.setText("в проекте")
+                    slab.setText("в файле" if fid else "в проекте")
                 else:
                     pct = (100.0 * val / total) if total else 0.0
                     slab.setText(f"{pct:.0f}%")

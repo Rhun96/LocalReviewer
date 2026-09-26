@@ -77,3 +77,67 @@ def test_nav_first():
     assert list(s.buttons)[0] == "dashboard"
     assert MainWindow.NAV_ITEMS[0][0] == "dashboard"
     assert "dashboard" in SCREENS
+
+
+def _proj2files():
+    from database import db
+    p = tempfile.mkdtemp()
+    init_database(p)
+    mapping = {"q": "primary_text", "a": "response_text"}
+    import_file(p, "a.xlsx", "excel", "S", 0, mapping,
+                [{"q": f"a{i}", "a": f"a{i}"} for i in range(3)])
+    import_file(p, "b.xlsx", "excel", "S", 0, mapping,
+                [{"q": "b0", "a": "b0"}])
+    with db(p) as conn:
+        fids = {r["file_name"]: r["file_id"] for r in conn.execute(
+            "SELECT file_id, file_name FROM files").fetchall()}
+        aids = [r["case_id"] for r in conn.execute(
+            "SELECT case_id FROM cases WHERE file_id=?",
+            (fids["a.xlsx"],)).fetchall()]
+    bulk_set_status(p, aids[:2], "good")
+    bugs.create_bug(p, "в файле а", severity="High", case_ids=aids[:1])
+    return p, fids
+
+
+def test_scope_combo_and_file_cards():
+    import analytics_service as an
+    p, fids = _proj2files()
+    w = _win(p)
+    try:
+        w.show()
+        assert w.scope_combo.count() == 3
+        for i in range(w.scope_combo.count()):
+            if w.scope_combo.itemData(i) == fids["b.xlsx"]:
+                w.scope_combo.setCurrentIndex(i)
+                break
+        w.refresh()
+        v, s = _text(w, "reviewed")
+        assert v == "0", (v, s)
+        assert "из 1" in s, (v, s)
+        v, _s = _text(w, "bugs")
+        assert v == "0", (v, _s)
+        scoped = an.bugs_stats(p, {"file_id": fids["a.xlsx"]})
+        assert scoped["open"] == 1 and scoped["created"] == 1
+        scoped_b = an.bugs_stats(p, {"file_id": fids["b.xlsx"]})
+        assert scoped_b["open"] == 0 and scoped_b["created"] == 0
+    finally:
+        w.close()
+
+
+def test_review_cards_follow_file_filter():
+    _ = QApplication.instance() or QApplication([])
+    from review_screen import ReviewScreen
+    p, fids = _proj2files()
+    w = ReviewScreen(p)
+    try:
+        w.show()
+        w.refresh()
+        assert w._stat_cards["total"][0].text() == "4"
+        assert w._stat_cards["total"][1].text() == "в проекте"
+        w.filters = {"file_id": fids["b.xlsx"]}
+        w.load_case_ids()
+        w.update_stat_cards()
+        assert w._stat_cards["total"][0].text() == "1"
+        assert w._stat_cards["total"][1].text() == "в файле"
+    finally:
+        w.close()

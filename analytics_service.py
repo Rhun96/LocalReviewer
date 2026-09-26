@@ -248,15 +248,24 @@ def verdict_dist(project_path: str, scope: dict | None) -> list:
 
 
 def bugs_stats(project_path: str, scope: dict | None) -> dict:
-    """Баги за период: создано/открыто/закрыто/по тяжести/связанных кейсов."""
+    """Баги за период: создано/открыто/закрыто/по тяжести/связанных кейсов.
+
+    scope file_id — только баги, привязанные к кейсам файла.
+    """
     base = scope_filters(scope)
     conds, params = [], []
+    join = ""
     if base.get("reviewed_from"):
-        conds.append("substr(created_at, 1, 10) >= ?")
+        conds.append("substr(b.created_at, 1, 10) >= ?")
         params.append(base["reviewed_from"])
     if base.get("reviewed_to"):
-        conds.append("substr(created_at, 1, 10) <= ?")
+        conds.append("substr(b.created_at, 1, 10) <= ?")
         params.append(base["reviewed_to"])
+    if base.get("file_id"):
+        join = ("JOIN bug_report_cases bc ON bc.bug_id = b.bug_id "
+                "JOIN cases c ON c.case_id = bc.case_id")
+        conds.append("c.file_id = ?")
+        params.append(base["file_id"])
     where = ("WHERE " + " AND ".join(conds)) if conds else ""
     try:
         with db(project_path) as conn:
@@ -266,11 +275,14 @@ def bugs_stats(project_path: str, scope: dict | None) -> dict:
             if "bug_reports" not in tables:
                 return {"present": False}
             rows = cur.execute(
-                f"SELECT bug_id, status, severity FROM bug_reports "
-                f"{where}").fetchall()
+                f"SELECT DISTINCT b.bug_id, b.status, b.severity "
+                f"FROM bug_reports b "
+                f"{join} {where}", params).fetchall()
             sev_rows = cur.execute(
-                f"SELECT severity, COUNT(*) AS n FROM bug_reports "
-                f"{where} GROUP BY severity").fetchall() if rows else []
+                f"SELECT b.severity, COUNT(DISTINCT b.bug_id) AS n "
+                f"FROM bug_reports b "
+                f"{join} {where} GROUP BY b.severity",
+                params).fetchall() if rows else []
             linked = 0
             if "bug_report_cases" in tables and rows:
                 ph = ",".join(["?"] * len(rows))

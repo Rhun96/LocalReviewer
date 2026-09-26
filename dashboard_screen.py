@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (
 )
 
 from ui_base import BaseScreen
-from ui_compat import FPushButton, clear_in_fluent, effective_theme
+from ui_compat import FComboBox, FPushButton, clear_in_fluent, effective_theme
 import analytics_service as an
 import history_service as hs
 
@@ -59,6 +59,21 @@ class DashboardScreen(BaseScreen):
         title = QLabel("🏠 ГЛАВНАЯ")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(title)
+
+        # Охват (правило: данные всегда и по проекту, и по файлам).
+        scope_row = QHBoxLayout()
+        scope_row.addWidget(QLabel("Охват:"))
+        self.scope_combo = FComboBox()
+        self.scope_combo.addItem("Весь проект", None)
+        try:
+            from report_service import get_files_list as _gfl
+            for f in _gfl(self.project_path):
+                self.scope_combo.addItem(f["file_name"], f["file_id"])
+        except Exception:
+            pass
+        self.scope_combo.currentIndexChanged.connect(self.refresh)
+        scope_row.addWidget(self.scope_combo, 1)
+        layout.addLayout(scope_row)
 
         from styles import SEMANTIC as _SEM
         cards_row = QHBoxLayout()
@@ -127,13 +142,20 @@ class DashboardScreen(BaseScreen):
         self.setLayout(outer)
 
     def refresh(self):
+        scope = {}
         try:
-            cards = an.card_counts(self.project_path, None)["cards"]
+            fid = self.scope_combo.currentData()
+            if fid is not None:
+                scope = {"file_id": int(fid)}
+        except Exception:
+            scope = {}
+        try:
+            cards = an.card_counts(self.project_path, scope)["cards"]
             pcts = an.percentages({"cards": cards})
         except Exception:
             cards, pcts = {}, {}
         try:
-            dyn = an.dynamics(self.project_path, None, limit_days=90)
+            dyn = an.dynamics(self.project_path, scope, limit_days=90)
         except Exception:
             dyn = []
         last7 = dyn[:7]
@@ -150,8 +172,9 @@ class DashboardScreen(BaseScreen):
         bad_pct = pcts.get("bad")
         try:
             week_ago = (_date.today() - _td(days=7)).isoformat()
-            bugs = an.bugs_stats(self.project_path, None)
-            bugs7 = an.bugs_stats(self.project_path, {"reviewed_from": week_ago})
+            bscope = dict(scope, reviewed_from=week_ago)
+            bugs = an.bugs_stats(self.project_path, scope or None)
+            bugs7 = an.bugs_stats(self.project_path, bscope)
         except Exception:
             bugs, bugs7 = {"present": False}, {"present": False}
 
@@ -233,7 +256,20 @@ class DashboardScreen(BaseScreen):
     def _load_recent(self):
         from ui_compat import format_dt as _fdt
         try:
-            events = hs.search_history(self.project_path, limit=8)
+            fid = self.scope_combo.currentData()
+        except Exception:
+            fid = None
+        try:
+            if fid is not None:
+                from database import db as _db
+                with _db(self.project_path) as conn:
+                    cids = [r["case_id"] for r in conn.execute(
+                        "SELECT case_id FROM cases WHERE file_id = ?",
+                        (int(fid),)).fetchall()]
+                events = hs.search_history(
+                    self.project_path, case_ids=cids, limit=8) if cids else []
+            else:
+                events = hs.search_history(self.project_path, limit=8)
         except Exception:
             events = []
         self.recent_list.clear()
