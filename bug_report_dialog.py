@@ -206,6 +206,37 @@ class BugReportWidget(QWidget):
                 f"Кейс {p.get('source_id') or p.get('case_id')} "
                 f"[{p.get('review_status', '')}]: {q}")
         self._refresh_cases()
+        self._snapshot = self._snap()
+
+    def _snap(self):
+        return (self._collect(), list(self._linked))
+
+    def is_dirty(self) -> bool:
+        """Есть несохранённые правки (сравнение со снимком загрузки)."""
+        try:
+            return self._snap() != self._snapshot
+        except Exception:
+            return False
+
+    def _has_title(self) -> bool:
+        try:
+            return bool(self.title_edit.text().strip())
+        except Exception:
+            return False
+
+    def autosave(self) -> bool:
+        """Тихое сохранение для панели: True — можно уходить с карточки."""
+        try:
+            if not self.is_dirty():
+                return True
+            if not self._has_title():
+                notify(self, "warning", "Несохранённые правки",
+                       "Введи заголовок — иначе правки потеряются")
+                return False
+            self._save()
+            return not self.is_dirty()
+        except Exception:
+            return True
 
     def _refresh_cases(self):
         self.cases_list.clear()
@@ -378,6 +409,10 @@ class BugReportWidget(QWidget):
             notify(self, "warning", "Ошибка", str(e))
             return
         notify(self, "success", "Баг", f"Сохранён #{self.result_id}")
+        try:
+            self._snapshot = self._snap()
+        except Exception:
+            pass
         self.saved.emit(self.result_id)
 
 

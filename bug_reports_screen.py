@@ -239,6 +239,8 @@ class BugReportsScreen(BaseScreen):
             except Exception:
                 pass
             return
+        if not self._maybe_autosave():
+            return
         self._clear_card()
         self.card_id = bug_id
         try:
@@ -254,6 +256,41 @@ class BugReportsScreen(BaseScreen):
             pass
         self.card_host.addWidget(w)
         self.card_widget = w
+        if bug_id is not None:
+            self._select_row(bug_id)
+
+    def _maybe_autosave(self) -> bool:
+        """Автосейв грязной карточки перед уходом. False — остаёмся."""
+        from bug_report_dialog import BugReportWidget
+        w = self.card_widget
+        if not isinstance(w, BugReportWidget):
+            return True
+        try:
+            ok = w.autosave()
+        except Exception:
+            return True
+        if ok:
+            return True
+        self._select_row(self.card_id)
+        return False
+
+    def _select_row(self, bug_id) -> None:
+        if bug_id is None:
+            return
+        try:
+            self.table.blockSignals(True)
+            for r in range(self.table.rowCount()):
+                item = self.table.item(r, 0)
+                if item is not None and item.data(Qt.ItemDataRole.UserRole) == bug_id:
+                    self.table.setCurrentCell(r, 0)
+                    break
+        except Exception:
+            pass
+        finally:
+            try:
+                self.table.blockSignals(False)
+            except Exception:
+                pass
 
     def _on_selection(self):
         try:

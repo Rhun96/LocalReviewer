@@ -85,3 +85,82 @@ def test_panel_selection_and_new():
         assert w.card_id != bid
     finally:
         w.close()
+
+
+def test_is_dirty_and_snapshot():
+    _app()
+    p = _proj()
+    bid = bugs.create_bug(p, "исходный", severity="Low")
+    w = BugReportWidget(p, None, bid)
+    try:
+        w.show()
+        assert not w.is_dirty()
+        w.title_edit.setText("правленый")
+        assert w.is_dirty()
+        w._save()
+        assert not w.is_dirty()
+    finally:
+        w.close()
+
+
+def test_autosave_on_switch():
+    _app()
+    p = _proj()
+    a = bugs.create_bug(p, "а", severity="Low")
+    b = bugs.create_bug(p, "б", severity="Low")
+    w = BugReportsScreen(p, None)
+    try:
+        w.show()
+        w.table.setCurrentCell(0, 0)
+        first = w.card_id
+        assert first in (a, b)
+        other = b if first == a else a
+        w.card_widget.title_edit.setText("а-правленый")
+        w.open_card(other)
+        assert w.card_id == other
+        got = bugs.get_bug(p, first)
+        assert got["title"] == "а-правленый"
+    finally:
+        w.close()
+
+
+def test_autosave_invalid_stays():
+    _app()
+    p = _proj()
+    a = bugs.create_bug(p, "а", severity="Low")
+    b = bugs.create_bug(p, "б", severity="Low")
+    w = BugReportsScreen(p, None)
+    try:
+        w.show()
+        w.table.setCurrentCell(0, 0)
+        first = w.card_id
+        other = b if first == a else a
+        w.card_widget.title_edit.setText("   ")
+        w.open_card(other)
+        assert w.card_id == first
+        with db(p) as conn:
+            n = conn.execute("SELECT COUNT(*) c FROM bug_reports").fetchone()["c"]
+        assert n == 2
+    finally:
+        w.close()
+
+
+def test_autosave_new_creates_on_switch():
+    _app()
+    p = _proj()
+    a = bugs.create_bug(p, "а", severity="Low")
+    w = BugReportsScreen(p, None)
+    try:
+        w.show()
+        w.table.setCurrentCell(0, 0)
+        assert w.card_id == a
+        w._new_bug()
+        w.card_widget.title_edit.setText("созданный уходом")
+        w.open_card(a)
+        assert w.card_id == a
+        with db(p) as conn:
+            rows = conn.execute("SELECT title FROM bug_reports").fetchall()
+        assert "созданный уходом" in [r["title"] for r in rows]
+        assert w.table.rowCount() == 2
+    finally:
+        w.close()
