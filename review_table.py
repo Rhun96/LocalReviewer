@@ -908,6 +908,13 @@ class TableMixin:
                 upd()
         except Exception:
             pass
+        try:
+            import visibility_service as _vis
+            btn = getattr(self, "btn_unhide", None)
+            if btn is not None:
+                btn.setEnabled(_vis.hidden_count(self.project_path) > 0)
+        except Exception:
+            pass
 
     def _refit_on_resize(self):
         """Рефит таблицы после ресайза окна (вызывает оболочка: Qt не видит

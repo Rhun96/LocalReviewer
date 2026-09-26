@@ -120,3 +120,26 @@ def test_hide_undo_in_case_mode():
         assert cid in w.case_ids
     finally:
         w.close()
+
+
+def test_unhide_button_in_case_mode():
+    """Кнопка вместо мёртвого Ctrl+Z: гаснет без скрытых, возвращает последнее."""
+    from PySide6.QtWidgets import QApplication
+    QApplication.instance() or QApplication([])
+    from review_screen import ReviewScreen
+    p = _proj()
+    w = ReviewScreen(p)
+    try:
+        w.show()
+        assert not w.btn_unhide.isEnabled()
+        w.on_unhide_last()
+        assert vis.hidden_count(p) == 0
+        cid = w.current_case_id
+        w.toggle_hide_current()
+        assert w.btn_unhide.isEnabled()
+        w.on_unhide_last()
+        assert vis.hidden_count(p) == 0
+        assert w.current_case_id == cid
+        assert not w.btn_unhide.isEnabled()
+    finally:
+        w.close()

@@ -123,12 +123,17 @@ class CaseMixin:
         self.btn_hide.setMinimumHeight(30)
         self.btn_hide.setToolTip("Скрыть кейс из ревью (Ctrl+H). Не удаление!")
         self.btn_hide.clicked.connect(self.toggle_hide_current)
+        self.btn_unhide = FPushButton("↩ Вернуть скрытый")
+        self.btn_unhide.setMinimumHeight(30)
+        self.btn_unhide.setToolTip("Вернуть последний скрытый кейс в ревью")
+        self.btn_unhide.clicked.connect(self.on_unhide_last)
         nav_layout.addWidget(btn_prev)
         nav_layout.addWidget(btn_filters)
         nav_layout.addWidget(btn_next)
         nav_layout.addWidget(btn_back)
         nav_layout.addWidget(self.btn_finish)
         nav_layout.addWidget(self.btn_hide)
+        nav_layout.addWidget(self.btn_unhide)
         nav_group.setLayout(nav_layout)
         right_col.addWidget(nav_group)
 
@@ -1057,6 +1062,37 @@ class CaseMixin:
             self.focus_work_area()
         except Exception as e:
             self.show_error("Не удалось скрыть кейс", e)
+
+    def on_unhide_last(self):
+        """Вернуть последний скрытый кейс (кнопка вместо мёртвого Ctrl+Z)."""
+        try:
+            from database import db as _db
+            with _db(self.project_path) as conn:
+                rows = conn.execute(
+                    "SELECT case_id FROM history WHERE event_type='case_hidden'"
+                    " ORDER BY history_id DESC LIMIT 20").fetchall()
+                target = None
+                for r in rows:
+                    h = conn.execute(
+                        "SELECT COALESCE(hidden, 0) AS h FROM cases WHERE case_id=?",
+                        (r["case_id"],)).fetchone()
+                    if h and h["h"]:
+                        target = r["case_id"]
+                        break
+            if target is None:
+                notify(self, "warning", "Скрытые", "Скрытых кейсов нет")
+                return
+            import visibility_service as _vis
+            _vis.unhide_cases(self.project_path, [target])
+            self.load_case_ids()
+            if target in (self.case_ids or []):
+                self.load_case(self.case_ids.index(target))
+            self.update_queue_indicator()
+            self.update_filter_indicator()
+            notify(self, "success", "Скрытие", "Кейс снова в ревью.")
+            self.focus_work_area()
+        except Exception as e:
+            self.show_error("Не удалось вернуть кейс", e)
 
     def undo_single(self):
         """Отмена последнего одиночного действия (статус/тег/комментарий)."""
