@@ -29,6 +29,24 @@ class CaseMixin:
         layout = QVBoxLayout()
         layout.setSpacing(8)
 
+        # Пилот шаг G: рельс от самого верха (референс Проверка).
+        # Слева контент (текст, проверки, комментарий, теги),
+        # справа решения (навигация, статус, действия). Логика та же.
+        content_row = QHBoxLayout()
+        content_row.setSpacing(8)
+        content_row.setContentsMargins(0, 0, 0, 0)
+        left_col = QVBoxLayout()
+        left_col.setSpacing(8)
+        left_col.setContentsMargins(0, 0, 0, 0)
+        right_col = QVBoxLayout()
+        right_col.setSpacing(6)
+        right_col.setContentsMargins(0, 0, 0, 0)
+        right_wrap = QWidget()
+        right_wrap.setLayout(right_col)
+        right_wrap.setMaximumWidth(360)
+        content_row.addLayout(left_col, 3)
+        content_row.addWidget(right_wrap, 1)
+
         # === 1. Текст кейса (плоский контейнер: вложенные группы
         # криво рисуют заголовки, проверено на скринах) ===
         case_wrap = QWidget()
@@ -58,7 +76,7 @@ class CaseMixin:
         case_wrap_layout.addWidget(text_scroll)
         clear_in_fluent(text_scroll)
         case_wrap.setLayout(case_wrap_layout)
-        layout.addWidget(case_wrap)
+        left_col.addWidget(case_wrap)
 
         # Подсветка фрагментов — через правое меню панели ответа
         # (выдели мышью → правая кнопка → цвет), отдельных кнопок нет.
@@ -68,9 +86,9 @@ class CaseMixin:
         # что выделили, а не серить пунктами. (case_id, start, end).
         self._last_answer_sel = None
 
-        # === 2. Навигация (сразу после текста) ===
+        # === 2. Навигация (пилот G: вертикально, первой в рельсе) ===
         nav_group = QGroupBox("🧭 Навигация")
-        nav_layout = QHBoxLayout()
+        nav_layout = QVBoxLayout()
         nav_layout.setSpacing(6)
         btn_prev = FPushButton("⬅️ Пред.")
         btn_prev.setMinimumHeight(30)
@@ -106,10 +124,8 @@ class CaseMixin:
         nav_layout.addWidget(btn_back)
         nav_layout.addWidget(self.btn_finish)
         nav_layout.addWidget(self.btn_hide)
-        for _i in range(5):
-            nav_layout.setStretch(_i, 1)
         nav_group.setLayout(nav_layout)
-        layout.addWidget(nav_group)
+        right_col.addWidget(nav_group)
 
         # V2.1 §14: тихая подсказка «нет Bug Report» (не модалка, не авто-баг).
         self.nobug_widget = QWidget()
@@ -136,25 +152,6 @@ class CaseMixin:
         self.nobug_widget.setVisible(False)
         self._nobug_hidden_for = None
         layout.addWidget(self.nobug_widget)
-
-        # Пилот шаг 2: двухколоночный низ (референс Проверка — контент
-        # слева, решение справа). Текст кейса и навигация остаются
-        # во всю ширину сверху; делятся только низовые панели.
-        # Логика та же, меняется лишь родитель виджетов.
-        content_row = QHBoxLayout()
-        content_row.setSpacing(8)
-        content_row.setContentsMargins(0, 0, 0, 0)
-        left_col = QVBoxLayout()
-        left_col.setSpacing(8)
-        left_col.setContentsMargins(0, 0, 0, 0)
-        right_col = QVBoxLayout()
-        right_col.setSpacing(6)
-        right_col.setContentsMargins(0, 0, 0, 0)
-        right_wrap = QWidget()
-        right_wrap.setLayout(right_col)
-        right_wrap.setMaximumWidth(360)
-        content_row.addLayout(left_col, 3)
-        content_row.addWidget(right_wrap, 1)
 
         # === 3. Автопроверки ===
         self.checks_group = QGroupBox("⚠️ Автопроверки")
