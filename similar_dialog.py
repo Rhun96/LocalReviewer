@@ -229,9 +229,12 @@ class DuplicatesDialog(QDialog):
     def _init_ui(self):
         layout = QVBoxLayout()
         scope = ("текущем файле" if self.file_id else "проекте")
-        layout.addWidget(QLabel(f"Попарное сравнение в {scope} "
-                                "(запрос+ответ). Дубли не ставятся автоматически. "
-                                "Перефразировки лови порогом ниже (70–80%)."))
+        self.hint_label = QLabel(
+            f"Попарное сравнение в {scope} (запрос+ответ). "
+            "Дубли не ставятся автоматически. "
+            "Перефразировки лови порогом ниже (70–80%).")
+        self.hint_label.setWordWrap(True)
+        layout.addWidget(self.hint_label)
         row = QHBoxLayout()
         row.addWidget(QLabel("Порог:"))
         self.thr_spin = FSpinBox()
@@ -245,6 +248,17 @@ class DuplicatesDialog(QDialog):
         row.addWidget(btn)
         row.addStretch()
         layout.addLayout(row)
+        try:
+            # Эмбеддинги жмут скоры вверх: дефолт и подсказка свои.
+            be, _note = sim.resolve_backend()
+            if be.name == "embedding":
+                self.thr_spin.setValue(95)
+                self.hint_label.setText(
+                    f"Попарное сравнение эмбеддингами в {scope}. "
+                    "Дубли не ставятся автоматически. "
+                    "Эмбеддинги жмут скоры вверх: дубли лови порогом 93–98%.")
+        except Exception:
+            pass
         self.info = QLabel("")
         layout.addWidget(self.info)
         self.results = QListWidget()
