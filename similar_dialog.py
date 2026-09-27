@@ -79,11 +79,27 @@ class SimilarDialog(QDialog):
         layout.addWidget(self.info)
         self.results = QListWidget()
         self.results.itemDoubleClicked.connect(self._on_open)
+        self.results.currentItemChanged.connect(lambda *_a: self._show_preview())
         layout.addWidget(self.results, 2)
         try:
             clear_in_fluent(self.results)
         except Exception:
             pass
+        from PySide6.QtWidgets import QSplitter, QTextBrowser
+        preview = QSplitter(Qt.Orientation.Horizontal)
+        self.preview_a = QTextBrowser()
+        self.preview_a.setReadOnly(True)
+        self.preview_a.setMaximumHeight(150)
+        self.preview_b = QTextBrowser()
+        self.preview_b.setReadOnly(True)
+        self.preview_b.setMaximumHeight(150)
+        preview.addWidget(self.preview_a)
+        preview.addWidget(self.preview_b)
+        try:
+            clear_in_fluent(self.preview_a, self.preview_b)
+        except Exception:
+            pass
+        layout.addWidget(preview)
         btns = QHBoxLayout()
         btn_open = FPushButton("➡️ Открыть выбранный")
         btn_open.clicked.connect(self._on_open)
@@ -147,6 +163,19 @@ class SimilarDialog(QDialog):
             return
         self.result_case_id = item.data(Qt.ItemDataRole.UserRole)
         self.accept()
+
+    def _show_preview(self):
+        """Превью пары: текущий кейс vs выбранный похожий."""
+        try:
+            item = self.results.currentItem()
+            if item is None:
+                return
+            cid = item.data(Qt.ItemDataRole.UserRole)
+            ta, tb = pair_preview(self.project_path, self.case_id, int(cid))
+            self.preview_a.setPlainText(ta)
+            self.preview_b.setPlainText(tb)
+        except Exception:
+            pass
 
     def _refresh_suggestion(self):
         """Предложение по одинаково размеченным похожим (§33): вручную."""
@@ -214,6 +243,31 @@ class SimilarDialog(QDialog):
         self._refresh_suggestion()
 
 
+def pair_preview(project_path: str, case_a: int, case_b: int,
+                 limit: int = 500) -> tuple:
+    """Тексты пары для превью (Вопрос + Ответ, обрезка)."""
+    out = []
+    try:
+        from database import db as _db
+        with _db(project_path) as conn:
+            for cid in (case_a, case_b):
+                row = conn.execute(
+                    "SELECT primary_text, response_text FROM cases WHERE case_id=?",
+                    (cid,)).fetchone()
+                if row is None:
+                    out.append("— кейс не найден —")
+                    continue
+                q = (row["primary_text"] or "").strip()
+                a = (row["response_text"] or "").strip()
+                text = f"Вопрос: {q}\nОтвет: {a}".strip()
+                if len(text) > limit:
+                    text = text[:limit] + "…"
+                out.append(text or "— пусто —")
+    except Exception:
+        out = ["— ошибка —", "— ошибка —"]
+    return (out + ["—", "—"])[:2]
+
+
 class DuplicatesDialog(QDialog):
     """Потенциальные дубли в файле/проекте (попарный TF-IDF, порог)."""
 
@@ -223,7 +277,7 @@ class DuplicatesDialog(QDialog):
         self.file_id = file_id
         self.result_case_id = None
         self.setWindowTitle("Потенциальные дубли")
-        self.setMinimumSize(560, 440)
+        self.setMinimumSize(760, 560)
         self._init_ui()
 
     def _init_ui(self):
@@ -263,11 +317,29 @@ class DuplicatesDialog(QDialog):
         layout.addWidget(self.info)
         self.results = QListWidget()
         self.results.itemDoubleClicked.connect(self._on_open)
+        self.results.currentItemChanged.connect(lambda *_a: self._show_pair())
+        self.results.setMinimumHeight(140)
         layout.addWidget(self.results, 2)
         try:
             clear_in_fluent(self.results)
         except Exception:
             pass
+        from PySide6.QtWidgets import QSplitter, QTextBrowser
+        pair_split = QSplitter(Qt.Orientation.Horizontal)
+        self.pair_a = QTextBrowser()
+        self.pair_a.setReadOnly(True)
+        self.pair_a.setMinimumHeight(120)
+        self.pair_b = QTextBrowser()
+        self.pair_b.setReadOnly(True)
+        self.pair_b.setMinimumHeight(120)
+        pair_split.addWidget(self.pair_a)
+        pair_split.addWidget(self.pair_b)
+        try:
+            clear_in_fluent(self.pair_a)
+            clear_in_fluent(self.pair_b)
+        except Exception:
+            pass
+        layout.addWidget(pair_split, 1)
         btns = QHBoxLayout()
         btn_open = FPushButton("➡️ Открыть первый из пары")
         btn_open.clicked.connect(self._on_open)
@@ -326,8 +398,15 @@ class DuplicatesDialog(QDialog):
                 pct = int(round(p["score"] * 100))
                 item = QListWidgetItem(
                     f"{pct}%  case:{p['case_a']}  ⇄  case:{p['case_b']}")
-                item.setData(Qt.ItemDataRole.UserRole, p["case_a"])
+                item.setData(Qt.ItemDataRole.UserRole,
+                             (p["case_a"], p["case_b"]))
                 self.results.addItem(item)
+            try:
+                if self.results.count():
+                    self.results.setCurrentRow(0)
+            except Exception:
+                pass
+            self._show_pair()
 
         def _fail(msg):
             try:
@@ -343,9 +422,29 @@ class DuplicatesDialog(QDialog):
 
         QTimer.singleShot(0, _work_outer)
 
+    def _show_pair(self):
+        """Превью выбранной пары: оба текста рядом, ходить никуда не надо."""
+        try:
+            item = self.results.currentItem()
+            if item is None:
+                return
+            data = item.data(Qt.ItemDataRole.UserRole)
+            if not isinstance(data, (list, tuple)) or len(data) != 2:
+                return
+            ta, tb = pair_preview(self.project_path, int(data[0]), int(data[1]))
+            self.pair_a.setPlainText(ta)
+            self.pair_b.setPlainText(tb)
+        except Exception:
+            pass
+
     def _on_open(self):
         item = self.results.currentItem()
         if not item:
             return
-        self.result_case_id = item.data(Qt.ItemDataRole.UserRole)
+        data = item.data(Qt.ItemDataRole.UserRole)
+        try:
+            self.result_case_id = int(data[0]) if isinstance(
+                data, (list, tuple)) else int(data)
+        except Exception:
+            return
         self.accept()
