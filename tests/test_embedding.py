@@ -67,13 +67,17 @@ def test_dim_mismatch_rejected(proj):
 
 def test_no_model_fallback(monkeypatch, proj):
     p, ids = proj
-    monkeypatch.setattr(emb, "_MODEL", None)
-    monkeypatch.setattr(emb, "model_files_present", lambda: False)
+
+    def _raise(*a, **k):
+        raise emb.EmbeddingUnavailableError("no model (test)")
+
+    monkeypatch.setattr(emb, "_load_model", _raise)
     with pytest.raises(emb.EmbeddingUnavailableError):
         emb.find_similar_embedding(p, ids[0])
     with pytest.raises(emb.EmbeddingUnavailableError):
         emb.find_duplicates_embedding(p)
     import similarity_service as sim
+    monkeypatch.setattr(emb, "model_files_present", lambda: False)
     be, note = sim.resolve_backend("embedding")
     assert be.name == "tfidf" and note
     assert sim.get_backend("embedding").name == "embedding"
