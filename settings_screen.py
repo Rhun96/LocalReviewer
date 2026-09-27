@@ -305,9 +305,82 @@ class SettingsScreen(BaseScreen):
         checks_group.setLayout(checks_layout)
         layout.addWidget(checks_group)
 
+        # Семантический поиск (эмбеддинги Gemma-300M, опционально).
+        sem_group = QGroupBox("Семантический поиск")
+        sem_layout = QFormLayout()
+        self.sim_backend_combo = FComboBox()
+        self.sim_backend_combo.addItem("TF-IDF (всегда работает)", "tfidf")
+        self.sim_backend_combo.addItem("Эмбеддинги Gemma-300M", "embedding")
+        try:
+            from ui_compat import get_similarity_backend as _gsb
+            _cur_be = _gsb()
+            for i in range(self.sim_backend_combo.count()):
+                if self.sim_backend_combo.itemData(i) == _cur_be:
+                    self.sim_backend_combo.blockSignals(True)
+                    self.sim_backend_combo.setCurrentIndex(i)
+                    self.sim_backend_combo.blockSignals(False)
+                    break
+        except Exception:
+            pass
+        self.sim_backend_combo.currentIndexChanged.connect(self.on_sim_backend_changed)
+        sem_layout.addRow("Движок похожих:", self.sim_backend_combo)
+        self.embed_thr_spin = FSpinBox()
+        self.embed_thr_spin.setRange(30, 95)
+        self.embed_thr_spin.setSuffix(" %")
+        self.embed_thr_spin.setMaximumWidth(180)
+        try:
+            from ui_compat import get_embed_threshold as _get_thr
+            self.embed_thr_spin.setValue(int(round(_get_thr() * 100)))
+        except Exception:
+            self.embed_thr_spin.setValue(65)
+        self.embed_thr_spin.valueChanged.connect(self.on_embed_thr_changed)
+        sem_layout.addRow("Порог эмбеддингов:", self.embed_thr_spin)
+        self.embed_topk_spin = FSpinBox()
+        self.embed_topk_spin.setRange(1, 50)
+        self.embed_topk_spin.setMaximumWidth(180)
+        try:
+            from ui_compat import get_embed_topk as _get_k
+            self.embed_topk_spin.setValue(_get_k())
+        except Exception:
+            self.embed_topk_spin.setValue(10)
+        self.embed_topk_spin.valueChanged.connect(self.on_embed_topk_changed)
+        sem_layout.addRow("Top-K эмбеддингов:", self.embed_topk_spin)
+        self.embed_auto_switch = FSwitch()
+        try:
+            from ui_compat import get_embed_auto as _get_auto
+            self.embed_auto_switch.setChecked(bool(_get_auto()))
+        except Exception:
+            pass
+        try:
+            from ui_compat import connect_check_changed as _ccc
+            _ccc(self.embed_auto_switch, self.on_embed_auto_changed)
+        except Exception:
+            pass
+        sem_layout.addRow("Доиндексировать недостающее в фоне:",
+                          self.embed_auto_switch)
+        self.embed_status = QLabel("...")
+        self.embed_status.setWordWrap(True)
+        sem_layout.addRow("Статус:", self.embed_status)
+        sem_btns = QHBoxLayout()
+        self.btn_embed_download = FPushButton("⬇ Скачать модель")
+        self.btn_embed_download.setToolTip(
+            "google/embeddinggemma-300m (~600MB; нужны принятая лицензия и hf login)")
+        self.btn_embed_download.clicked.connect(self.on_embed_download)
+        self.btn_embed_reindex = FPushButton("🔄 Переиндексировать")
+        self.btn_embed_reindex.setToolTip("Построить векторы всех кейсов в фоне")
+        self.btn_embed_reindex.clicked.connect(self.on_embed_reindex)
+        sem_btns.addWidget(self.btn_embed_download)
+        sem_btns.addWidget(self.btn_embed_reindex)
+        sem_btns.addStretch()
+        sem_layout.addRow(sem_btns)
+        sem_group.setLayout(sem_layout)
+        layout.addWidget(sem_group)
+        self._refresh_embed_status()
+
         # Оконный режим: подписи форм переносятся (иначе min = вся строка).
         for _form in (review_layout, prio_layout, ui_layout,
-                      session_layout, privacy_layout, checks_layout):
+                      session_layout, privacy_layout, checks_layout,
+                      sem_layout):
             try:
                 for _i in range(_form.count()):
                     _lab = _form.itemAt(_i, QFormLayout.ItemRole.LabelRole)
@@ -538,6 +611,151 @@ class SettingsScreen(BaseScreen):
         set_palette_mode(self.palette_combo.currentData() or "classic")
         notify(self, "warning", "Палитра",
                "Применится после перезапуска приложения.")
+
+    def on_sim_backend_changed(self):
+        from ui_compat import set_similarity_backend
+        set_similarity_backend(
+            self.sim_backend_combo.currentData() or "tfidf")
+        self._refresh_embed_status()
+
+    def on_embed_thr_changed(self):
+        from ui_compat import set_embed_threshold
+        set_embed_threshold((self.embed_thr_spin.value() or 65) / 100)
+
+    def on_embed_topk_changed(self):
+        from ui_compat import set_embed_topk
+        set_embed_topk(self.embed_topk_spin.value() or 10)
+
+    def on_embed_auto_changed(self, *_a):
+        from ui_compat import set_embed_auto
+        try:
+            set_embed_auto(bool(self.embed_auto_switch.isChecked()))
+        except Exception:
+            pass
+
+    def _refresh_embed_status(self):
+        try:
+            import embedding_service as _emb
+            has_model = bool(_emb.model_files_present())
+            n = _emb.indexed_count(self.project_path)
+            with_self = ""
+            try:
+                from database import db as _db
+                with _db(self.project_path) as conn:
+                    total = conn.execute(
+                        "SELECT COUNT(*) AS c FROM cases").fetchone()["c"]
+                with_self = f" из {total}"
+            except Exception:
+                pass
+            self.embed_status.setText(
+                f"Модель: {'есть' if has_model else 'нет'} "
+                f"(google/embeddinggemma-300m); "
+                f"проиндексировано: {n}{with_self}.")
+        except Exception:
+            try:
+                self.embed_status.setText("Статус недоступен")
+            except Exception:
+                pass
+
+    def on_embed_download(self):
+        try:
+            import embedding_service as _emb
+            if _emb.model_files_present():
+                notify(self, "success", "Модель", "Уже скачана.")
+                return
+        except Exception:
+            pass
+        try:
+            from workers import run_in_background as _run
+            self.btn_embed_download.setEnabled(False)
+            w = _run(self._download_model_bg)
+            w.signals.finished.connect(self._on_embed_downloaded)
+            w.signals.error.connect(self._on_embed_download_error)
+        except Exception as e:
+            try:
+                self.btn_embed_download.setEnabled(True)
+            except Exception:
+                pass
+            notify(self, "error", "Ошибка", str(e))
+
+    @staticmethod
+    def _download_model_bg():
+        from huggingface_hub import snapshot_download
+        return snapshot_download("google/embeddinggemma-300m")
+
+    def _on_embed_downloaded(self, _path=None):
+        try:
+            self.btn_embed_download.setEnabled(True)
+        except Exception:
+            pass
+        notify(self, "success", "Модель", "Скачана. Переключи движок выше.")
+        self._refresh_embed_status()
+
+    def _on_embed_download_error(self, msg):
+        try:
+            self.btn_embed_download.setEnabled(True)
+        except Exception:
+            pass
+        notify(self, "error", "Модель",
+               f"{msg}\nНужны принятая лицензия и hf login.")
+
+    def on_embed_reindex(self):
+        try:
+            from workers import run_in_background as _run
+            from PySide6.QtWidgets import QProgressDialog
+            from PySide6.QtCore import QTimer
+            import threading
+            import embedding_service as _emb
+            cancel_event = threading.Event()
+            progress = QProgressDialog("Индексация эмбеддингов…", "Отмена",
+                                       0, 100, self)
+            progress.setWindowModality(Qt.WindowModality.WindowModal)
+            progress.setMinimumDuration(0)
+            progress.setAutoClose(True)
+            progress.canceled.connect(cancel_event.set)
+            progress.setValue(0)
+            with_self = self
+
+            def _work():
+                from database import db as _db
+                with _db(with_self.project_path) as conn:
+                    ids = [r["case_id"] for r in conn.execute(
+                        "SELECT case_id FROM cases").fetchall()]
+
+                def _progress(done, total):
+                    w = holder.get("w")
+                    if w is not None:
+                        w.signals.progress.emit(
+                            int(done / total * 100) if total else 0)
+
+                holder: dict = {}
+                worker = _run(_emb.ensure_indexed, with_self.project_path,
+                              ids, _progress, cancel_event)
+                holder["w"] = worker
+                worker.signals.progress.connect(progress.setValue)
+                worker.signals.finished.connect(_reindexed)
+                worker.signals.error.connect(_reindex_failed)
+
+            def _reindexed(res):
+                try:
+                    progress.close()
+                except Exception:
+                    pass
+                notify(with_self, "success", "Индексация",
+                       f"Готово: {res.get('done', 0)}, "
+                       f"пропущено: {res.get('failed', 0)}.")
+                with_self._refresh_embed_status()
+
+            def _reindex_failed(msg):
+                try:
+                    progress.close()
+                except Exception:
+                    pass
+                notify(with_self, "error", "Индексация", str(msg))
+
+            QTimer.singleShot(0, _work)
+        except Exception as e:
+            notify(self, "error", "Ошибка", str(e))
 
     def _collect_settings(self) -> list:
         # 1-в-1 с autocheck_service.DEFAULTS: каждый ключ — свой чекбокс.

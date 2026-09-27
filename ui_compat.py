@@ -378,6 +378,83 @@ def set_palette_mode(mode: str) -> str:
         return "classic"
 
 
+SIMILARITY_BACKENDS = ("tfidf", "embedding")
+
+
+def _qs_value(key: str, default):
+    try:
+        from PySide6.QtCore import QSettings
+        v = QSettings("LocalReviewer", "LocalReviewer").value(key, default)
+        return default if v is None else v
+    except Exception:
+        return default
+
+
+def _qs_set(key: str, value) -> None:
+    try:
+        from PySide6.QtCore import QSettings
+        QSettings("LocalReviewer", "LocalReviewer").setValue(key, value)
+    except Exception:
+        pass
+
+
+def get_similarity_backend() -> str:
+    m = str(_qs_value("ui/similarity_backend", "tfidf") or "tfidf")
+    return m if m in SIMILARITY_BACKENDS else "tfidf"
+
+
+def set_similarity_backend(mode: str) -> str:
+    if mode not in SIMILARITY_BACKENDS:
+        mode = "tfidf"
+    _qs_set("ui/similarity_backend", mode)
+    return mode
+
+
+def get_embed_threshold() -> float:
+    try:
+        v = float(_qs_value("ui/embed_threshold", 0.65))
+        return min(0.95, max(0.3, v))
+    except Exception:
+        return 0.65
+
+
+def set_embed_threshold(v: float) -> float:
+    try:
+        v = min(0.95, max(0.3, float(v)))
+    except Exception:
+        v = 0.65
+    _qs_set("ui/embed_threshold", v)
+    return v
+
+
+def get_embed_topk() -> int:
+    try:
+        return min(50, max(1, int(_qs_value("ui/embed_topk", 10))))
+    except Exception:
+        return 10
+
+
+def set_embed_topk(v: int) -> int:
+    try:
+        v = min(50, max(1, int(v)))
+    except Exception:
+        v = 10
+    _qs_set("ui/embed_topk", v)
+    return v
+
+
+def get_embed_auto() -> bool:
+    v = _qs_value("ui/embed_auto", True)
+    if isinstance(v, str):
+        return v.lower() not in ("0", "false", "no", "off")
+    return bool(v)
+
+
+def set_embed_auto(on: bool) -> bool:
+    _qs_set("ui/embed_auto", bool(on))
+    return bool(on)
+
+
 def _resolve_effective(mode: str) -> str:
     """system -> light/dark по ОС (через darkdetect из зависимостей Fluent)."""
     if mode in ("light", "dark"):

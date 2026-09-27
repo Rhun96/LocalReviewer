@@ -103,22 +103,34 @@ class SimilarDialog(QDialog):
 
     def _search(self):
         try:
-            res = sim.find_similar(self.project_path, self.case_id, **self._params())
+            be, note = sim.resolve_backend()
+            res = be.find_similar(self.project_path, self.case_id, **self._params())
         except ValueError as e:
             notify(self, "warning", "Поиск", str(e))
             return
         except Exception as e:
             notify(self, "error", "Ошибка", str(e))
             return
+        engine = f" [движок: {be.name}{(' — ' + note) if note else ''}]"
         self.results.clear()
         if not res["results"]:
             self.info.setText("Ничего похожего не нашлось — попробуй снизить порог "
-                              "или расширить область.")
+                              "или расширить область." + engine)
             self._refresh_suggestion()
             return
         labeled = sum(1 for r in res["results"] if r["reviewed"])
         self.info.setText(f"Найдено: {res['total']}, из них размеченных: {labeled}. "
-                          "Двойной клик — открыть кейс.")
+                          "Двойной клик — открыть кейс." + engine)
+        try:
+            # Авто-индексация недостающего — в фон, без фриза.
+            from ui_compat import get_embed_auto as _auto
+            missing = res.get("missing") or []
+            if be.name == "embedding" and _auto() and missing:
+                from workers import run_in_background as _run
+                import embedding_service as _emb
+                _run(_emb.ensure_indexed, self.project_path, list(missing))
+        except Exception:
+            pass
         for r in res["results"]:
             pct = int(round(r["score"] * 100))
             mark = "✅" if r["reviewed"] else "⬜"
@@ -277,7 +289,8 @@ class DuplicatesDialog(QDialog):
                     w.signals.progress.emit(
                         int(done / total * 100) if total else 0)
 
-            worker = _run(sim.find_duplicates, self.project_path, file_id, thr,
+            be, _note = sim.resolve_backend()
+            worker = _run(be.find_duplicates, self.project_path, file_id, thr,
                           200, _progress, cancel_event)
             holder["w"] = worker
             worker.signals.progress.connect(progress.setValue)

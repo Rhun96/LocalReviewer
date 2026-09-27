@@ -350,6 +350,16 @@ class MainWindow(_BaseWindow):
             ensure_preset_views(str(folder))
         except Exception:
             pass
+        try:
+            # Прогрев эмбеддинг-модели в фоне (первый «Похожие» без фриза).
+            from ui_compat import get_similarity_backend
+            if get_similarity_backend() == "embedding":
+                from workers import run_in_background as _run
+                import embedding_service as _emb
+                if _emb.model_files_present():
+                    _run(_emb.encode_texts, ["прогрев"])
+        except Exception:
+            pass
         if FLUENT:
             for key, icon_name, text in self.NAV_ITEMS:
                 screen = self.project_window.screens[key]

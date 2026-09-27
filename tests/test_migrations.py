@@ -44,7 +44,7 @@ def test_upgrade_chain_v10_to_current():
         assert "CHECK" not in sql  # свои статусы разрешены
         for t in ("case_check_verdicts", "model_runs", "run_answers",
                   "run_preferences", "output_reviews", "regression_runs",
-                  "regression_results"):
+                  "regression_results", "case_embeddings"):
             assert con.execute(
                 "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
                 (t,)).fetchone(), t

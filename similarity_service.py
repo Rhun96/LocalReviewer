@@ -319,9 +319,26 @@ class TfidfSimilarityBackend(SimilarityBackend):
         return find_duplicates(project_path, **kwargs)
 
 
-# Будущий EmbeddingSimilarityBackend регистрируется здесь же;
-# UI ходит через get_backend() и не зависит от реализации.
-BACKENDS = {"tfidf": TfidfSimilarityBackend()}
+class EmbeddingSimilarityBackend(SimilarityBackend):
+    """Эмбеддинги (Gemma-300M, опционально). Без модели — ошибка наружу,
+    вызывающий код падает на TF-IDF (см. resolve_backend)."""
+
+    name = "embedding"
+
+    def find_similar(self, project_path: str, case_id: int, **kwargs) -> dict:
+        import embedding_service as _emb
+        kwargs.pop("fields", None)
+        return _emb.find_similar_embedding(project_path, case_id, **kwargs)
+
+    def find_duplicates(self, project_path: str, **kwargs) -> dict:
+        import embedding_service as _emb
+        kwargs.pop("fields", None)
+        return _emb.find_duplicates_embedding(project_path, **kwargs)
+
+
+# UI ходит через get_backend()/resolve_backend() и не зависит от реализации.
+BACKENDS = {"tfidf": TfidfSimilarityBackend(),
+            "embedding": EmbeddingSimilarityBackend()}
 
 
 def get_backend(name: str = "tfidf") -> SimilarityBackend:
@@ -329,3 +346,24 @@ def get_backend(name: str = "tfidf") -> SimilarityBackend:
     if be is None:
         raise ValueError(f"Неизвестный backend: {name!r}")
     return be
+
+
+def resolve_backend(prefer: str | None = None) -> tuple:
+    """(backend, note): выбранный движок + пометка для UI.
+
+    embedding — только если модель на месте, иначе молча TF-IDF.
+    """
+    try:
+        from ui_compat import get_similarity_backend as _pref
+        want = prefer or _pref()
+    except Exception:
+        want = "tfidf"
+    if want == "embedding":
+        try:
+            import embedding_service as _emb
+            if _emb.model_files_present():
+                return BACKENDS["embedding"], ""
+        except Exception:
+            pass
+        return BACKENDS["tfidf"], "эмбеддинги недоступны — TF-IDF"
+    return BACKENDS["tfidf"], ""

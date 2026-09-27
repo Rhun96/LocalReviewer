@@ -7,7 +7,7 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 20
+SCHEMA_VERSION = 21
 DB_TIMEOUT = 10.0
 
 
@@ -371,6 +371,11 @@ def init_database(project_path: str):
             from migrations import migrate_to_v20
             migrate_to_v20(cursor)
             cursor.execute("PRAGMA user_version=20")
+            version = 20
+        if version < 21:
+            from migrations import migrate_to_v21
+            migrate_to_v21(cursor)
+            cursor.execute("PRAGMA user_version=21")
         conn.commit()
     except Exception:
         try:

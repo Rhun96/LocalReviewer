@@ -811,3 +811,31 @@ def migrate_to_v20(cursor) -> None:
     finally:
         cursor.execute("PRAGMA foreign_keys=ON")
     logger.info("migrated to v20 (regression candidate: run or dataset version)")
+
+
+def migrate_to_v21(cursor) -> None:
+    """Локальные эмбеддинги кейсов (Gemma-300M backend, опционально).
+
+    Только CREATE TABLE + INDEX (старые данные не трогаем).
+    Вектор — BLOB float32; одна активная строка на (кейс, модель, версия).
+    """
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS case_embeddings (
+            embedding_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            case_id INTEGER NOT NULL,
+            model_name TEXT NOT NULL,
+            model_version TEXT NOT NULL DEFAULT 'v1',
+            source_hash TEXT NOT NULL DEFAULT '',
+            dimensions INTEGER NOT NULL DEFAULT 0,
+            embedding_data BLOB,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            is_active INTEGER NOT NULL DEFAULT 1,
+            FOREIGN KEY (case_id) REFERENCES cases(case_id) ON DELETE CASCADE
+        )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_embeddings_case "
+                   "ON case_embeddings(case_id, model_name, model_version)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_embeddings_active "
+                   "ON case_embeddings(is_active)")
+    logger.info("migrated to v21 (case embeddings)")
