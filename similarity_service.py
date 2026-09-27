@@ -312,28 +312,48 @@ class TfidfSimilarityBackend(SimilarityBackend):
     """Локальный TF-IDF backend (по умолчанию, без LLM/embeddings)."""
     name = "tfidf"
 
-    def find_similar(self, project_path: str, case_id: int, **kwargs) -> dict:
-        return find_similar(project_path, case_id, **kwargs)
+    def find_similar(self, project_path: str, case_id: int,
+                     min_score: float = 0.75, scope: str = "file",
+                     fields=("primary_text",), top_n: int = 10,
+                     **kwargs) -> dict:
+        return find_similar(project_path, case_id, min_score=min_score,
+                            scope=scope, fields=fields, top_n=top_n)
 
-    def find_duplicates(self, project_path: str, **kwargs) -> dict:
-        return find_duplicates(project_path, **kwargs)
+    def find_duplicates(self, project_path: str, file_id: int | None = None,
+                        threshold: float = 0.9, limit: int = 200,
+                        progress_callback=None, cancel_event=None,
+                        **kwargs) -> dict:
+        return find_duplicates(project_path, file_id=file_id,
+                               threshold=threshold, limit=limit,
+                               progress_callback=progress_callback,
+                               cancel_event=cancel_event)
 
 
 class EmbeddingSimilarityBackend(SimilarityBackend):
     """Эмбеддинги (Gemma-300M, опционально). Без модели — ошибка наружу,
-    вызывающий код падает на TF-IDF (см. resolve_backend)."""
+    вызывающий код падает на TF-IDF (см. resolve_backend).
+
+    Сигнатуры 1-в-1 как у TF-IDF: воркеры зовут позиционно.
+    """
 
     name = "embedding"
 
-    def find_similar(self, project_path: str, case_id: int, **kwargs) -> dict:
+    def find_similar(self, project_path: str, case_id: int,
+                     min_score: float = 0.6, scope: str = "file",
+                     fields=("primary_text",), top_n: int = 10, **kwargs) -> dict:
         import embedding_service as _emb
-        kwargs.pop("fields", None)
-        return _emb.find_similar_embedding(project_path, case_id, **kwargs)
+        return _emb.find_similar_embedding(
+            project_path, case_id, min_score=min_score, scope=scope,
+            top_n=top_n)
 
-    def find_duplicates(self, project_path: str, **kwargs) -> dict:
+    def find_duplicates(self, project_path: str, file_id: int | None = None,
+                        threshold: float = 0.9, limit: int = 200,
+                        progress_callback=None, cancel_event=None,
+                        **kwargs) -> dict:
         import embedding_service as _emb
-        kwargs.pop("fields", None)
-        return _emb.find_duplicates_embedding(project_path, **kwargs)
+        return _emb.find_duplicates_embedding(
+            project_path, file_id=file_id, threshold=threshold, limit=limit,
+            progress_callback=progress_callback, cancel_event=cancel_event)
 
 
 # UI ходит через get_backend()/resolve_backend() и не зависит от реализации.

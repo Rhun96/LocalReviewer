@@ -105,3 +105,23 @@ def test_similarity_settings_snapshot():
                 qs.remove(k)
             else:
                 qs.setValue(k, v)
+
+
+def test_backends_accept_positional_like_dialogs(proj):
+    """Регресс: воркеры зовут find_* позиционно (краш дубликатов)."""
+    import similarity_service as sim
+    p, ids = proj
+    tf = sim.get_backend("tfidf")
+    out = tf.find_duplicates(p, None, 0.9, 200, None, None)
+    assert "pairs" in out and "total" in out
+    out2 = tf.find_similar(p, ids[0], 0.3, "project", ("primary_text",), 10)
+    assert "results" in out2
+    em = sim.get_backend("embedding")
+    try:
+        em.find_duplicates(p, None, 0.9, 200, None, None)
+    except emb.EmbeddingUnavailableError:
+        pass
+    try:
+        em.find_similar(p, ids[0], 0.6, "file", ("primary_text",), 10)
+    except emb.EmbeddingUnavailableError:
+        pass
