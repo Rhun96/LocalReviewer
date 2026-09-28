@@ -228,8 +228,13 @@ class ReportsScreen(BaseScreen):
     def create_files_tab(self):
         widget = QWidget()
         layout = QVBoxLayout()
+        hint = QLabel("Файлы: полнота и грязь (клик — кейсы файла). "
+                      "Сортировка — клик по шапке.")
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
         self.files_table = FTable()
         self.files_table.setStyleSheet(classic_table_style())
+        self.files_table.itemClicked.connect(self._drill_file)
         layout.addWidget(self.files_table)
         clear_in_fluent(self.files_table)
         polish_table(self.files_table, stretch_last=True)
@@ -455,12 +460,22 @@ class ReportsScreen(BaseScreen):
             ["Категория", "Проблем", "Доля %"])
         self.quality_cats.itemClicked.connect(self._drill_cat)
         layout.addWidget(self.quality_cats)
+        self.quality_dyn_label = QLabel("Динамика причин по неделям:")
+        layout.addWidget(self.quality_dyn_label)
+        from PySide6.QtWidgets import QTableWidget as _TW3
+        self.quality_dyn = _TW3()
+        self.quality_dyn.setColumnCount(4)
+        self.quality_dyn.setHorizontalHeaderLabels(
+            ["Категория", "Прошлая", "Эта", "Δ"])
+        self.quality_dyn.itemClicked.connect(self._drill_dyn)
+        layout.addWidget(self.quality_dyn)
         try:
             clear_in_fluent(self.quality_verdicts, self.quality_sev,
-                            self.quality_cats)
+                            self.quality_cats, self.quality_dyn)
             polish_table(self.quality_verdicts, stretch_last=False)
             polish_table(self.quality_sev, stretch_last=False)
             polish_table(self.quality_cats, stretch_last=False)
+            polish_table(self.quality_dyn, stretch_last=False)
         except Exception:
             pass
         return self._scroll_wrap(widget, layout)
@@ -721,6 +736,24 @@ class ReportsScreen(BaseScreen):
             share = "" if t["share"] is None else f"{t['share']}%"
             self.quality_cats.setItem(i, 2, QTableWidgetItem(share))
         self.quality_cats.resizeColumnsToContents()
+        try:
+            dyn = _an.category_dynamics(self.project_path, scope, limit=10)
+        except Exception:
+            dyn = {"weeks": ["", ""], "rows": []}
+        self._quality_dyn_rows = (dyn or {}).get("rows", [])
+        _weeks = (dyn or {}).get("weeks", ["", ""]) or ["", ""]
+        self.quality_dyn_label.setText(
+            f"Динамика причин по неделям ({_weeks[0]} → {_weeks[1]}, "
+            "клик — кейсы):")
+        self.quality_dyn.setRowCount(len(self._quality_dyn_rows))
+        for i, t in enumerate(self._quality_dyn_rows):
+            self.quality_dyn.setItem(i, 0, QTableWidgetItem(t["name"]))
+            self.quality_dyn.setItem(i, 1, QTableWidgetItem(str(t["prev"])))
+            self.quality_dyn.setItem(i, 2, QTableWidgetItem(str(t["last"])))
+            _d = t["delta"]
+            self.quality_dyn.setItem(
+                i, 3, QTableWidgetItem(f"+{_d}" if _d > 0 else str(_d)))
+        self.quality_dyn.resizeColumnsToContents()
 
     def _drill_verdict(self, item):
         try:
@@ -741,6 +774,14 @@ class ReportsScreen(BaseScreen):
     def _drill_cat(self, item):
         try:
             rows = getattr(self, "_quality_cat_rows", []) or []
+            hit = rows[item.row()]
+        except Exception:
+            return
+        self._drill_to_review(hit.get("filters", {}))
+
+    def _drill_dyn(self, item):
+        try:
+            rows = getattr(self, "_quality_dyn_rows", []) or []
             hit = rows[item.row()]
         except Exception:
             return
@@ -881,23 +922,44 @@ class ReportsScreen(BaseScreen):
         self.overall_table.resizeColumnsToContents()
 
     def load_files_report(self):
-        files = get_files_report(self.project_path)
+        from report_service import get_files_quality
+        files = get_files_quality(self.project_path)
         if self.report_file_id is not None:
             files = [f for f in files if f["file_id"] == self.report_file_id]
+        self._files_rows = files
         self.files_table.clear()
-        self.files_table.setColumnCount(4)
+        self.files_table.setColumnCount(7)
         self.files_table.setRowCount(len(files))
         self.files_table.setHorizontalHeaderLabels([
-            "Файл", "Всего кейсов", "Проверено", "Дата импорта"
+            "Файл", "Всего", "Проверено", "Полнота %",
+            "Плохих", "Bad-rate %", "Импорт"
         ])
         self.files_table.setSortingEnabled(True)
         for row, file in enumerate(files):
-            self.files_table.setItem(row, 0, QTableWidgetItem(file['file_name']))
-            self.files_table.setItem(row, 1, QTableWidgetItem(str(file['cases_count'])))
-            self.files_table.setItem(row, 2, QTableWidgetItem(str(file['reviewed_count'])))
+            name_item = QTableWidgetItem(file['file_name'])
+            name_item.setData(Qt.ItemDataRole.UserRole, file["file_id"])
+            self.files_table.setItem(row, 0, name_item)
+            self.files_table.setItem(row, 1, QTableWidgetItem(str(file['total'])))
+            self.files_table.setItem(
+                row, 2, QTableWidgetItem(str(file['reviewed'])))
+            self.files_table.setItem(
+                row, 3, QTableWidgetItem(f"{file['reviewed_pct']:.1f}"))
+            self.files_table.setItem(row, 4, QTableWidgetItem(str(file['bad'])))
+            self.files_table.setItem(
+                row, 5, QTableWidgetItem(f"{file['bad_rate']:.1f}"))
             from ui_compat import format_dt as _fdt
-            self.files_table.setItem(row, 3, QTableWidgetItem(_fdt(file['imported_at'])))
+            self.files_table.setItem(row, 6, QTableWidgetItem(_fdt(file['imported_at'])))
         self.files_table.resizeColumnsToContents()
+
+    def _drill_file(self, item):
+        try:
+            fid = self.files_table.item(item.row(), 0).data(
+                Qt.ItemDataRole.UserRole)
+        except Exception:
+            fid = None
+        if not fid:
+            return
+        self._drill_to_review({"file_id": int(fid)})
 
     def load_tags_report(self):
         tags = get_tags_report(self.project_path, self.report_file_id)
@@ -1035,6 +1097,24 @@ class ReportsScreen(BaseScreen):
             eta = velo.get("eta_days")
             rows.append(("Прогноз, дней", eta if eta is not None else "—"))
             rows.append(("Готово к дате", velo.get("eta_date") or "—"))
+        try:
+            import analytics_service as _an
+            _tscope = ({"file_id": self.report_file_id}
+                       if self.report_file_id else None)
+            _t = _an.review_time_stats(self.project_path, _tscope)
+        except Exception:
+            _t = {}
+        rows.append(("--- Время ревью ---", ""))
+        if (_t or {}).get("count"):
+            rows.append(("Среднее на кейс", _an.fmt_duration(_t["avg_s"])))
+            rows.append(("Медиана", _an.fmt_duration(_t["median_s"])))
+            rows.append(("Замеров", _t["count"]))
+            rows.append(("Итого времени", _an.fmt_duration(_t["total_s"])))
+            for _s in (_t.get("slowest") or [])[:5]:
+                rows.append((f"Долго: {_s['source_id'] or _s['case_id']}",
+                             _an.fmt_duration(_s["duration_s"])))
+        else:
+            rows.append(("Замеры", "нет (копятся с этого обновления)"))
         rows.append(("--- Тренд (7 дней) ---", ""))
         for d in stats.get("by_day", [])[:7]:
             rows.append((d["day"], d["n"]))

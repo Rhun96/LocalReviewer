@@ -6,7 +6,7 @@ from PySide6.QtCore import Qt, Signal
 from database import db
 from ui_base import BaseScreen
 from ui_compat import (
-    FLUENT, FComboBox, FPrimaryButton, FPushButton, FSpinBox,
+    FLUENT, FComboBox, FLineEdit, FPrimaryButton, FPushButton, FSpinBox,
     FSwitch, THEME_NAMES, apply_theme, connect_check_changed, get_theme_mode,
     notify, set_theme_mode,
 )
@@ -127,27 +127,56 @@ class SettingsScreen(BaseScreen):
         self.theme_combo.addItem("Тёмная", "dark")
         self.theme_combo.currentIndexChanged.connect(self.on_theme_changed)
         ui_layout.addRow("Тема:", self.theme_combo)
-        self.palette_combo = FComboBox()
-        self.palette_combo.addItem("Классика", "classic")
-        self.palette_combo.addItem("Референс", "ref")
-        try:
-            from ui_compat import get_palette_mode as _gpm
-            _cur = _gpm()
-            for i in range(self.palette_combo.count()):
-                if self.palette_combo.itemData(i) == _cur:
-                    self.palette_combo.blockSignals(True)
-                    self.palette_combo.setCurrentIndex(i)
-                    self.palette_combo.blockSignals(False)
-                    break
-        except Exception:
-            pass
-        self.palette_combo.currentIndexChanged.connect(self.on_palette_changed)
-        ui_layout.addRow("Палитра:", self.palette_combo)
         self.fluent_hint = QLabel()
         self.fluent_hint.setWordWrap(True)
         ui_layout.addRow(self.fluent_hint)
         ui_group.setLayout(ui_layout)
         layout.addWidget(ui_group)
+
+        # Свои цвета поверх единой палитры (применяются после рестарта).
+        custom_group = QGroupBox("Свои цвета")
+        custom_layout = QFormLayout()
+        from styles import CUSTOM_COLORS as _SPEC
+        from ui_compat import get_custom_colors as _get_cc
+        try:
+            _cur = _get_cc()
+        except Exception:
+            _cur = {}
+        self.color_edits: dict = {}
+        self.color_swatches: dict = {}
+        for _ck, _label, _c, _f in _SPEC:
+            _edit = FLineEdit()
+            _edit.setText(_cur.get(_ck, ""))
+            _edit.setPlaceholderText(" hex, например " + _cur.get(_ck, ""))
+            _edit.setMaximumWidth(140)
+            _edit.textChanged.connect(
+                lambda _t, _k=_ck: self.on_custom_color_changed(_k))
+            _sw = QLabel()
+            _sw.setFixedSize(30, 20)
+            _sw.setCursor(Qt.CursorShape.PointingHandCursor)
+            _sw.setToolTip("Нажми — выбрать цвет мышью")
+            _sw.mousePressEvent = (
+                lambda _ev, _k=_ck: self._pick_color(_k))
+            self.color_edits[_ck] = _edit
+            self.color_swatches[_ck] = _sw
+            self._paint_swatch(_ck)
+            _row = QHBoxLayout()
+            _row.addWidget(_edit)
+            _row.addWidget(_sw)
+            _row.addStretch()
+            custom_layout.addRow(_label + ":", _row)
+        self.custom_restart_note = QLabel("Применится после перезапуска.")
+        self.custom_restart_note.setWordWrap(True)
+        custom_layout.addRow(self.custom_restart_note)
+        _reset_row = QHBoxLayout()
+        self.btn_custom_reset = FPushButton("Сбросить свои цвета")
+        self.btn_custom_reset.setToolTip("Вернуть палитру как была")
+        self.btn_custom_reset.clicked.connect(self.on_custom_colors_reset)
+        _reset_row.addWidget(self.btn_custom_reset)
+        _reset_row.addStretch()
+        custom_layout.addRow(_reset_row)
+        custom_group.setLayout(custom_layout)
+        layout.addWidget(custom_group)
 
         # Рабочее место V2.1 P0: восстановление сессии (глобально, QSettings).
         session_group = QGroupBox("Рабочее место")
@@ -346,6 +375,9 @@ class SettingsScreen(BaseScreen):
         self.embed_topk_spin.valueChanged.connect(self.on_embed_topk_changed)
         sem_layout.addRow("Top-K эмбеддингов:", self.embed_topk_spin)
         self.embed_auto_switch = FSwitch()
+        self.embed_auto_switch.setToolTip(
+            "Поиск доиндексирует недостающее сам; после импорта "
+            "новые кейсы индексируются автоматически.")
         try:
             from ui_compat import get_embed_auto as _get_auto
             self.embed_auto_switch.setChecked(bool(_get_auto()))
@@ -606,11 +638,73 @@ class SettingsScreen(BaseScreen):
                 "Fluent-библиотека не установлена (pip install PySide6-Fluent-Widgets) — "
                 "используется классическая тема.")
 
-    def on_palette_changed(self):
-        from ui_compat import set_palette_mode
-        set_palette_mode(self.palette_combo.currentData() or "classic")
-        notify(self, "warning", "Палитра",
-               "Применится после перезапуска приложения.")
+    def _paint_swatch(self, key: str) -> None:
+        """Квадратик-превью: текущий hex или красная рамка при мусоре."""
+        try:
+            from ui_compat import get_custom_colors as _get_cc
+            from ui_compat import is_valid_hex as _ok
+            cur = (_get_cc() or {}).get(key, "")
+            typed = self.color_edits[key].text().strip()
+            shown = typed if _ok(typed) else cur
+            bad = bool(typed) and not _ok(typed)
+            self.color_swatches[key].setStyleSheet(
+                f"background-color: {shown}; border-radius: 4px;"
+                + (" border: 2px solid red;" if bad else ""))
+        except Exception:
+            pass
+
+    def _pick_color(self, key: str) -> None:
+        """Выбор цвета мышью (hex можно и вбить руками в поле)."""
+        try:
+            from PySide6.QtGui import QColor as _QC
+            from PySide6.QtWidgets import QColorDialog as _CD
+            from ui_compat import get_custom_colors as _get_cc
+            from ui_compat import set_custom_color as _set
+            cur = (_get_cc() or {}).get(key, "")
+            picked = _CD.getColor(_QC(cur), self, "Выбери цвет")
+            if not picked.isValid():
+                return
+            _set(key, picked.name())
+            edit = self.color_edits[key]
+            try:
+                edit.blockSignals(True)
+                edit.setText(picked.name())
+                edit.blockSignals(False)
+            except Exception:
+                pass
+        except Exception:
+            pass
+        self._paint_swatch(key)
+
+    def on_custom_color_changed(self, key: str) -> None:
+        """Живое сохранение hex; мусор не пишется, подсвечивается рамкой."""
+        try:
+            from ui_compat import set_custom_color as _set
+            _set(key, self.color_edits[key].text())
+        except ValueError:
+            pass
+        except Exception:
+            pass
+        self._paint_swatch(key)
+
+    def on_custom_colors_reset(self) -> None:
+        from ui_compat import reset_custom_colors as _reset
+        from ui_compat import get_custom_colors as _get_cc
+        try:
+            _reset()
+            cur = _get_cc() or {}
+            for k, edit in self.color_edits.items():
+                try:
+                    edit.blockSignals(True)
+                    edit.setText(cur.get(k, ""))
+                    edit.blockSignals(False)
+                except Exception:
+                    pass
+                self._paint_swatch(k)
+        except Exception:
+            pass
+        notify(self, "warning", "Свои цвета",
+               "Сброшены. Применится после перезапуска приложения.")
 
     def on_sim_backend_changed(self):
         from ui_compat import set_similarity_backend

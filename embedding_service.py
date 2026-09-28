@@ -374,6 +374,44 @@ def find_similar_embedding(project_path: str, case_id: int,
             "backend": "embedding"}
 
 
+def find_by_text_embedding(project_path: str, query: str,
+                           min_score: float = 0.6, scope: str = "project",
+                           file_id: int | None = None,
+                           top_n: int = 10) -> dict:
+    """Поиск по произвольному тексту через эмбеддинги. Формат результата —
+    как у TF-IDF find_by_text (query/total/results/backend) + поля
+    indexed/scope_total/missing для честного UI."""
+    if scope not in ("file", "project", "golden", "archive"):
+        raise ValueError(f"Плохая область: {scope!r}")
+    if not 0 <= min_score <= 1:
+        raise ValueError("min_score: 0..1")
+    if scope == "file" and file_id is None:
+        raise ValueError("Для области «файл» нужен file_id")
+    import numpy as _np
+    text = build_text(query or "", None, None)
+    if not text:
+        return {"query": query or "", "total": 0, "results": [],
+                "indexed": 0, "scope_total": 0, "missing": [],
+                "backend": "embedding"}
+    ids = _scope_ids(project_path, scope, file_id)
+    if ids is None:
+        with db(project_path) as conn:
+            ids = [r["case_id"] for r in conn.cursor().execute(
+                "SELECT case_id FROM cases").fetchall()]
+    qvec = encode_texts([text])[0]
+    vecs = load_vectors(project_path, ids)
+    missing = [c for c in ids if c not in vecs][:2000]
+    scored = [(c, float(_np.dot(qvec, v))) for c, v in vecs.items()]
+    scored.sort(key=lambda t: -t[1])
+    hits = [(c, s) for c, s in scored if s >= min_score][:max(1, top_n)]
+    return {"query": query or "", "total": len(hits),
+            "results": _enrich(project_path, hits),
+            "indexed": len(vecs),
+            "scope_total": len(ids),
+            "missing": missing,
+            "backend": "embedding"}
+
+
 def find_duplicates_embedding(project_path: str, file_id: int | None = None,
                               threshold: float = 0.9, limit: int = 200,
                               progress_callback=None,
@@ -415,3 +453,26 @@ def find_duplicates_embedding(project_path: str, file_id: int | None = None,
     pairs.sort(key=lambda p: -p["score"])
     return {"total": len(pairs), "pairs": pairs[:limit],
             "truncated": len(pairs) > limit, "backend": "embedding"}
+
+
+def auto_index_wanted() -> tuple:
+    """(True, '') — после импорта стоит доиндексировать в фоне.
+
+    Тот же тумблер «Доиндексировать недостающее в фоне», что у поиска:
+    движок — эмбеддинги, авто — включено, веса — на месте.
+    """
+    try:
+        from ui_compat import get_embed_auto as _auto
+        from ui_compat import get_similarity_backend as _be
+        if _be() != "embedding":
+            return False, "движок — TF-IDF"
+        if not _auto():
+            return False, "автоиндексация выключена"
+    except Exception:
+        return False, "настройки недоступны"
+    try:
+        if not model_files_present():
+            return False, "нет весов модели"
+    except Exception:
+        return False, "нет весов модели"
+    return True, ""

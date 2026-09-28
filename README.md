@@ -13,7 +13,7 @@
 ![Qt](https://img.shields.io/badge/Interface-PySide6_Fluent-41CD52?logo=qt&logoColor=white)
 ![Windows](https://img.shields.io/badge/OS-Windows_10%2F11-0078D6?logo=windows&logoColor=white)
 ![SQLite](https://img.shields.io/badge/Storage-SQLite-003B57?logo=sqlite&logoColor=white)
-![Version](https://img.shields.io/badge/Version-1.0.0-0b7a34)
+![Version](https://img.shields.io/badge/Version-1.1.0-0b7a34)
 
 ---
 
@@ -95,8 +95,8 @@
 ### 🎨 Оформление
 - Fluent-дизайн (Windows 11): светлая, тёмная и системная темы, переключаются
   в Настройках без перезапуска; без библиотеки — классическая тема
-- Палитры: Классика и Референс (тёмная сине-серая) — переключатель в Настройках,
-  применяется после перезапуска
+- Палитра единая (тёмная сине-серая) + «Свои цвета» в Настройках
+  (11 цветов поверх, применяется после перезапуска)
 - Оконный режим: таблицы и кейс подстраиваются под размер окна
 
 ---

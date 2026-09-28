@@ -3,6 +3,8 @@ from PySide6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QLabel, QTableWidget, QTableWidgetItem,
 )
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QPixmap
+from io import BytesIO
 from ui_base import BaseScreen
 from ui_compat import (FComboBox, FLineEdit, FPushButton, FPrimaryButton,
                        clear_in_fluent, confirm, notify, polish_table)
@@ -53,6 +55,21 @@ class LaunchesScreen(BaseScreen):
         btn_find.clicked.connect(self.refresh)
         filt.addWidget(btn_find)
         layout.addLayout(filt)
+
+        self.trend_hint = QLabel("Тренд: регрессии/улучшения по запускам "
+                                 "(нужно 2+ в выборке).")
+        self.trend_hint.setWordWrap(True)
+        try:
+            from styles import COLORS as _CC
+            self.trend_hint.setStyleSheet(
+                f"font-size: 11px; color: {_CC['gray']};")
+        except Exception:
+            pass
+        layout.addWidget(self.trend_hint)
+        self.trend_label = QLabel()
+        self.trend_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.trend_label.setVisible(False)
+        layout.addWidget(self.trend_label)
 
         self.table = QTableWidget()
         layout.addWidget(self.table, 2)
@@ -147,6 +164,76 @@ class LaunchesScreen(BaseScreen):
             self.table.item(i, 0).setData(
                 Qt.ItemDataRole.UserRole, r["regression_id"])
         self.table.resizeColumnsToContents()
+        self._refresh_trend(shown)
+
+    @staticmethod
+    def _trend_points(rows: list) -> list:
+        """Точки тренда хронологически (list_regressions отдаёт свежими)."""
+        pts = []
+        for r in reversed(list(rows or [])):
+            try:
+                label = f"#{r['regression_id']} {(r.get('name') or '')[:14]}"
+                pts.append({"label": label,
+                            "reg": int(r.get("regressions") or 0),
+                            "imp": int(r.get("improvements") or 0),
+                            "gate": r.get("gate_result") or ""})
+            except Exception:
+                continue
+        return pts
+
+    def _refresh_trend(self, shown: list) -> None:
+        pts = self._trend_points(shown)
+        if len(pts) < 2:
+            self.trend_label.setVisible(False)
+            return
+        try:
+            import matplotlib
+            matplotlib.use("Agg")
+            import matplotlib.pyplot as plt
+            from styles import CHART_DARK, CHART_LIGHT
+            from ui_compat import effective_theme
+            from styles import SEMANTIC as _SEM
+            pal = dict(CHART_DARK) if effective_theme() == "dark" \
+                else dict(CHART_LIGHT)
+            plt.style.use(pal["style"])
+            fig, ax = plt.subplots(figsize=(7, 2.6), dpi=100)
+            fig.patch.set_facecolor(pal["bg"])
+            ax.set_facecolor(pal["bg"])
+            xs = [p["label"] for p in pts]
+            ax.plot(xs, [p["reg"] for p in pts], marker="o",
+                    color=_SEM["danger"], linewidth=2, label="Регрессии")
+            ax.plot(xs, [p["imp"] for p in pts], marker="o",
+                    color=_SEM["success"], linewidth=2, label="Улучшения")
+            for x, p in zip(xs, pts, strict=True):
+                if p["gate"] == "FAIL":
+                    ax.plot(x, p["reg"], marker="x", markersize=10,
+                            color=_SEM["danger"], markeredgewidth=2)
+            ax.grid(True, alpha=0.25, linestyle="--")
+            ax.set_axisbelow(True)
+            ax.set_title("Тренд запусков", color=pal["fg"],
+                         fontsize=13, pad=10)
+            ax.tick_params(colors=pal["fg"])
+            for tick in ax.get_xticklabels():
+                tick.set_rotation(20)
+                tick.set_ha("right")
+                tick.set_color(pal["fg"])
+            ax.legend(facecolor=pal["bg"], edgecolor=pal["spine"],
+                      labelcolor=pal["fg"])
+            fig.tight_layout()
+            buf = BytesIO()
+            fig.savefig(buf, format="png", bbox_inches="tight",
+                        facecolor=fig.get_facecolor())
+            plt.close(fig)
+            buf.seek(0)
+            pixmap = QPixmap()
+            pixmap.loadFromData(buf.read())
+            self.trend_label.setPixmap(pixmap.scaled(
+                640, 320,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation))
+            self.trend_label.setVisible(True)
+        except Exception:
+            self.trend_label.setVisible(False)
 
     def _selected_id(self) -> int | None:
         item = self.table.currentItem()

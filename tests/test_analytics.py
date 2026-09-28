@@ -49,6 +49,53 @@ def test_product_and_error_top():
     assert get_error_top(p, _fid(p, "a.xlsx")) == []
 
 
+def test_category_dynamics_two_full_weeks():
+    from datetime import datetime, timedelta, UTC
+    from taxonomy_service import set_case_error
+    import analytics_service as an
+    p = _proj()
+    assert an.category_dynamics(p, None)["rows"] == []
+    ids = get_filtered_case_ids(p, {})
+    bulk_set_status(p, ids, "bad")
+    with db(p) as conn:
+        cat = conn.execute("SELECT category_id FROM error_categories "
+                           "WHERE code='correctness'").fetchone()
+        sub = conn.execute("SELECT category_id FROM error_categories "
+                           "WHERE code='correctness.hallucination'").fetchone()
+    for cid in ids:
+        set_case_error(p, cid, cat["category_id"], sub["category_id"], "high")
+    today = datetime.now(UTC).date()
+    monday = today - timedelta(days=today.weekday())
+    dprev = (monday - timedelta(days=14)).isoformat() + " 10:00:00"
+    dlast = (monday - timedelta(days=7)).isoformat() + " 10:00:00"
+    with db(p) as conn:
+        conn.execute("UPDATE case_errors SET updated_at=? WHERE case_id=?",
+                     (dprev, ids[0]))
+        conn.execute("UPDATE case_errors SET updated_at=? WHERE case_id<>?",
+                     (dlast, ids[0]))
+    res = an.category_dynamics(p, None)
+    assert res["weeks"] == list(an._last_full_weeks())
+    assert len(res["rows"]) == 1
+    row = res["rows"][0]
+    assert row["name"] == "Правильность"
+    assert (row["prev"], row["last"], row["delta"]) == (1, 2, 1)
+    assert row["filters"]["error_category_id"] == cat["category_id"]
+
+
+def test_files_quality_completeness_and_dirt():
+    from report_service import get_files_quality
+    p = _proj()
+    ids = get_filtered_case_ids(p, {})
+    bulk_set_status(p, ids[:2], "good")
+    bulk_set_status(p, ids[2:], "bad")
+    q = {r["file_name"]: r for r in get_files_quality(p)}
+    a, b = q["a.xlsx"], q["b.xlsx"]
+    assert (a["total"], a["reviewed"], a["bad"]) == (2, 2, 0)
+    assert a["reviewed_pct"] == 100.0 and a["bad_rate"] == 0.0
+    assert (b["total"], b["reviewed"], b["bad"]) == (1, 1, 1)
+    assert b["reviewed_pct"] == 100.0 and b["bad_rate"] == 100.0
+
+
 def test_velocity_and_forecast():
     from report_service import get_velocity
     p = _proj()
@@ -99,10 +146,31 @@ def test_leaderboard_and_management_report():
     assert export_management_report(p, out) is True
     ws = openpyxl.load_workbook(out, read_only=True)
     assert ws.sheetnames == ["Сводка", "Сверка", "Продукты", "Причины", "Прогоны",
-                             "Регрессии", "Версии"]
+                             "Регрессии", "Версии", "Файлы", "Динамика",
+                             "Группы"]
     summary = {r[0]: r[1] for r in ws["Сводка"].iter_rows(values_only=True)}
     assert summary["Всего кейсов"] == 3 and summary["Осталось"] == 0
     assert summary["ВЕРДИКТ"] == "НЕ ГОТОВ (gate FAIL)"
+    assert summary["Файлов"] == 2
+    assert ws["Файлы"].max_row == 3
+    assert ws["Динамика"].max_row >= 1
+    assert ws["Группы"].max_row >= 1
+
+
+def test_bug_semantic_groups():
+    from bug_report_service import create_bug
+    from report_service import bug_semantic_groups
+    p = _proj()
+    assert bug_semantic_groups(p) == []
+    create_bug(p, "Возврат денег не пришёл")
+    create_bug(p, "Не пришёл возврат денег")
+    create_bug(p, "Упал импорт таблицы Excel")
+    groups = bug_semantic_groups(p)
+    assert len(groups) == 1
+    assert groups[0]["size"] == 2
+    assert len(groups[0]["titles"]) == 2
+    with pytest.raises(ValueError):
+        bug_semantic_groups(p, threshold=2)
 
 
 def test_consistency_alerts_golden_trend():

@@ -92,3 +92,55 @@ def search_cases(project_path: str, query: str, limit: int = LIMIT) -> list:
         logger.warning("global search failed: %s", e)
         return []
     return out[:limit]
+
+
+def search_semantic(project_path: str, query: str, scope: str = "project",
+                    file_id: int | None = None, min_score: float | None = None,
+                    top_n: int = 10) -> dict:
+    """Поиск по смыслу произвольного текста (text-query).
+
+    Движок — из настроек (resolve_backend): эмбеддинги, если модель на месте,
+    иначе TF-IDF с честной пометкой. Ошибка эмбеддинг-слоя в рантайме
+    (нет torch/весов) — тоже молча TF-IDF + пометка, а не красная ошибка.
+    Возвращает {results, total, backend, note, indexed, scope_total, missing}.
+    Пустой запрос → пустые результаты (не ошибка).
+    """
+    q = (query or "").strip()
+    empty = {"query": query or "", "total": 0, "results": [], "backend": "tfidf",
+             "note": "", "indexed": 0, "scope_total": 0, "missing": []}
+    if not q:
+        return empty
+    import similarity_service as sim
+    be, note = sim.resolve_backend()
+    if min_score is None:
+        if be.name == "embedding":
+            try:
+                from ui_compat import get_embed_threshold as _thr
+                min_score = float(_thr())
+            except Exception:
+                min_score = 0.65
+        else:
+            min_score = 0.3
+    try:
+        res = be.find_by_text(project_path, q, min_score=min_score,
+                              scope=scope, file_id=file_id, top_n=top_n)
+    except ValueError:
+        raise
+    except Exception as e:
+        logger.warning("semantic search backend failed, TF-IDF fallback: %s", e)
+        be = sim.get_backend("tfidf")
+        note = (note + "; " if note else "") + "эмбеддинги недоступны — TF-IDF"
+        res = be.find_by_text(project_path, q, min_score=0.3,
+                              scope=scope, file_id=file_id, top_n=top_n)
+    rows = [{"case_id": r["case_id"],
+             "source_id": r.get("source_id") or "",
+             "snippet": (r.get("snippet") or "")[:160],
+             "score": r.get("score", 0.0),
+             "status": r.get("status", "unreviewed"),
+             "reviewed": r.get("reviewed", False)}
+            for r in res.get("results", [])]
+    return {"query": q, "total": res.get("total", len(rows)), "results": rows,
+            "backend": getattr(be, "name", "tfidf"), "note": note,
+            "indexed": res.get("indexed", 0),
+            "scope_total": res.get("scope_total", 0),
+            "missing": res.get("missing") or []}

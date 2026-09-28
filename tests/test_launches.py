@@ -100,3 +100,27 @@ def test_dialog_preselect():
             or d._reg_id is not None
     finally:
         d.close()
+
+
+def test_trend_points_chronological():
+    from launches_screen import LaunchesScreen
+    rows = rg.list_regressions(_proj())
+    pts = LaunchesScreen._trend_points(rows)
+    assert [p["label"] for p in pts] == ["#1 rel-1", "#2 rel-2"]
+    assert [(p["reg"], p["imp"], p["gate"]) for p in pts] == [
+        (0, 2, "PASS"), (3, 0, "FAIL")]
+
+
+def test_trend_chart_shown_and_hidden():
+    w = _win(_proj())
+    try:
+        w.show()
+        assert w.trend_label.isVisible()
+        assert w.trend_label.pixmap() is not None
+        assert not w.trend_label.pixmap().isNull()
+        w.search_edit.setText("rel-1")
+        w.refresh()
+        assert w.table.rowCount() == 1
+        assert not w.trend_label.isVisible()
+    finally:
+        w.close()

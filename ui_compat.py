@@ -352,30 +352,67 @@ def set_theme_mode(mode: str) -> str:
         return "system"
 
 
-PALETTE_MODES = ("classic", "ref")
-PALETTE_NAMES = {"classic": "Классика", "ref": "Референс"}
-
-
-def get_palette_mode() -> str:
-    """Палитра из настроек (применяется при старте, нужен перезапуск)."""
+def is_valid_hex(value) -> bool:
+    """Строгий #RRGGBB (снаружи только такое и пишем)."""
+    if not isinstance(value, str):
+        return False
+    v = value.strip()
+    if len(v) != 7 or not v.startswith("#"):
+        return False
     try:
-        from PySide6.QtCore import QSettings
-        mode = QSettings("LocalReviewer", "LocalReviewer").value(
-            "ui/palette", "classic")
-        return mode if mode in PALETTE_MODES else "classic"
-    except Exception:
-        return "classic"
+        int(v[1:], 16)
+    except ValueError:
+        return False
+    return True
 
 
-def set_palette_mode(mode: str) -> str:
+def get_custom_colors() -> dict:
+    """{ключ: hex}: дефолты палитры + сохранённые свои цвета."""
     try:
-        from PySide6.QtCore import QSettings
-        if mode not in PALETTE_MODES:
-            mode = "classic"
-        QSettings("LocalReviewer", "LocalReviewer").setValue("ui/palette", mode)
-        return mode
+        from styles import CUSTOM_COLORS, _custom_default
     except Exception:
-        return "classic"
+        return {}
+    out = {}
+    for ck, _label, _c, _f in CUSTOM_COLORS:
+        try:
+            out[ck] = _custom_default(ck)
+        except Exception:
+            continue
+    for ck in out:
+        try:
+            v = _qs_value(f"ui/custom_{ck}", None)
+        except Exception:
+            continue
+        if isinstance(v, str) and is_valid_hex(v):
+            out[ck] = v.strip()
+    return out
+
+
+def set_custom_color(key: str, value: str) -> str:
+    """Сохранить свой цвет (применится после рестарта). Мусор — ValueError."""
+    from styles import CUSTOM_COLORS
+    if key not in {ck for ck, _l, _c, _f in CUSTOM_COLORS}:
+        raise ValueError(f"Плохой ключ цвета: {key!r}")
+    v = (value or "").strip()
+    if not is_valid_hex(v):
+        raise ValueError(f"Плохой hex: {value!r} (нужен #RRGGBB)")
+    _qs_set(f"ui/custom_{key}", v)
+    return v
+
+
+def reset_custom_colors() -> None:
+    """Сбросить свои цвета (снова чистая палитра после рестарта)."""
+    try:
+        from styles import CUSTOM_COLORS
+        from PySide6.QtCore import QSettings
+        qs = QSettings("LocalReviewer", "LocalReviewer")
+        for ck, _l, _c, _f in CUSTOM_COLORS:
+            try:
+                qs.remove(f"ui/custom_{ck}")
+            except Exception:
+                pass
+    except Exception:
+        pass
 
 
 SIMILARITY_BACKENDS = ("tfidf", "embedding")

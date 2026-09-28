@@ -1,7 +1,9 @@
 """Универсальная аналитика поверх существующих данных (ТЗ Analytics v1.0).
 
 Принципы:
-- никаких новых таблиц/миграций: cases/annotations/case_errors/bugs/history;
+- никаких новых таблиц: cases/annotations/case_errors/bugs/history
+  (время ревью — колонками annotations, v22: старт просмотра +
+  длительность последней ручной проверки);
 - цифра на карточке считается ТЕМ ЖЕ предикатом, что drill-down
   (count_filtered_cases + drill_filters) — ключевой тест ТЗ держится
   конструкцией, а не надеждой;
@@ -104,6 +106,104 @@ def percentages(card_counts_result: dict) -> dict:
     return out
 
 
+# Замер дольше — забытый открытым кейс, а не ревью (не копим враньё).
+REVIEW_STALE_AFTER_S = 4 * 3600
+
+
+def review_duration_seconds(started_iso, end_iso):
+    """Длительность просмотра кейса, сек. None — не считаем (мусор/простой)."""
+    try:
+        from datetime import datetime as _dt
+        s = _dt.fromisoformat((started_iso or "").strip())
+        e = _dt.fromisoformat((end_iso or "").strip())
+        d = (e - s).total_seconds()
+    except Exception:
+        return None
+    if not 0 <= d <= REVIEW_STALE_AFTER_S:
+        return None
+    return round(d, 1)
+
+
+def fmt_duration(seconds) -> str:
+    """Человекочитаемо: 45 с / 1 мин 20 с / 2 ч 05 мин. None — «—»."""
+    try:
+        s = float(seconds)
+    except (TypeError, ValueError):
+        return "—"
+    if s < 0:
+        return "—"
+    if s < 60:
+        return f"{int(round(s))} с"
+    m = int(s // 60)
+    if m < 60:
+        rest = int(round(s % 60))
+        return f"{m} мин" + (f" {rest:02d} с" if rest else "")
+    h = m // 60
+    return f"{h} ч {m % 60:02d} мин"
+
+
+def review_time_stats(project_path: str, scope: dict | None) -> dict:
+    """Время ревью: только честные замеры (duration NOT NULL).
+
+    {count, avg_s, median_s, total_s, by_day: [{day, avg_s, n}],
+     slowest: [{case_id, source_id, duration_s}]}.
+    count=0 — замеров нет (например, всё размечено до v22).
+    """
+    import statistics as _st
+    base = scope_filters(scope)
+    conds = ["COALESCE(c.hidden, 0) = 0",
+             "a.review_duration_s IS NOT NULL"]
+    params: list = []
+    if base.get("file_id"):
+        conds.append("c.file_id = ?")
+        params.append(base["file_id"])
+    if base.get("reviewed_from"):
+        conds.append("substr(a.updated_at, 1, 10) >= ?")
+        params.append(base["reviewed_from"])
+    if base.get("reviewed_to"):
+        conds.append("substr(a.updated_at, 1, 10) <= ?")
+        params.append(base["reviewed_to"])
+    where = "WHERE " + " AND ".join(conds)
+    try:
+        with db(project_path) as conn:
+            cur = conn.cursor()
+            vals = [float(r["d"]) for r in cur.execute(
+                f"SELECT a.review_duration_s AS d FROM cases c "
+                f"JOIN files f ON c.file_id = f.file_id "
+                f"JOIN annotations a ON a.case_id = c.case_id {where}",
+                params).fetchall()]
+            by_day = [{"day": r["day"], "avg_s": round(r["avg"], 1),
+                       "n": r["n"]} for r in cur.execute(
+                "SELECT substr(a.updated_at, 1, 10) AS day, "
+                "AVG(a.review_duration_s) AS avg, "
+                "COUNT(*) AS n FROM cases c "
+                "JOIN files f ON c.file_id = f.file_id "
+                "JOIN annotations a ON a.case_id = c.case_id "
+                f"{where} GROUP BY day ORDER BY day DESC LIMIT 30",
+                params).fetchall()]
+            slowest = [{"case_id": r["case_id"],
+                        "source_id": r["source_id"] or "",
+                        "duration_s": float(r["d"])} for r in cur.execute(
+                "SELECT c.case_id AS case_id, c.source_id AS source_id, "
+                "a.review_duration_s AS d FROM cases c "
+                "JOIN files f ON c.file_id = f.file_id "
+                "JOIN annotations a ON a.case_id = c.case_id "
+                f"{where} ORDER BY a.review_duration_s DESC LIMIT 10",
+                params).fetchall()]
+    except Exception as e:
+        logger.warning("review_time_stats failed: %s", e)
+        return {"count": 0, "avg_s": None, "median_s": None, "total_s": 0,
+                "by_day": [], "slowest": []}
+    if not vals:
+        return {"count": 0, "avg_s": None, "median_s": None, "total_s": 0,
+                "by_day": [], "slowest": []}
+    return {"count": len(vals),
+            "avg_s": round(sum(vals) / len(vals), 1),
+            "median_s": round(_st.median(vals), 1),
+            "total_s": round(sum(vals), 1),
+            "by_day": by_day, "slowest": slowest}
+
+
 def dynamics(project_path: str, scope: dict | None,
              limit_days: int = 90) -> list:
     """По дням: [{day, reviewed, bad}]. Агрегация SQL, без вытягивания."""
@@ -192,6 +292,76 @@ def top_categories(project_path: str, scope: dict | None,
                     "share": _pct(r["n"], total),
                     "filters": flt})
     return out
+
+
+def _last_full_weeks() -> tuple:
+    """Ключи двух последних ПОЛНЫХ недель (%Y-%W, понедельник; штампы UTC).
+    Текущая неделя частична — её не сравниваем, иначе дельта врёт."""
+    from datetime import datetime as _dt, timedelta as _td, UTC as _UTC
+    today = _dt.now(_UTC).date()
+    this_monday = today - _td(days=today.weekday())
+    last = this_monday - _td(days=7)
+    prev = this_monday - _td(days=14)
+    return (f"{prev.year}-{prev.strftime('%W')}",
+            f"{last.year}-{last.strftime('%W')}")
+
+
+def category_dynamics(project_path: str, scope: dict | None,
+                      limit: int = 10) -> dict:
+    """Причины по неделям: прошлая полная vs позапрошлая.
+    {weeks: [prev, last], rows: [{category_id, name, prev, last, delta,
+    filters}]} — delta desc (рост сверху). Пусто — данных нет."""
+    base = scope_filters(scope)
+    wprev, wlast = _last_full_weeks()
+    conds, params = ["COALESCE(c.hidden, 0) = 0"], []
+    if base.get("file_id"):
+        conds.append("c.file_id = ?")
+        params.append(base["file_id"])
+    if base.get("reviewed_from"):
+        conds.append("substr(e.updated_at, 1, 10) >= ?")
+        params.append(base["reviewed_from"])
+    if base.get("reviewed_to"):
+        conds.append("substr(e.updated_at, 1, 10) <= ?")
+        params.append(base["reviewed_to"])
+    conds.append("strftime('%Y-%W', e.updated_at) IN (?, ?)")
+    params.extend([wprev, wlast])
+    where = "WHERE " + " AND ".join(conds)
+    try:
+        with db(project_path) as conn:
+            cur = conn.cursor()
+            rows = cur.execute(
+                "SELECT COALESCE(e.category_id, e.subcategory_id) AS cat, "
+                "strftime('%Y-%W', e.updated_at) AS wk, "
+                "COUNT(DISTINCT e.case_id) AS n "
+                "FROM case_errors e "
+                "JOIN cases c ON c.case_id = e.case_id "
+                "JOIN files f ON f.file_id = c.file_id "
+                f"{where} GROUP BY cat, wk", params).fetchall()
+            names = {r["category_id"]: r["name"] for r in cur.execute(
+                "SELECT category_id, name FROM error_categories").fetchall()}
+    except Exception as e:
+        logger.warning("category_dynamics failed: %s", e)
+        return {"weeks": [wprev, wlast], "rows": []}
+    pivot: dict = {}
+    for r in rows:
+        if not r["cat"]:
+            continue
+        cell = pivot.setdefault(r["cat"], {"prev": 0, "last": 0})
+        if r["wk"] == wprev:
+            cell["prev"] += r["n"]
+        elif r["wk"] == wlast:
+            cell["last"] += r["n"]
+    out = []
+    for cat, cell in pivot.items():
+        flt = dict(base, error_category_id=cat,
+                   statuses=reviewed_codes(project_path))
+        out.append({"category_id": cat,
+                    "name": names.get(cat, f"#{cat}"),
+                    "prev": cell["prev"], "last": cell["last"],
+                    "delta": cell["last"] - cell["prev"],
+                    "filters": flt})
+    out.sort(key=lambda t: (-t["delta"], -t["last"]))
+    return {"weeks": [wprev, wlast], "rows": out[:max(1, limit)]}
 
 
 def severity_dist(project_path: str, scope: dict | None) -> list:

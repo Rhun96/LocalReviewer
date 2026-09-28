@@ -203,3 +203,112 @@ def test_filter_dialog_period_roundtrip():
             dlg2.close()
     finally:
         dlg.close()
+
+
+def test_personal_review_time_block():
+    """Личное: среднее/медиана из замеров; пусто — честное «нет»."""
+    from PySide6.QtWidgets import QApplication
+    QApplication.instance() or QApplication([])
+    from reports_screen import ReportsScreen
+    from database import db as _db
+    p, ids = _proj()
+
+    def _rows(w):
+        return {(w.personal_table.item(r, 0).text(),
+                 w.personal_table.item(r, 1).text())
+                for r in range(w.personal_table.rowCount())}
+
+    w = ReportsScreen(p, None)
+    try:
+        w.show()
+        w.tabs.setCurrentWidget(w.personal_tab)
+        w.load_personal_report()
+        assert ("Замеры", "нет (копятся с этого обновления)") in _rows(w)
+    finally:
+        w.close()
+    with _db(p) as conn:
+        conn.execute("UPDATE annotations SET review_duration_s=60.0 "
+                     "WHERE case_id=?", (ids[0],))
+        conn.execute("UPDATE annotations SET review_duration_s=120.0 "
+                     "WHERE case_id=?", (ids[1],))
+    w = ReportsScreen(p, None)
+    try:
+        w.show()
+        w.tabs.setCurrentWidget(w.personal_tab)
+        w.load_personal_report()
+        rows = _rows(w)
+        assert ("Среднее на кейс", "1 мин 30 с") in rows
+        assert ("Медиана", "1 мин 30 с") in rows
+        assert ("Замеров", "2") in rows
+    finally:
+        w.close()
+
+
+def test_quality_dynamics_block():
+    """Качество: таблица динамики причин (прошлая/эта/Δ)."""
+    from datetime import datetime, timedelta, UTC
+    from PySide6.QtWidgets import QApplication
+    QApplication.instance() or QApplication([])
+    from reports_screen import ReportsScreen
+    from bulk_operation_service import bulk_set_status
+    from database import db as _db
+    from filter_service import get_filtered_case_ids
+    from taxonomy_service import set_case_error
+    p, ids = _proj()
+    all_ids = get_filtered_case_ids(p, {})
+    bulk_set_status(p, all_ids, "bad")
+    with _db(p) as conn:
+        cat = conn.execute("SELECT category_id FROM error_categories "
+                           "WHERE code='correctness'").fetchone()
+        sub = conn.execute("SELECT category_id FROM error_categories "
+                           "WHERE code='correctness.hallucination'").fetchone()
+    for cid in all_ids:
+        set_case_error(p, cid, cat["category_id"], sub["category_id"], "high")
+    today = datetime.now(UTC).date()
+    monday = today - timedelta(days=today.weekday())
+    dprev = (monday - timedelta(days=14)).isoformat() + " 10:00:00"
+    dlast = (monday - timedelta(days=7)).isoformat() + " 10:00:00"
+    with _db(p) as conn:
+        conn.execute("UPDATE case_errors SET updated_at=? WHERE case_id=?",
+                     (dprev, all_ids[0]))
+        conn.execute("UPDATE case_errors SET updated_at=? WHERE case_id<>?",
+                     (dlast, all_ids[0]))
+    w = ReportsScreen(p, None)
+    try:
+        w.show()
+        w.tabs.setCurrentWidget(w.quality_tab)
+        w.load_quality_report()
+        assert w.quality_dyn.rowCount() == 1
+        assert w.quality_dyn.item(0, 0).text() == "Правильность"
+        assert w.quality_dyn.item(0, 1).text() == "1"
+        assert w.quality_dyn.item(0, 2).text() == "2"
+        assert w.quality_dyn.item(0, 3).text() == "+1"
+        assert "→" in w.quality_dyn_label.text()
+    finally:
+        w.close()
+
+
+def test_files_quality_tab_and_drill():
+    """Файлы: полнота/грязь + клик ведёт в ревью файла."""
+    from PySide6.QtWidgets import QApplication
+    QApplication.instance() or QApplication([])
+    from reports_screen import ReportsScreen
+    from database import db as _db
+    p, ids = _proj()
+    with _db(p) as conn:
+        fid = conn.execute("SELECT file_id FROM files").fetchone()["file_id"]
+    mw = _MW()
+    w = ReportsScreen(p, None)
+    try:
+        w.parent_window = _PW(mw)
+        w.show()
+        w.tabs.setCurrentWidget(w.files_tab)
+        w.load_files_report()
+        assert w.files_table.columnCount() == 7
+        assert w.files_table.rowCount() == 1
+        assert w.files_table.item(0, 3).text() == "66.7"
+        w._drill_file(w.files_table.item(0, 0))
+        assert mw.calls and mw.calls[0][0] == "review"
+        assert mw.calls[0][1] == {"file_id": fid}
+    finally:
+        w.close()

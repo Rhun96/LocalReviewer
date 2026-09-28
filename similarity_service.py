@@ -297,6 +297,54 @@ def find_duplicates(project_path: str, file_id: int | None = None,
             "truncated": len(pairs) > limit}
 
 
+def find_by_text(project_path: str, query: str, min_score: float = 0.3,
+                 scope: str = "project", file_id: int | None = None,
+                 fields: tuple = ("primary_text",),
+                 top_n: int = 10) -> dict:
+    """Поиск по произвольному тексту (text-query): TF-IDF-косинус запроса
+    против документов области. Пустой запрос → пустой список (не ошибка).
+    Формат результатов — как у find_similar (без case_id запроса)."""
+    if scope not in SCOPES:
+        raise ValueError(f"Плохая область: {scope!r}")
+    if not 0 <= min_score <= 1:
+        raise ValueError("min_score: 0..1")
+    if fields is None:
+        fields = ("primary_text",)
+    fields = tuple(f for f in fields if f in FIELDS)
+    if not fields:
+        raise ValueError("Нужно хотя бы одно поле")
+    qterms = Counter(_terms(query or ""))
+    if not qterms:
+        return {"query": query or "", "total": 0, "results": [],
+                "backend": "tfidf"}
+    with db(project_path) as conn:
+        cur = conn.cursor()
+        if scope == "file" and file_id is None:
+            raise ValueError("Для области «файл» нужен file_id")
+        ids = _scope_case_ids(cur, scope, file_id)
+        docs = _load_docs(cur, ids, fields)
+        statuses = {r["case_id"]: r["status"] for r in cur.execute(
+            "SELECT case_id, status FROM annotations").fetchall()}
+    vecs = _tfidf_vectors([qterms] + [d["terms"] for d in docs])
+    qvec, vecs = vecs[0], vecs[1:]
+    out = []
+    for doc, vec in zip(docs, vecs, strict=True):
+        if not doc["terms"]:
+            continue
+        score = _cosine(qvec, vec)
+        if score >= min_score:
+            st = statuses.get(doc["case_id"], "unreviewed")
+            out.append({"case_id": doc["case_id"],
+                        "source_id": doc["source_id"],
+                        "score": round(score, 4),
+                        "status": st,
+                        "reviewed": st != "unreviewed",
+                        "snippet": (doc["primary_text"] or "")[:160]})
+    out.sort(key=lambda r: -r["score"])
+    return {"query": query or "", "total": len(out),
+            "results": out[:max(1, top_n)], "backend": "tfidf"}
+
+
 class SimilarityBackend:
     """Интерфейс движка схожести (ТЗ V2 §19, §33)."""
     name = "base"
@@ -305,6 +353,9 @@ class SimilarityBackend:
         raise NotImplementedError
 
     def find_duplicates(self, project_path: str, **kwargs) -> dict:
+        raise NotImplementedError
+
+    def find_by_text(self, project_path: str, query: str, **kwargs) -> dict:
         raise NotImplementedError
 
 
@@ -327,6 +378,14 @@ class TfidfSimilarityBackend(SimilarityBackend):
                                threshold=threshold, limit=limit,
                                progress_callback=progress_callback,
                                cancel_event=cancel_event)
+
+    def find_by_text(self, project_path: str, query: str,
+                     min_score: float = 0.3, scope: str = "project",
+                     file_id: int | None = None, fields=("primary_text",),
+                     top_n: int = 10, **kwargs) -> dict:
+        return find_by_text(project_path, query, min_score=min_score,
+                            scope=scope, file_id=file_id, fields=fields,
+                            top_n=top_n)
 
 
 class EmbeddingSimilarityBackend(SimilarityBackend):
@@ -354,6 +413,15 @@ class EmbeddingSimilarityBackend(SimilarityBackend):
         return _emb.find_duplicates_embedding(
             project_path, file_id=file_id, threshold=threshold, limit=limit,
             progress_callback=progress_callback, cancel_event=cancel_event)
+
+    def find_by_text(self, project_path: str, query: str,
+                     min_score: float = 0.6, scope: str = "project",
+                     file_id: int | None = None, fields=("primary_text",),
+                     top_n: int = 10, **kwargs) -> dict:
+        import embedding_service as _emb
+        return _emb.find_by_text_embedding(
+            project_path, query, min_score=min_score, scope=scope,
+            file_id=file_id, top_n=top_n)
 
 
 # UI ходит через get_backend()/resolve_backend() и не зависит от реализации.

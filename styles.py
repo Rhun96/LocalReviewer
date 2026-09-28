@@ -8,51 +8,42 @@
 from PySide6.QtWidgets import QGraphicsDropShadowEffect
 from PySide6.QtGui import QColor
 
-# Основная палитра
+# Основная палитра — единая (бывший Референс; классика вырезана
+# решением пользователя: один вариант, дальше — только свои цвета поверх).
 COLORS = {
-    'bg_dark': '#000000',
-    'bg_panel': '#0A0F0A',
-    'bg_card': '#0D150D',
-    'bg_card_hover': '#122012',
-    'bg_input': '#001A0A',
-    'bg_hover': '#0F2010',
-    'bg_active': '#1A3A1A',
-    'bg_sidebar': '#050A05',
-    'green_bright': '#00FF41',
-    # Белый текст классики (0.6.1): зелёным остаются только рамки,
-    # подсветки и семантика (статусы/severity). Один токен — смена в 1 месте.
-    'text_bright': '#e8e8e8',
-    'green_main': '#00DD38',
-    'green_dark': '#00AA2A',
-    'green_dim': '#007722',
-    'red': '#FF3B3B',
-    'red_dark': '#CC2222',
-    # Ховеры кнопок (жили россыпью по экранам, значения 1-в-1).
-    'danger_hover': '#330000',
-    'amber_hover': '#332200',
-    # Светлый красный сайдбара (единственное место, оттенок свой).
-    'red_light': '#FF6666',
-    'red_border': '#662222',
-    # Кирпичный gate-карточек и подсветки (темнее danger, оттенок свой).
+    'bg_dark': '#0d1117',
+    'bg_panel': '#12181d',
+    'bg_card': '#1a2129',
+    'bg_card_hover': '#212a33',
+    'bg_input': '#161d24',
+    'bg_hover': '#1f2933',
+    'bg_active': '#28323d',
+    'bg_sidebar': '#0b0f14',
+    'green_bright': '#00ff41',
+    'text_bright': '#e6edf3',
+    'green_main': '#00ff41',
+    'green_dark': '#00cc33',
+    'green_dim': '#0a5c2a',
+    'red': '#ff4d4f',
+    'red_dark': '#b32b2b',
+    'danger_hover': '#2a0d0d',
+    'amber_hover': '#332a00',
+    'red_light': '#ff8080',
+    'red_border': '#5a2a2a',
     'gate_red': '#C0392B',
-    # Мягкая рамка (таблицы/карточки, где border_dim слишком зелёный).
-    'border_soft': '#3A3A3A',
-    # Жёлтый подсветки фрагментов (свой оттенок).
+    'border_soft': '#30363d',
     'highlight_yellow': '#E3B008',
     'pure_white': '#FFFFFF',
     'pure_black': '#000000',
-    'yellow': '#FFD700',
+    'yellow': '#f5c518',
     'orange': '#FF9900',
-    # Янтарь предупреждений (#FFAA00 живёт в ~10 местах по экранам).
-    'amber': '#FFAA00',
-    'blue': '#00AAFF',
-    # Ховер синей кнопки (жил в 8 местах пятью файлами).
-    'accent_hover': '#002233',
-    'gray': '#888888',
-    'border': '#00FF41',
-    'border_dim': '#00441A',
-    # Глубокий зелёный шапок таблиц (жил в 4+ местах reports_screen).
-    'green_deep': '#003315',
+    'amber': '#f5c518',
+    'blue': '#4da3ff',
+    'accent_hover': '#0f1e2e',
+    'gray': '#8b949e',
+    'border': '#00ff41',
+    'border_dim': '#24313a',
+    'green_deep': '#0f2e1c',
 }
 
 # Семантика reskin-ветки: один смысл — один цвет. Нейтральные значения
@@ -97,16 +88,16 @@ CHART_SERIES_LIGHT = {
 # (_fluent_base) и QPalette (_apply_palette в ui_compat). Значения 1-в-1
 # как были россыпью, ключи совпадают с аргументами _fluent_base.
 FLUENT_DARK = {
-    'bg': '#202020',
-    'bg_card': '#2b2b2b',
-    'bg_input': '#2b2b2b',
-    'text': '#ffffff',
-    'text_dim': '#a0a0a0',
-    'border': '#3a3a3a',
-    'accent': '#4ade80',
-    'accent_soft': '#1d3a28',
-    'header_bg': '#2d2d2d',
-    'sel_bg': '#2ea043',
+    'bg': '#12181d',
+    'bg_card': '#1a2129',
+    'bg_input': '#161d24',
+    'text': '#e6edf3',
+    'text_dim': '#8b949e',
+    'border': '#30363d',
+    'accent': '#00ff41',
+    'accent_soft': '#0f2e1c',
+    'header_bg': '#161d24',
+    'sel_bg': '#00cc33',
     'sel_text': '#ffffff',
 }
 
@@ -128,11 +119,11 @@ FLUENT_LIGHT = {
 # _chart_palette в reports_screen. Значения 1-в-1 как были.
 CHART_DARK = {
     'style': 'dark_background',
-    'bg': '#0A0F0A',
-    'fg': '#e8e8e8',
-    'spine': '#3a3a3a',
-    'bar_total': '#1d5c33',
-    'bar_done': '#00CC66',
+    'bg': '#12181d',
+    'fg': '#e6edf3',
+    'spine': '#30363d',
+    'bar_total': '#1d4a30',
+    'bar_done': '#00cc33',
     'pct_stroke': '#000000',
 }
 
@@ -177,100 +168,61 @@ UI_TOKENS = {
     "font_title": 15,
     "font_body": 13,
     "font_small": 11,
-    "radius_s": 6,
-    "radius_m": 8,
+    "radius_s": 8,
+    "radius_m": 12,
 }
 
-# === Референс-палитра (старый визуал ChatGPT, hex — лучшее чтение
-# со скрина, править построчно при сверке; кегли НЕ трогаем:
-# веб-масштаб 20/24 ломает десктопные шапки) ===
-REF_COLORS = {
-    'bg_dark': '#0d1117',
-    'bg_panel': '#12181d',
-    'bg_card': '#1a2129',
-    'bg_card_hover': '#212a33',
-    'bg_input': '#161d24',
-    'bg_hover': '#1f2933',
-    'bg_active': '#28323d',
-    'bg_sidebar': '#0b0f14',
-    'green_bright': '#00ff41',
-    'text_bright': '#e6edf3',
-    'green_main': '#00ff41',
-    'green_dark': '#00cc33',
-    'green_dim': '#0a5c2a',
-    'red': '#ff4d4f',
-    'red_dark': '#b32b2b',
-    'danger_hover': '#2a0d0d',
-    'amber_hover': '#332a00',
-    'red_light': '#ff8080',
-    'red_border': '#5a2a2a',
-    'gate_red': '#C0392B',
-    'border_soft': '#30363d',
-    'highlight_yellow': '#E3B008',
-    'pure_white': '#FFFFFF',
-    'pure_black': '#000000',
-    'yellow': '#f5c518',
-    'orange': '#FF9900',
-    'amber': '#f5c518',
-    'blue': '#4da3ff',
-    'accent_hover': '#0f1e2e',
-    'gray': '#8b949e',
-    'border': '#00ff41',
-    'border_dim': '#24313a',
-    'green_deep': '#0f2e1c',
-}
-
-REF_FLUENT_DARK = {
-    'bg': '#12181d',
-    'bg_card': '#1a2129',
-    'bg_input': '#161d24',
-    'text': '#e6edf3',
-    'text_dim': '#8b949e',
-    'border': '#30363d',
-    'accent': '#00ff41',
-    'accent_soft': '#0f2e1c',
-    'header_bg': '#161d24',
-    'sel_bg': '#00cc33',
-    'sel_text': '#ffffff',
-}
-
-REF_CHART_DARK = {
-    'style': 'dark_background',
-    'bg': '#12181d',
-    'fg': '#e6edf3',
-    'spine': '#30363d',
-    'bar_total': '#1d4a30',
-    'bar_done': '#00cc33',
-    'pct_stroke': '#000000',
-}
+# === Свои цвета пользователя (Настройки → Свои цвета) ===
+# (ключ, подпись, ключи COLORS, ключи FLUENT_DARK). Акцент/зелёный/жёлтый
+# едут пачкой родственных токенов — «один смысл, один цвет» сохраняется.
+CUSTOM_COLORS = (
+    ("bg", "Фон", ("bg_dark",), ()),
+    ("panel", "Панели", ("bg_panel",), ("bg",)),
+    ("card", "Карточки", ("bg_card",), ("bg_card",)),
+    ("input", "Поля ввода", ("bg_input",), ("bg_input", "header_bg")),
+    ("text", "Текст", ("text_bright",), ("text",)),
+    ("dim", "Вторичный текст", ("gray",), ("text_dim",)),
+    ("accent", "Рамки, кнопки",
+     ("green_bright", "green_main", "border"), ("accent",)),
+    ("green", "«Хорошо», выделение",
+     ("green_dark",), ("sel_bg",)),
+    ("red", "«Плохо», баги", ("red",), ()),
+    ("yellow", "Предупреждения", ("yellow", "amber"), ()),
+    ("blue", "Ссылки, инфо", ("blue",), ()),
+)
 
 
-def _palette_variant() -> str:
-    """classic | ref: env LR_PALETTE важнее QSettings ui/palette."""
-    try:
-        import os as _os
-        v = (_os.environ.get("LR_PALETTE") or "").strip().lower()
-        if v in ("classic", "ref"):
-            return v
-    except Exception:
-        pass
+def _custom_default(key: str) -> str:
+    for ck, _label, ckeys, _fkeys in CUSTOM_COLORS:
+        if ck == key:
+            return COLORS[ckeys[0]]
+    raise KeyError(f"Плохой ключ цвета: {key!r}")
+
+
+def _apply_custom_overrides() -> None:
+    """Свои цвета поверх палитры (QSettings ui/custom_*, нужен рестарт)."""
+    import re as _re
+    _ok = _re.compile(r"^#[0-9a-fA-F]{6}$")
     try:
         from PySide6.QtCore import QSettings as _QS
-        v = str(_QS("LocalReviewer", "LocalReviewer").value(
-            "ui/palette", "classic") or "classic")
-        return "ref" if v.strip().lower() == "ref" else "classic"
+        _qs = _QS("LocalReviewer", "LocalReviewer")
     except Exception:
-        return "classic"
+        return
+    for ck, _label, ckeys, fkeys in CUSTOM_COLORS:
+        try:
+            v = _qs.value(f"ui/custom_{ck}", None)
+        except Exception:
+            continue
+        if not isinstance(v, str) or not _ok.match(v.strip()):
+            continue
+        v = v.strip()
+        for k in ckeys:
+            COLORS[k] = v
+        for k in fkeys:
+            FLUENT_DARK[k] = v
 
 
-# Переключатель, НЕ замена: литералы выше целы (гард токенов парсит
-# их как есть), мутация in-place — все потребители видят один объект.
-# Светлая тема и SEMANTIC/DIFF/серии — общие для обоих вариантов.
-if _palette_variant() == "ref":
-    COLORS.update(REF_COLORS)
-    FLUENT_DARK.update(REF_FLUENT_DARK)
-    CHART_DARK.update(REF_CHART_DARK)
-    UI_TOKENS.update({"radius_s": 8, "radius_m": 12})
+_apply_custom_overrides()
 
 # Глобальный стиль приложения
 APP_STYLE = f"""

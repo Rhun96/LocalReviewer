@@ -88,7 +88,7 @@ def test_theme_switch_converges_palettes():
         w.show()
         app.processEvents()
         role = app.palette().ColorRole.Window
-        for mode, expect, hl in (("dark", "#202020", "#2ea043"),
+        for mode, expect, hl in (("dark", "#12181d", "#00cc33"),
                                  ("light", "#f3f3f3", "#0b7a34")):
             apply_theme(mode)
             app.processEvents()

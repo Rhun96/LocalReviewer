@@ -262,6 +262,11 @@ class CaseMixin:
         self.btn_similar.setToolTip("Похожие кейсы (TF-IDF) — только контекст")
         self.btn_similar.clicked.connect(self.open_similar)
         tags_row.addWidget(self.btn_similar)
+        self.btn_find = FPushButton("🔍 Найти")
+        self.btn_find.setMinimumHeight(30)
+        self.btn_find.setToolTip("Найти кейс: точно по ID/тексту или по смыслу")
+        self.btn_find.clicked.connect(self.open_global_search)
+        tags_row.addWidget(self.btn_find)
         self.btn_history = FPushButton("🕘 История")
         self.btn_history.setMinimumHeight(30)
         self.btn_history.setToolTip("История кейса (H)")
@@ -500,7 +505,9 @@ class CaseMixin:
             return
         try:
             from global_search_dialog import GlobalSearchDialog
-            dlg = GlobalSearchDialog(self.project_path, self)
+            dlg = GlobalSearchDialog(
+                self.project_path, self,
+                file_id=(self.filters or {}).get("file_id"))
             if dlg.exec() != QDialog.DialogCode.Accepted:
                 return
             cid = getattr(dlg, "result_case_id", None)
@@ -582,6 +589,20 @@ class CaseMixin:
                     WHERE ct.case_id = ?
                 """, (self.current_case_id,))
                 case_tags = {r['tag_id'] for r in cursor.fetchall()}
+                # Старт часов ревью (аналитика времени, v22): каждый показ
+                # кейса — новый замер; длительность пишется в set_status.
+                try:
+                    from database import utcnow as _utcnow3
+                    _now3 = _utcnow3()
+                    cursor.execute("""
+                        INSERT INTO annotations (case_id, status, updated_at,
+                                                 review_started_at)
+                        VALUES (?, 'unreviewed', ?, ?)
+                        ON CONFLICT(case_id) DO UPDATE SET
+                            review_started_at = ?
+                    """, (self.current_case_id, _now3, _now3, _now3))
+                except Exception:
+                    pass
             try:
                 from taxonomy_service import get_case_error
                 self.current_error = get_case_error(self.project_path, self.current_case_id)
@@ -1308,21 +1329,33 @@ class CaseMixin:
             with db(self.project_path) as conn:
                 cursor = conn.cursor()
                 cursor.execute(
-                    "SELECT status FROM annotations WHERE case_id = ?",
+                    "SELECT status, review_started_at FROM annotations "
+                    "WHERE case_id = ?",
                     (self.current_case_id,)
                 )
                 old_row = cursor.fetchone()
                 old_status = old_row['status'] if old_row else 'unreviewed'
+                try:
+                    started = old_row['review_started_at'] if old_row else None
+                except Exception:
+                    started = None
+                try:
+                    from analytics_service import review_duration_seconds as _dur
+                    duration = _dur(started, now)
+                except Exception:
+                    duration = None
                 cursor.execute("""
-                    INSERT INTO annotations (case_id, status, comment, updated_at)
-                    VALUES (?, ?, ?, ?)
+                    INSERT INTO annotations (case_id, status, comment, updated_at,
+                                             review_duration_s)
+                    VALUES (?, ?, ?, ?, ?)
                     ON CONFLICT(case_id) DO UPDATE SET
                         status = ?,
                         comment = ?,
-                        updated_at = ?
+                        updated_at = ?,
+                        review_duration_s = ?
                 """, (
                     self.current_case_id, status, comment or None, now,
-                    status, comment or None, now
+                    duration, status, comment or None, now, duration
                 ))
                 if old_status != status:
                     cursor.execute("""

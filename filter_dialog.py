@@ -10,6 +10,7 @@ from ui_compat import (
     FCheckBox, FComboBox, FLineEdit, FPrimaryButton, FPushButton,
     clear_in_fluent, notify,
 )
+from datetime import UTC
 
 
 class FilterDialog(QDialog):
@@ -340,13 +341,16 @@ class FilterDialog(QDialog):
 
     @staticmethod
     def _iso_today() -> str:
-        from datetime import date as _d
-        return _d.today().isoformat()
+        # Штампы в БД — utcnow(), группировки динамики — по UTC-суткам:
+        # граница «сегодня» тоже UTC, иначе ночью (смещение часового
+        # пояса) пресет пустеет — свежие правки мимо «сегодня».
+        from datetime import datetime as _dt
+        return _dt.now(UTC).date().isoformat()
 
     @staticmethod
     def _iso_days_ago(n: int) -> str:
-        from datetime import date as _d, timedelta as _td
-        return (_d.today() - _td(days=n)).isoformat()
+        from datetime import datetime as _dt, timedelta as _td
+        return (_dt.now(UTC).date() - _td(days=n)).isoformat()
 
     def _on_period_preset(self):
         """Пресет ставит даты; ручная правка дат переключает на «Вручную»."""
@@ -354,7 +358,11 @@ class FilterDialog(QDialog):
         if not mode or mode == "manual":
             return
         from PySide6.QtCore import QDate as _QD
-        today = _QD.currentDate()
+        from datetime import datetime as _dt
+        # Виджеты — в тех же UTC-сутках, что применяемый пресет
+        # (_iso_today/_iso_days_ago), иначе показ и фильтр разъедутся ночью.
+        _utc = _dt.now(UTC).date()
+        today = _QD(_utc.year, _utc.month, _utc.day)
         if mode == "today":
             self.date_from.setDate(today)
             self.date_to.setDate(today)

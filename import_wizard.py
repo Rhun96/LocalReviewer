@@ -733,6 +733,89 @@ class ImportWizard(QWidget):
             pass
         notify(self, "success", "Импорт завершён", msg)
         self.import_finished.emit()
+        # Import-hook эмбеддингов: новые кейсы сразу ищутся по смыслу,
+        # без ручной переиндексации (фон, с прогрессом и отменой).
+        try:
+            self._maybe_auto_index(file_id)
+        except Exception:
+            pass
+
+    def _maybe_auto_index(self, file_id) -> None:
+        """Фоновая доиндексация файла после импорта (только эмбеддинги)."""
+        import threading
+        from PySide6.QtWidgets import QProgressDialog
+        from PySide6.QtCore import QTimer
+        import embedding_service as _emb
+        ok, _why = _emb.auto_index_wanted()
+        if not ok:
+            return
+        try:
+            from database import db as _db
+            with _db(self.project_path) as _conn:
+                ids = [r["case_id"] for r in _conn.execute(
+                    "SELECT case_id FROM cases WHERE file_id=?", (file_id,))]
+        except Exception:
+            return
+        if not ids:
+            return
+        cancel_event = threading.Event()
+        progress = QProgressDialog("Индексация эмбеддингов…", "Отмена",
+                                   0, 100, self)
+        progress.setWindowModality(Qt.WindowModality.WindowModal)
+        progress.setMinimumDuration(0)
+        progress.setAutoClose(True)
+        progress.canceled.connect(cancel_event.set)
+        progress.setValue(0)
+
+        def _work():
+            from workers import run_in_background as _run
+            holder: dict = {}
+
+            def _progress(done, total):
+                w = holder.get("w")
+                if w is not None:
+                    w.signals.progress.emit(
+                        int(done / total * 100) if total else 0)
+
+            worker = _run(_emb.ensure_indexed, self.project_path, list(ids),
+                          _progress, cancel_event)
+            holder["w"] = worker
+            worker.signals.progress.connect(progress.setValue)
+            worker.signals.finished.connect(
+                lambda res: self._on_auto_index_done(res, progress))
+            worker.signals.error.connect(
+                lambda msg: self._on_auto_index_error(msg, progress))
+
+        QTimer.singleShot(0, _work)
+
+    def _on_auto_index_done(self, res, progress) -> None:
+        try:
+            progress.close()
+        except Exception:
+            pass
+        try:
+            done = int((res or {}).get("done", 0))
+            total = int((res or {}).get("total", 0))
+        except Exception:
+            done, total = 0, 0
+        if total:
+            notify(self, "success", "Индексация",
+                   f"Эмбеддинги: проиндексировано {done} из {total} "
+                   "— поиск по смыслу видит новые кейсы.")
+        # total=0: всё уже было в индексе — молчим, не шумим.
+
+    def _on_auto_index_error(self, msg: str, progress) -> None:
+        try:
+            progress.close()
+        except Exception:
+            pass
+        if "Прервано пользователем" in (msg or ""):
+            notify(self, "warning", "Индексация",
+                   f"{msg}\nЧастичный индекс сохранён.")
+        else:
+            notify(self, "warning", "Индексация",
+                   f"{msg}\nПоиск по смыслу новых кейсов — "
+                   "через «Настройки → Переиндексировать».")
 
     def _on_import_error(self, msg: str, progress):
         try:

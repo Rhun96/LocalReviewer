@@ -83,6 +83,38 @@ def get_files_report(project_path: str) -> list:
         return [dict(row) for row in cursor.fetchall()]
 
 
+def get_files_quality(project_path: str) -> list:
+    """Разбор по файлам: полнота и грязь (bad-rate) по base-семантике.
+
+    [{file_id, file_name, imported_at, total, reviewed, reviewed_pct,
+    bad, bad_rate}] — сортировка в UI (клик по шапке).
+    """
+    files = get_files_list(project_path)
+    try:
+        with db(project_path) as conn:
+            dates = {r["file_id"]: r["imported_at"] for r in conn.execute(
+                "SELECT file_id, imported_at FROM files").fetchall()}
+    except Exception:
+        dates = {}
+    out = []
+    for f in files:
+        rep = get_overall_report(project_path, f["file_id"])
+        total = rep.get("total", 0) or 0
+        reviewed = rep.get("reviewed", 0) or 0
+        bad = rep.get("bad", 0) or 0
+        out.append({"file_id": f["file_id"],
+                    "file_name": f["file_name"],
+                    "imported_at": dates.get(f["file_id"], ""),
+                    "total": total,
+                    "reviewed": reviewed,
+                    "reviewed_pct": round(100.0 * reviewed / total, 1)
+                    if total else 0.0,
+                    "bad": bad,
+                    "bad_rate": round(100.0 * bad / reviewed, 1)
+                    if reviewed else 0.0})
+    return out
+
+
 def get_tags_report(project_path: str, file_id=None) -> list:
     with db(project_path) as conn:
         cursor = conn.cursor()
@@ -514,4 +546,65 @@ def get_quality_trend(project_path: str) -> list:
                     "version": r["version_number"], "status": r["status"],
                     "total": total, "bad": r["bad"],
                     "bad_rate": round(r["bad"] / total, 4) if total else None})
+    return out
+
+
+_OPEN_BUG_EXCLUDED = ("Fixed", "Rejected", "Duplicate")
+
+
+def bug_semantic_groups(project_path: str, file_id=None,
+                        threshold: float = 0.4) -> list:
+    """Группы похожих открытых багов по формулировкам (TF-IDF, без LLM).
+
+    [{bug_ids: [...], titles: [...], size}] — только группы 2+.
+    Одиночки не шумят. Порог — косинус 0..1 (заголовки короткие,
+    поэтому ниже, чем у дублей кейсов).
+    """
+    from collections import Counter
+    from bug_report_service import list_bugs
+    import similarity_service as _sim
+    if not 0 <= threshold <= 1:
+        raise ValueError("threshold: 0..1")
+    bugs = [b for b in list_bugs(project_path)
+            if (b.get("status") or "") not in _OPEN_BUG_EXCLUDED]
+    if file_id:
+        try:
+            with db(project_path) as conn:
+                fids = {r["case_id"] for r in conn.execute(
+                    "SELECT case_id FROM cases WHERE file_id=?", (file_id,))}
+                links = {}
+                for r in conn.execute(
+                        "SELECT bug_id, case_id FROM bug_report_cases"):
+                    links.setdefault(r["bug_id"], set()).add(r["case_id"])
+        except Exception:
+            fids, links = set(), {}
+        bugs = [b for b in bugs
+                if (links.get(b["bug_id"]) or set()) & fids]
+    docs = [(b["bug_id"], (b.get("title") or "").strip()) for b in bugs]
+    docs = [(i, t) for i, t in docs if t]
+    if len(docs) < 2:
+        return []
+    vecs = _sim._tfidf_vectors(
+        [Counter(_sim._terms(t)) for _, t in docs])
+    parent = list(range(len(docs)))
+
+    def _find(x):
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    for i in range(len(docs)):
+        if not docs[i][1]:
+            continue
+        for j in range(i + 1, len(docs)):
+            if _sim._cosine(vecs[i], vecs[j]) >= threshold:
+                parent[_find(i)] = _find(j)
+    clusters: dict = {}
+    for k, (bid, title) in enumerate(docs):
+        clusters.setdefault(_find(k), []).append((bid, title))
+    out = [{"bug_ids": [b for b, _t in g],
+            "titles": [t for _b, t in g],
+            "size": len(g)} for g in clusters.values() if len(g) >= 2]
+    out.sort(key=lambda g: -g["size"])
     return out

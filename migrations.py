@@ -839,3 +839,15 @@ def migrate_to_v21(cursor) -> None:
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_embeddings_active "
                    "ON case_embeddings(is_active)")
     logger.info("migrated to v21 (case embeddings)")
+
+
+def migrate_to_v22(cursor) -> None:
+    """Время ревью (аналитика): старт просмотра + длительность последней
+    ручной проверки. Только ADD COLUMN (старые данные не трогаем);
+    замеры копятся с момента обновления — раньше их не было, честно."""
+    cols = [r[1] for r in cursor.execute("PRAGMA table_info(annotations)").fetchall()]
+    if "review_started_at" not in cols:
+        cursor.execute("ALTER TABLE annotations ADD COLUMN review_started_at TEXT")
+    if "review_duration_s" not in cols:
+        cursor.execute("ALTER TABLE annotations ADD COLUMN review_duration_s REAL")
+    logger.info("migrated to v22 (review timing)")

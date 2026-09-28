@@ -390,7 +390,9 @@ def export_management_report(project_path: str, output_path: str, file_id=None) 
     from report_service import (get_error_top, get_model_leaderboard,
                                 get_overall_report, get_product_report,
                                 get_velocity, consistency_check,
-                                get_golden_info)
+                                get_golden_info, get_files_quality,
+                                bug_semantic_groups)
+    import analytics_service as _an
     import regression_service as _rg
 
     out = _resolve_output(output_path)
@@ -420,6 +422,17 @@ def export_management_report(project_path: str, output_path: str, file_id=None) 
     chk = consistency_check(project_path, file_id)
     gi = get_golden_info(project_path)
     top3 = sum(e["n"] for e in errors[:3])
+    _fscope = {"file_id": file_id} if file_id else None
+    fq = get_files_quality(project_path)
+    if file_id:
+        fq = [f for f in fq if f["file_id"] == file_id]
+    _ts = _an.review_time_stats(project_path, _fscope)
+    _dyn = _an.category_dynamics(project_path, _fscope, limit=10)
+    _groups = bug_semantic_groups(project_path, file_id)
+    _worst = max((f for f in fq if f["reviewed"]),
+                 key=lambda f: f["bad_rate"], default=None)
+    _grow = next((r for r in (_dyn.get("rows") or []) if r["delta"] > 0),
+                 None)
     if remaining > 0:
         verdict = f"НЕ ГОТОВ (осталось {remaining})"
     elif latest and (latest.get("gate_result") or "") == "FAIL":
@@ -466,7 +479,15 @@ def export_management_report(project_path: str, output_path: str, file_id=None) 
         ("Golden свеж", (f"{gi['count']}, {gi['oldest_days']} дн." if gi["count"]
                          else "нет замороженных")),
         ("Концентрация топ-3", (round(top3 / overall.get("bad", 0), 4)
-                                if overall.get("bad", 0) else 0)),
+                                 if overall.get("bad", 0) else 0)),
+        ("Среднее время ревью", (_an.fmt_duration(_ts["avg_s"])
+                                 if _ts.get("count") else "—")),
+        ("Файлов", len(fq)),
+        ("Худший файл", (f"{_worst['file_name']} ({_worst['bad_rate']}%)"
+                         if _worst else "—")),
+        ("Растёт причина", (f"{_grow['name']} (+{_grow['delta']})"
+                            if _grow else "—")),
+        ("Групп похожих багов", len(_groups)),
         ("ВЕРДИКТ", verdict),
     ]
     for i, (k, v) in enumerate(summary, 2):
@@ -517,10 +538,39 @@ def export_management_report(project_path: str, output_path: str, file_id=None) 
 
     ws = _sheet("Версии", ["Датасет", "Версия", "Статус", "Кейсов"], [25, 10, 12, 10])
     for i, v in enumerate(versions, 2):
-        ws.cell(row=i, column=1, value=safe_cell(v["ds_name"]))
+        ws.cell(row=i, column=1, value=v["ds_name"])
         ws.cell(row=i, column=2, value=v["version_number"])
         ws.cell(row=i, column=3, value=v["status"])
         ws.cell(row=i, column=4, value=v["case_count"])
+
+    ws = _sheet("Файлы", ["Файл", "Всего", "Проверено", "Полнота %",
+                          "Плохих", "Bad-rate %", "Импорт"],
+                [30, 10, 12, 12, 10, 12, 20])
+    for i, f in enumerate(fq, 2):
+        ws.cell(row=i, column=1, value=safe_cell(f["file_name"]))
+        ws.cell(row=i, column=2, value=f["total"])
+        ws.cell(row=i, column=3, value=f["reviewed"])
+        ws.cell(row=i, column=4, value=f["reviewed_pct"])
+        ws.cell(row=i, column=5, value=f["bad"])
+        ws.cell(row=i, column=6, value=f["bad_rate"])
+        ws.cell(row=i, column=7, value=f["imported_at"])
+
+    ws = _sheet("Динамика", ["Категория", "Прошлая нед.", "Эта нед.", "Δ"],
+                [30, 14, 12, 10])
+    for i, t in enumerate((_dyn.get("rows") or []), 2):
+        ws.cell(row=i, column=1, value=safe_cell(t["name"]))
+        ws.cell(row=i, column=2, value=t["prev"])
+        ws.cell(row=i, column=3, value=t["last"])
+        ws.cell(row=i, column=4, value=t["delta"])
+
+    ws = _sheet("Группы", ["Группа", "Багов", "Заголовки"], [10, 10, 80])
+    for i, g in enumerate(_groups, 2):
+        ws.cell(row=i, column=1, value=i - 1)
+        ws.cell(row=i, column=2, value=g["size"])
+        ws.cell(row=i, column=3,
+                value=safe_cell("; ".join(
+                    f"#{bid} {t}" for bid, t in zip(
+                        g["bug_ids"], g["titles"], strict=True))))
 
     _atomic_save(wb, out)
     return True

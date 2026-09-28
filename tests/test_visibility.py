@@ -20,7 +20,7 @@ def _proj():
 
 
 def test_schema_v19():
-    assert SCHEMA_VERSION == 21
+    assert SCHEMA_VERSION == 22
 
 
 def test_hide_unhide_roundtrip():

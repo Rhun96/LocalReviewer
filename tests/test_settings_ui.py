@@ -74,23 +74,67 @@ def test_connect_check_changed_both_widgets():
         assert hits == ["box", "switch"]
 
 
-def test_palette_combo_snapshot():
+def test_custom_colors_group_snapshot():
+    """Группа «Свои цвета»: 11 полей, дефолты, мусор не пишется."""
     from PySide6.QtCore import QSettings
+    from styles import CUSTOM_COLORS
+    import ui_compat as u
     qs = QSettings("LocalReviewer", "LocalReviewer")
-    old = qs.value("ui/palette", None)
+    keys = [f"ui/custom_{ck}" for ck, _l, _c, _f in CUSTOM_COLORS]
+    old = {k: qs.value(k, None) for k in keys}
     w, _p = _win()
     try:
         w.show()
-        assert w.palette_combo.count() == 2
-        for i in range(w.palette_combo.count()):
-            if w.palette_combo.itemData(i) == "ref":
-                w.palette_combo.setCurrentIndex(i)
-                break
-        from ui_compat import get_palette_mode
-        assert get_palette_mode() == "ref"
+        assert len(w.color_edits) == len(CUSTOM_COLORS) == 11
+        assert len(w.color_swatches) == 11
+        base = u.get_custom_colors()
+        for ck, _l, _c, _f in CUSTOM_COLORS:
+            assert w.color_edits[ck].text() == base[ck]
+        # валидный hex через поле — сохраняется; мусор — нет.
+        w.color_edits["accent"].setText("#" + "abcdef")
+        assert u.get_custom_colors()["accent"] == "#" + "abcdef"
+        w.color_edits["accent"].setText("мусор")
+        assert u.get_custom_colors()["accent"] == "#" + "abcdef"
+        w.on_custom_colors_reset()
+        assert u.get_custom_colors() == base
     finally:
         w.close()
-        if old is None:
-            qs.remove("ui/palette")
-        else:
-            qs.setValue("ui/palette", old)
+        for k, v in old.items():
+            if v is None:
+                qs.remove(k)
+            else:
+                qs.setValue(k, v)
+
+
+def test_pick_color_via_dialog(monkeypatch):
+    """Клик по квадратику: выбор применяется, отмена — нет (диалог мок)."""
+    from PySide6.QtCore import QSettings
+    from PySide6.QtGui import QColor
+    import PySide6.QtWidgets as _qw
+    from styles import CUSTOM_COLORS
+    import ui_compat as u
+    qs = QSettings("LocalReviewer", "LocalReviewer")
+    keys = [f"ui/custom_{ck}" for ck, _l, _c, _f in CUSTOM_COLORS]
+    old = {k: qs.value(k, None) for k in keys}
+    w, _p = _win()
+    try:
+        w.show()
+        base = u.get_custom_colors()["accent"]
+        picked = "#" + "112233"
+        monkeypatch.setattr(_qw.QColorDialog, "getColor",
+                            staticmethod(lambda *a, **k: QColor(picked)))
+        w._pick_color("accent")
+        assert u.get_custom_colors()["accent"] == picked
+        assert w.color_edits["accent"].text() == picked
+        monkeypatch.setattr(_qw.QColorDialog, "getColor",
+                            staticmethod(lambda *a, **k: QColor()))
+        w._pick_color("accent")
+        assert u.get_custom_colors()["accent"] == picked
+        assert base != picked
+    finally:
+        w.close()
+        for k, v in old.items():
+            if v is None:
+                qs.remove(k)
+            else:
+                qs.setValue(k, v)
