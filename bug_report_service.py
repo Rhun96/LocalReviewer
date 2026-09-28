@@ -186,7 +186,7 @@ def list_bugs(project_path: str, status: str | None = None,
     query = """
         SELECT b.bug_id, b.title, b.status, b.severity, b.category_id,
                b.model_name, b.model_version, b.external_tracker, b.external_id,
-               b.created_at, b.updated_at,
+               b.created_at, b.updated_at, b.duplicate_of,
                COUNT(DISTINCT bc.case_id) AS cases
         FROM bug_reports b
         LEFT JOIN bug_report_cases bc ON bc.bug_id = b.bug_id
@@ -300,6 +300,16 @@ def bugs_for_case(project_path: str, case_id: int) -> list:
 def delete_bug(project_path: str, bug_id: int) -> None:
     with db(project_path) as conn:
         cur = conn.cursor()
+        try:
+            kids = cur.execute("SELECT bug_id FROM bug_reports "
+                               "WHERE duplicate_of=?", (bug_id,)).fetchall()
+        except Exception:
+            kids = []
+        if kids:
+            raise ValueError(
+                f"Баг #{bug_id} — цель дубликатов "
+                f"({', '.join('#' + str(r['bug_id']) for r in kids)}): "
+                "сначала отвяжи их (Объединить/Дубликат).")
         cur.execute("DELETE FROM bug_reports WHERE bug_id=?", (bug_id,))
         if cur.rowcount == 0:
             raise ValueError("Баг не найден")
@@ -373,3 +383,101 @@ def build_from_case(project_path: str, case_id: int) -> dict:
         "title_suggest": (f"[{meta.get('product', '')}] "
                           f"{(case.get('primary_text') or '')[:60]}".strip()),
     }
+
+
+def _get_bug(cur, bug_id: int) -> dict:
+    row = cur.execute("SELECT * FROM bug_reports WHERE bug_id=?",
+                      (bug_id,)).fetchone()
+    if not row:
+        raise ValueError(f"Баг #{bug_id} не найден")
+    return dict(row)
+
+
+def mark_duplicate(project_path: str, bug_id: int, target_id: int) -> None:
+    """Пометить баг дубликатом другого (связь, кейсы не двигаем).
+
+    Цель — не дубликат сама (цепочки не плодим). Статус → Duplicate.
+    """
+    if int(bug_id) == int(target_id):
+        raise ValueError("Баг не может быть дубликатом сам себя")
+    now = utcnow()
+    with db(project_path) as conn:
+        cur = conn.cursor()
+        _get_bug(cur, bug_id)
+        tgt = _get_bug(cur, target_id)
+        if (tgt.get("duplicate_of") is not None):
+            raise ValueError(f"Баг #{target_id} сам дубликат "
+                             f"(→ #{tgt['duplicate_of']}): цель — корень")
+        cur.execute("UPDATE bug_reports SET status='Duplicate', "
+                    "duplicate_of=?, updated_at=? WHERE bug_id=?",
+                    (target_id, now, bug_id))
+
+
+def unmark_duplicate(project_path: str, bug_id: int) -> None:
+    """Снять связь дубликата (статус не трогаем — решает человек)."""
+    with db(project_path) as conn:
+        cur = conn.cursor()
+        _get_bug(cur, bug_id)
+        cur.execute("UPDATE bug_reports SET duplicate_of=NULL, "
+                    "updated_at=? WHERE bug_id=?", (utcnow(), bug_id))
+
+
+def merge_bugs(project_path: str, target_id: int, source_ids: list) -> dict:
+    """Объединить: кейсы источников → цели, источники — дубликаты цели.
+
+    Возвращает {target, merged: [...], moved_cases}. Всё или ничего
+    по валидации (проверяем до первого UPDATE).
+    """
+    srcs = [int(c) for c in dict.fromkeys(int(c) for c in (source_ids or []))]
+    srcs = [c for c in srcs if c != int(target_id)]
+    if not srcs:
+        raise ValueError("Нечего объединять")
+    now = utcnow()
+    with db(project_path) as conn:
+        cur = conn.cursor()
+        tgt = _get_bug(cur, target_id)
+        if tgt.get("duplicate_of") is not None:
+            raise ValueError("Цель сама дубликат — выбери корень")
+        for sid in srcs:
+            _get_bug(cur, sid)
+        moved = 0
+        for sid in srcs:
+            for r in cur.execute("SELECT case_id FROM bug_report_cases "
+                                 "WHERE bug_id=?", (sid,)).fetchall():
+                cur.execute("INSERT OR IGNORE INTO bug_report_cases "
+                            "(bug_id, case_id, added_at) VALUES (?, ?, ?)",
+                            (target_id, r["case_id"], now))
+                moved += 1
+            cur.execute("UPDATE bug_reports SET status='Duplicate', "
+                        "duplicate_of=?, updated_at=? WHERE bug_id=?",
+                        (target_id, now, sid))
+    return {"target": int(target_id), "merged": srcs, "moved_cases": moved}
+
+
+def bulk_update_bugs(project_path: str, bug_ids: list, status: str | None = None,
+                     severity: str | None = None) -> int:
+    """Массово: статус и/или критичность. Возвращает число обновлённых."""
+    ids = list(dict.fromkeys(int(c) for c in (bug_ids or [])))
+    if not ids:
+        return 0
+    if status is not None and status not in STATUSES:
+        raise ValueError(f"Плохой статус: {status!r}")
+    if severity is not None and severity not in SEVERITIES:
+        raise ValueError(f"Плохая критичность: {severity!r}")
+    if status is None and severity is None:
+        return 0
+    sets, params = [], []
+    if status is not None:
+        sets.append("status=?")
+        params.append(status)
+    if severity is not None:
+        sets.append("severity=?")
+        params.append(severity)
+    sets.append("updated_at=?")
+    params.append(utcnow())
+    now_ids = ",".join(["?"] * len(ids))
+    with db(project_path) as conn:
+        cur = conn.cursor()
+        cur.execute(f"UPDATE bug_reports SET {', '.join(sets)} "
+                    f"WHERE bug_id IN ({now_ids})", (*params, *ids))
+        return cur.rowcount or 0

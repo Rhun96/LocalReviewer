@@ -72,10 +72,34 @@ class ReportsScreen(BaseScreen):
         self.period_combo.addItem("7 дней", "7d")
         self.period_combo.addItem("14 дней", "14d")
         self.period_combo.addItem("30 дней", "30d")
+        self.period_combo.addItem("Выбрать период", "manual")
         self.period_combo.setToolTip("Период проверки (по дате разметки) "
                                      "для вкладок Сводка и Качество")
         self.period_combo.currentIndexChanged.connect(self._on_period_changed)
         scope_row.addWidget(self.period_combo, 1)
+        from PySide6.QtWidgets import QDateEdit as _QDE
+        from PySide6.QtCore import QDate as _QD
+        self.date_from = _QDE()
+        self.date_from.setDisplayFormat("dd-MM-yyyy")
+        self.date_from.setCalendarPopup(True)
+        self.date_from.setDate(_QD.currentDate())
+        self.date_from.setToolTip("С какой даты (ручной период)")
+        self.date_from.dateChanged.connect(self._on_period_changed)
+        self.date_to = _QDE()
+        self.date_to.setDisplayFormat("dd-MM-yyyy")
+        self.date_to.setCalendarPopup(True)
+        self.date_to.setDate(_QD.currentDate())
+        self.date_to.setToolTip("По какую дату (ручной период)")
+        self.date_to.dateChanged.connect(self._on_period_changed)
+        self.date_from_label = QLabel("с:")
+        self.date_to_label = QLabel("по:")
+        scope_row.addWidget(self.date_from_label)
+        scope_row.addWidget(self.date_from)
+        scope_row.addWidget(self.date_to_label)
+        scope_row.addWidget(self.date_to)
+        for _w in (self.date_from_label, self.date_from,
+                   self.date_to_label, self.date_to):
+            _w.setVisible(False)
         layout.addLayout(scope_row)
 
         # Вкладки
@@ -302,7 +326,7 @@ class ReportsScreen(BaseScreen):
 
     def _analytics_scope(self) -> dict:
         """Охват + период для вкладок Сводка/Качество."""
-        from filter_dialog import FilterDialog as _FD
+        from ui_compat import period_dates as _pd
         scope: dict = {}
         if self.report_file_id:
             scope["file_id"] = self.report_file_id
@@ -310,17 +334,29 @@ class ReportsScreen(BaseScreen):
             mode = self.period_combo.currentData() or ""
         except Exception:
             mode = ""
-        if mode == "today":
-            t = _FD._iso_today()
-            scope["reviewed_from"] = t
+        try:
+            f, t = _pd(mode, self.date_from.date(), self.date_to.date())
+        except Exception:
+            f, t = "", ""
+        if f:
+            scope["reviewed_from"] = f
+        if t:
             scope["reviewed_to"] = t
-        elif mode in ("7d", "14d", "30d"):
-            scope["reviewed_from"] = _FD._iso_days_ago(int(mode[:-1]))
-            scope["reviewed_to"] = _FD._iso_today()
         return scope
 
-    def _on_period_changed(self):
+    def _on_period_changed(self, *_a):
         try:
+            manual = False
+            try:
+                manual = (self.period_combo.currentData() or "") == "manual"
+            except Exception:
+                pass
+            try:
+                for _w in (self.date_from_label, self.date_from,
+                           self.date_to_label, self.date_to):
+                    _w.setVisible(manual)
+            except Exception:
+                pass
             if self.tabs.currentWidget() is self.summary_tab:
                 self.load_summary_report()
             elif (hasattr(self, "quality_tab")
@@ -441,15 +477,17 @@ class ReportsScreen(BaseScreen):
         self.quality_verdicts.setHorizontalHeaderLabels(["Вердикт", "Кейсов"])
         self.quality_verdicts.itemClicked.connect(self._drill_verdict)
         vbox.addWidget(self.quality_verdicts)
+        vbox.addStretch(1)
         cols.addLayout(vbox, 1)
         sbox = QVBoxLayout()
         sbox.addWidget(QLabel("Тяжесть (клик — кейсы):"))
         self.quality_sev = _TW()
-        self.quality_sev.setColumnCount(3)
+        self.quality_sev.setColumnCount(4)
         self.quality_sev.setHorizontalHeaderLabels(
-            ["Тяжесть", "Проблем", "Доля %"])
+            ["Тяжесть", "Проблем", "Доля %", "Категории"])
         self.quality_sev.itemClicked.connect(self._drill_sev)
         sbox.addWidget(self.quality_sev)
+        sbox.addStretch(1)
         cols.addLayout(sbox, 1)
         layout.addLayout(cols)
         layout.addWidget(QLabel("Категории (клик — кейсы):"))
@@ -469,6 +507,7 @@ class ReportsScreen(BaseScreen):
             ["Категория", "Прошлая", "Эта", "Δ"])
         self.quality_dyn.itemClicked.connect(self._drill_dyn)
         layout.addWidget(self.quality_dyn)
+        layout.addStretch(1)
         try:
             clear_in_fluent(self.quality_verdicts, self.quality_sev,
                             self.quality_cats, self.quality_dyn)
@@ -476,6 +515,12 @@ class ReportsScreen(BaseScreen):
             polish_table(self.quality_sev, stretch_last=False)
             polish_table(self.quality_cats, stretch_last=False)
             polish_table(self.quality_dyn, stretch_last=False)
+            # Текст — в первой колонке: тянем её, а не проценты.
+            from PySide6.QtWidgets import QHeaderView as _HV
+            for _t in (self.quality_verdicts, self.quality_sev,
+                       self.quality_cats, self.quality_dyn):
+                _t.horizontalHeader().setSectionResizeMode(
+                    0, _HV.ResizeMode.Stretch)
         except Exception:
             pass
         return self._scroll_wrap(widget, layout)
@@ -690,7 +735,8 @@ class ReportsScreen(BaseScreen):
 
     def _drill_top(self, item):
         try:
-            cid = item.data(2)  # UserRole
+            from PySide6.QtCore import Qt as _Qt2
+            cid = item.data(_Qt2.ItemDataRole.UserRole)
         except Exception:
             cid = None
         if not cid:
@@ -720,6 +766,7 @@ class ReportsScreen(BaseScreen):
                 i, 0, QTableWidgetItem(base_names.get(d["base"], d["base"])))
             self.quality_verdicts.setItem(i, 1, QTableWidgetItem(str(d["value"])))
         self.quality_verdicts.resizeColumnsToContents()
+        self._fit_table_to_content(self.quality_verdicts)
         self._quality_sev_rows = sev
         self.quality_sev.setRowCount(len(sev))
         for i, s in enumerate(sev):
@@ -727,7 +774,11 @@ class ReportsScreen(BaseScreen):
             self.quality_sev.setItem(i, 1, QTableWidgetItem(str(s["problems"])))
             share = "" if s["share"] is None else f"{s['share']}%"
             self.quality_sev.setItem(i, 2, QTableWidgetItem(share))
+            _cats_txt = ", ".join(
+                f"{c['name']} ({c['n']})" for c in (s.get("cats") or []))
+            self.quality_sev.setItem(i, 3, QTableWidgetItem(_cats_txt))
         self.quality_sev.resizeColumnsToContents()
+        self._fit_table_to_content(self.quality_sev)
         self._quality_cat_rows = cats
         self.quality_cats.setRowCount(len(cats))
         for i, t in enumerate(cats):
@@ -736,6 +787,7 @@ class ReportsScreen(BaseScreen):
             share = "" if t["share"] is None else f"{t['share']}%"
             self.quality_cats.setItem(i, 2, QTableWidgetItem(share))
         self.quality_cats.resizeColumnsToContents()
+        self._fit_table_to_content(self.quality_cats)
         try:
             dyn = _an.category_dynamics(self.project_path, scope, limit=10)
         except Exception:
@@ -754,6 +806,25 @@ class ReportsScreen(BaseScreen):
             self.quality_dyn.setItem(
                 i, 3, QTableWidgetItem(f"+{_d}" if _d > 0 else str(_d)))
         self.quality_dyn.resizeColumnsToContents()
+        self._fit_table_to_content(self.quality_dyn)
+
+    def _fit_table_to_content(self, table, max_h: int = 420) -> None:
+        """Высота таблицы под содержимое: маленькие видны целиком,
+        большие упираются в потолок и скроллятся внутри."""
+        try:
+            total = 4
+            try:
+                total += table.horizontalHeader().height() or 28
+            except Exception:
+                total += 28
+            for r in range(table.rowCount()):
+                try:
+                    total += table.rowHeight(r)
+                except Exception:
+                    total += 28
+            table.setFixedHeight(max(60, min(total, max_h)))
+        except Exception:
+            pass
 
     def _drill_verdict(self, item):
         try:

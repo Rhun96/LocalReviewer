@@ -217,3 +217,22 @@ def test_case_stacks_on_narrow_window():
         assert w._case_content_row.indexOf(w._case_right_wrap) >= 0
     finally:
         w.close()
+
+
+def test_answer_browser_readable_height():
+    """Ответ не схлопывается: минимум по контенту, растягивание вверх."""
+    from PySide6.QtWidgets import QApplication, QSizePolicy
+    w = _make_window()
+    try:
+        app = QApplication.instance()
+        w.show()
+        w.resize(1400, 900)
+        app.processEvents()
+        w.load_case(0)
+        app.processEvents()
+        b = w.answer_browser
+        assert b is not None
+        assert b.minimumHeight() >= 120
+        assert b.sizePolicy().verticalPolicy() == QSizePolicy.Policy.Expanding
+    finally:
+        w.close()

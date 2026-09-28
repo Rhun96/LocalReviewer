@@ -1,6 +1,7 @@
 """Экран «Баги» (ТЗ V2 §21): таблица, фильтры, поиск, создание/правка."""
 from PySide6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QLabel, QTableWidget, QTableWidgetItem, QWidget,
+    QAbstractItemView,
 )
 from PySide6.QtCore import Qt
 from database import db
@@ -60,6 +61,10 @@ class BugReportsScreen(BaseScreen):
         from PySide6.QtWidgets import QSplitter
         splitter = QSplitter(Qt.Orientation.Horizontal)
         self.table = QTableWidget()
+        self.table.setSelectionBehavior(
+            QAbstractItemView.SelectionBehavior.SelectRows)
+        self.table.setSelectionMode(
+            QAbstractItemView.SelectionMode.ExtendedSelection)
         splitter.addWidget(self.table)
         try:
             clear_in_fluent(self.table)
@@ -102,11 +107,32 @@ class BugReportsScreen(BaseScreen):
                             "(Jira/Markdown/Plain, контекст подтянется сам)")
         btn_copy.clicked.connect(self._copy_menu)
         btn_del = FPushButton("🗑 Удалить")
-        btn_del.clicked.connect(self._delete_bug)
+        btn_del.setToolTip("Удалить выбранные (можно несколько строк)")
+        btn_del.clicked.connect(self._delete_bugs)
+        btn_bulk_status = FPushButton("📝 Статус")
+        btn_bulk_status.setToolTip("Сменить статус выбранным")
+        btn_bulk_status.clicked.connect(self._bulk_status_menu)
+        btn_bulk_sev = FPushButton("❗ Критичность")
+        btn_bulk_sev.setToolTip("Сменить критичность выбранным")
+        btn_bulk_sev.clicked.connect(self._bulk_sev_menu)
+        btn_dup = FPushButton("🔗 Дубликат…")
+        btn_dup.setToolTip("Пометить выбранный дубликатом другого (по ID)")
+        btn_dup.clicked.connect(self._mark_dup_flow)
+        btn_merge = FPushButton("🧬 Объединить")
+        btn_merge.setToolTip("Слить выбранные в текущий (кейсы переедут)")
+        btn_merge.clicked.connect(self._merge_flow)
+        btn_similar = FPushButton("👯 Похожие")
+        btn_similar.setToolTip("Группы похожих багов по формулировкам")
+        btn_similar.clicked.connect(self._similar_flow)
         btns.addWidget(btn_new)
         btns.addWidget(btn_open)
         btns.addWidget(btn_copy)
         btns.addWidget(btn_del)
+        btns.addWidget(btn_bulk_status)
+        btns.addWidget(btn_bulk_sev)
+        btns.addWidget(btn_dup)
+        btns.addWidget(btn_merge)
+        btns.addWidget(btn_similar)
         btns.addStretch()
         layout.addLayout(btns)
         self.setLayout(layout)
@@ -145,11 +171,11 @@ class BugReportsScreen(BaseScreen):
         except Exception:
             pass
         self.table.clear()
-        self.table.setColumnCount(8)
+        self.table.setColumnCount(9)
         self.table.setRowCount(len(rows))
         self.table.setHorizontalHeaderLabels(
             ["ID", "Заголовок", "Статус", "Критичность", "Категория", "Кейсы",
-             "External", "Обновлён"])
+             "External", "Обновлён", "Дубль"])
         # Цвет статуса и критичности (только foreground — делегат библиотеки).
         try:
             from PySide6.QtGui import QColor as _QC
@@ -194,6 +220,9 @@ class BugReportsScreen(BaseScreen):
             self.table.setItem(i, 6, QTableWidgetItem(r["external_id"] or "—"))
             from ui_compat import format_dt as _fdt
             self.table.setItem(i, 7, QTableWidgetItem(_fdt(r["updated_at"])))
+            _dup = r.get("duplicate_of")
+            self.table.setItem(
+                i, 8, QTableWidgetItem(f"→ #{_dup}" if _dup else "—"))
             self.table.item(i, 0).setData(Qt.ItemDataRole.UserRole, r["bug_id"])
         try:
             self.table.blockSignals(False)
@@ -381,15 +410,157 @@ class BugReportsScreen(BaseScreen):
             suffix = ""
         notify(self, "success", "Скопировано", f"Баг #{bug_id} ({label}) — в буфере.{suffix}")
 
-    def _delete_bug(self):
-        bid = self._selected_id()
-        if bid is None:
+    def _selected_ids(self) -> list:
+        """Все выделенные строки (мультивыбор); пусто — [] без ворчания."""
+        out = []
+        try:
+            for idx in self.table.selectionModel().selectedRows():
+                item = self.table.item(idx.row(), 0)
+                if item is None:
+                    continue
+                bid = item.data(Qt.ItemDataRole.UserRole)
+                if bid:
+                    out.append(int(bid))
+        except Exception:
+            pass
+        return list(dict.fromkeys(out))
+
+    def _guard_card(self) -> bool:
+        """Автосейв грязной карточки перед массовой операцией."""
+        try:
+            return bool(self._maybe_autosave())
+        except Exception:
+            return True
+
+    def _bulk_apply(self, status=None, severity=None) -> None:
+        ids = self._selected_ids()
+        if not ids:
+            notify(self, "warning", "Внимание", "Выбери баги в таблице")
             return
-        if not confirm(self, "Подтверждение", f"Удалить баг #{bid}?"):
+        if not self._guard_card():
             return
         try:
-            bugs.delete_bug(self.project_path, bid)
-            self._placeholder_card()
-            self.refresh()
+            n = bugs.bulk_update_bugs(self.project_path, ids, status,
+                                      severity)
         except ValueError as e:
             notify(self, "warning", "Ошибка", str(e))
+            return
+        self.refresh()
+        notify(self, "success", "Баги", f"Обновлено: {n}.")
+
+    def _bulk_status_menu(self):
+        from PySide6.QtWidgets import QMenu
+        menu = QMenu(self)
+        for code in bugs.STATUSES:
+            action = menu.addAction(bugs.BUG_STATUS_NAMES.get(code, code))
+            action.triggered.connect(
+                lambda _c, s=code: self._bulk_apply(status=s))
+        anchor = self.sender()
+        try:
+            menu.exec(anchor.mapToGlobal(anchor.rect().bottomLeft()))
+        except Exception:
+            menu.exec()
+
+    def _bulk_sev_menu(self):
+        from PySide6.QtWidgets import QMenu
+        menu = QMenu(self)
+        for code in bugs.SEVERITIES:
+            action = menu.addAction(bugs.BUG_SEVERITY_NAMES.get(code, code))
+            action.triggered.connect(
+                lambda _c, s=code: self._bulk_apply(severity=s))
+        anchor = self.sender()
+        try:
+            menu.exec(anchor.mapToGlobal(anchor.rect().bottomLeft()))
+        except Exception:
+            menu.exec()
+
+    def _mark_dup_flow(self):
+        ids = self._selected_ids()
+        if len(ids) != 1:
+            notify(self, "warning", "Внимание",
+                   "Выбери ровно один баг — он станет дубликатом")
+            return
+        if not self._guard_card():
+            return
+        from PySide6.QtWidgets import QInputDialog
+        target, ok = QInputDialog.getInt(
+            self, "Дубликат", f"Баг #{ids[0]} — дубликат какого (ID)?",
+            value=ids[0], min=1)
+        if not ok:
+            return
+        if not confirm(self, "Подтверждение",
+                       f"Баг #{ids[0]} → дубликат #{target}? "
+                       "Кейсы не двигаются, статус станет «Дубликат»."):
+            return
+        try:
+            bugs.mark_duplicate(self.project_path, ids[0], int(target))
+        except ValueError as e:
+            notify(self, "warning", "Ошибка", str(e))
+            return
+        self._placeholder_card()
+        self.refresh()
+
+    def _merge_flow(self):
+        ids = self._selected_ids()
+        if len(ids) < 2:
+            notify(self, "warning", "Внимание",
+                   "Выбери 2+ бага: текущий станет целью слияния")
+            return
+        if not self._guard_card():
+            return
+        try:
+            cur = self.table.currentItem()
+            target = self.table.item(
+                cur.row(), 0).data(Qt.ItemDataRole.UserRole) \
+                if cur is not None else None
+            target = int(target) if target else ids[0]
+        except Exception:
+            target = ids[0]
+        srcs = [c for c in ids if c != target]
+        if not confirm(
+                self, "Подтверждение",
+                f"Слить {len(srcs)} в баг #{target}? Кейсы переедут к нему, "
+                "источники станут дубликатами."):
+            return
+        try:
+            res = bugs.merge_bugs(self.project_path, target, srcs)
+        except ValueError as e:
+            notify(self, "warning", "Ошибка", str(e))
+            return
+        self._placeholder_card()
+        self.refresh()
+        notify(self, "success", "Баги",
+               f"В #{res['target']} влито {len(res['merged'])} "
+               f"(кейсов: {res['moved_cases']}).")
+
+    def _similar_flow(self):
+        from bug_similar_dialog import BugSimilarDialog
+        dlg = BugSimilarDialog(self.project_path, self)
+        dlg.exec()
+        self._placeholder_card()
+        self.refresh()
+
+    def _delete_bugs(self):
+        ids = self._selected_ids()
+        if not ids:
+            notify(self, "warning", "Внимание", "Выбери баги в таблице")
+            return
+        if not self._guard_card():
+            return
+        if not confirm(self, "Подтверждение",
+                       f"Удалить багов: {len(ids)}?"):
+            return
+        ok, errs = 0, []
+        for bid in ids:
+            try:
+                bugs.delete_bug(self.project_path, bid)
+                ok += 1
+            except ValueError as e:
+                errs.append(f"#{bid}: {e}")
+        self._placeholder_card()
+        self.refresh()
+        if errs:
+            notify(self, "warning", "Удалено частично",
+                   f"Удалено: {ok}.\n" + "\n".join(errs[:5]))
+        else:
+            notify(self, "success", "Баги", f"Удалено: {ok}.")

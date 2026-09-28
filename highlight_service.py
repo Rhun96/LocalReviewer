@@ -157,6 +157,19 @@ def _is_ws(c: str) -> bool:
     return c in " \t\r\n" or _ud.category(c) in ("Zs", "Zl", "Zp")
 
 
+def ltrim_blank_lines(text: str) -> tuple:
+    """Срезать ведущие пустые строки для показа (данные не трогаем).
+
+    Возвращает (текст, k): k — сколько символов срезано (для сдвига
+    смещений подсветок обратно). Ведомые пробелы внутри текста целы.
+    """
+    text = text or ""
+    k = 0
+    while k < len(text) and _is_ws(text[k]):
+        k += 1
+    return text[k:], k
+
+
 def _convert_run(text: str) -> tuple:
     """HTML + карта doc→src: k-й символ документа ↔ индекс исходника.
 
@@ -223,14 +236,27 @@ def doc_range_to_src(doc2src: list, text_len: int, s_doc: int,
 
 
 def render_answer_html(project_path: str, case_id: int) -> str:
-    """Ответ с подсветками (HTML). Без подсветок — просто экранированный текст."""
+    """Ответ с подсветками (HTML). Без подсветок — просто экранированный текст.
+
+    Ведущие пустые строки срезаются для показа (иначе шапка висит над
+    пустотой); смещения меток сдвигаются на срез."""
     text = _response_text(project_path, case_id)
+    text, cut = ltrim_blank_lines(text)
     marks = list_highlights(project_path, case_id)
     if not marks:
         return _rich_text(text) if text else "(пусто)"
+    shifted = []
+    for m in marks:
+        s, e = m["start_offset"] - cut, m["end_offset"] - cut
+        if e <= 0:
+            continue  # метка целиком на срезанных пустых строках
+        shifted.append({"start_offset": max(s, 0), "end_offset": e,
+                        "color": m["color"]})
+    if not shifted:
+        return _rich_text(text) if text else "(пусто)"
     parts = []
     pos = 0
-    for m in marks:
+    for m in shifted:
         s, e = m["start_offset"], m["end_offset"]
         if s < pos:  # на всякий случай после чистки
             continue
@@ -240,3 +266,12 @@ def render_answer_html(project_path: str, case_id: int) -> str:
         pos = e
     parts.append(_rich_text(text[pos:]))
     return "".join(parts) or "(пусто)"
+
+
+def answer_selection_map(project_path: str, case_id: int) -> tuple:
+    """(doc2src, shift, text_len) для перевода выделения в смещения БД.
+
+    Карта строится по ПОКАЗАННОМУ (подрезанному) тексту: к результату
+    doc_range_to_src вызывающий код прибавляет shift."""
+    text, cut = ltrim_blank_lines(_response_text(project_path, case_id))
+    return build_doc_map(text), cut, len(text)

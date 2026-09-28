@@ -17,11 +17,11 @@ def _proj():
 
 
 def test_schema_current():
-    assert SCHEMA_VERSION == 22
+    assert SCHEMA_VERSION == 23
     p = _proj()
     from database import db
     with db(p) as conn:
-          assert conn.execute("PRAGMA user_version").fetchone()[0] == 22
+          assert conn.execute("PRAGMA user_version").fetchone()[0] == 23
 
 
 def test_add_list_render():
@@ -186,3 +186,48 @@ def test_clear():
     hl.add_highlight(p, 1, 6, 10, "red")
     assert hl.clear_highlights(p, 1) == 2
     assert hl.list_highlights(p, 1) == []
+
+
+def _proj_trimmed():
+    """Ответ с ведущими пустыми строками (напрямую в SQL: импортёр края
+    стрипает, а легаси-данные и сырые мультиколонки их несут)."""
+    from database import db
+    tmp = tempfile.mkdtemp()
+    init_database(tmp)
+    import_file(tmp, "f.xlsx", "excel", "S", 0,
+                {"q": "primary_text", "a": "response_text"},
+                [{"q": "q", "a": "hello world"}])
+    with db(tmp) as conn:
+        conn.execute("UPDATE cases SET response_text=? WHERE case_id=1",
+                     ("\n\nhello world",))
+    return tmp
+
+
+def test_ltrim_blank_lines():
+    assert hl.ltrim_blank_lines("\n\n  \nabc") == ("abc", 5)
+    assert hl.ltrim_blank_lines("abc") == ("abc", 0)
+    assert hl.ltrim_blank_lines("") == ("", 0)
+    assert hl.ltrim_blank_lines("   ") == ("", 3)
+
+
+def test_render_trims_leading_blanks_and_shifts_marks():
+    p = _proj_trimmed()
+    html = hl.render_answer_html(p, 1)
+    assert not html.startswith("<br>")
+    assert "hello world" in html
+    # метка в исходных координатах (2..7 = hello) видна после среза
+    hl.add_highlight(p, 1, 2, 7, "green")
+    html = hl.render_answer_html(p, 1)
+    assert "<span" in html and "hello" in html
+    assert not html.startswith("<br>")
+
+
+def test_selection_map_compensates_trim():
+    from highlight_service import (answer_selection_map as _map,
+                                   doc_range_to_src as _conv)
+    p = _proj_trimmed()
+    doc, shift, n = _map(p, 1)
+    assert shift == 2 and n == len("hello world")
+    rng = _conv(doc, n, 0, n)
+    assert rng is not None
+    assert (rng[0] + shift, rng[1] + shift) == (2, 13)

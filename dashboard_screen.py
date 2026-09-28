@@ -1,7 +1,7 @@
 """Экран «Главная» (дашборд): цифры, динамика, последние действия.
 
-Только честные данные из существующих сервисов: среднего времени проверки
-у нас нет (не храним) — вместо него карточка открытых багов.
+Только честные данные из существующих сервисов (время ревью — из
+замеров v22, в «Личном»).
 """
 from datetime import date as _date
 from datetime import timedelta as _td
@@ -35,6 +35,15 @@ _EVENT_NAMES = {
     "BUG_CASE_ADDED": "Кейс привязан к багу",
     "BUG_CASE_REMOVED": "Кейс отвязан от бага",
 }
+
+
+def _day_label(iso_day: str) -> str:
+    """ГГГГ-ММ-ДД → ДД.ММ для оси графика (как везде в интерфейсе)."""
+    try:
+        y, m, d = (iso_day or "").split("-")
+        return f"{d}.{m}"
+    except (ValueError, AttributeError):
+        return iso_day or ""
 
 
 class DashboardScreen(BaseScreen):
@@ -101,8 +110,30 @@ class DashboardScreen(BaseScreen):
         self.period_combo.addItem("7 дней", "7d")
         self.period_combo.addItem("14 дней", "14d")
         self.period_combo.addItem("30 дней", "30d")
-        self.period_combo.currentIndexChanged.connect(self.refresh)
+        self.period_combo.addItem("Выбрать период", "manual")
+        self.period_combo.currentIndexChanged.connect(self._on_period_changed)
         scope_row.addWidget(self.period_combo, 1)
+        from PySide6.QtWidgets import QDateEdit as _QDE
+        from PySide6.QtCore import QDate as _QD
+        self.date_from = _QDE()
+        self.date_from.setDisplayFormat("dd-MM-yyyy")
+        self.date_from.setCalendarPopup(True)
+        self.date_from.setDate(_QD.currentDate())
+        self.date_from.dateChanged.connect(self._on_period_changed)
+        self.date_to = _QDE()
+        self.date_to.setDisplayFormat("dd-MM-yyyy")
+        self.date_to.setCalendarPopup(True)
+        self.date_to.setDate(_QD.currentDate())
+        self.date_to.dateChanged.connect(self._on_period_changed)
+        self.date_from_label = QLabel("с:")
+        self.date_to_label = QLabel("по:")
+        scope_row.addWidget(self.date_from_label)
+        scope_row.addWidget(self.date_from)
+        scope_row.addWidget(self.date_to_label)
+        scope_row.addWidget(self.date_to)
+        for _w in (self.date_from_label, self.date_from,
+                   self.date_to_label, self.date_to):
+            _w.setVisible(False)
         layout.addLayout(scope_row)
 
         from styles import SEMANTIC as _SEM
@@ -171,6 +202,26 @@ class DashboardScreen(BaseScreen):
         outer.addWidget(scroll)
         self.setLayout(outer)
 
+    def _on_period_changed(self, *_a):
+        try:
+            manual = False
+            try:
+                manual = (self.period_combo.currentData() or "") == "manual"
+            except Exception:
+                pass
+            try:
+                for _w in (self.date_from_label, self.date_from,
+                           self.date_to_label, self.date_to):
+                    _w.setVisible(manual)
+            except Exception:
+                pass
+        except Exception:
+            pass
+        try:
+            self.refresh()
+        except Exception:
+            pass
+
     def refresh(self):
         scope = {}
         try:
@@ -180,14 +231,13 @@ class DashboardScreen(BaseScreen):
         except Exception:
             scope = {}
         try:
+            from ui_compat import period_dates as _pd
             mode = self.period_combo.currentData() or ""
-            today = _date.today()
-            if mode == "today":
-                scope["reviewed_from"] = scope["reviewed_to"] = today.isoformat()
-            elif mode and mode.endswith("d"):
-                scope["reviewed_from"] = (
-                    today - _td(days=int(mode[:-1]))).isoformat()
-                scope["reviewed_to"] = today.isoformat()
+            f, t = _pd(mode, self.date_from.date(), self.date_to.date())
+            if f:
+                scope["reviewed_from"] = f
+            if t:
+                scope["reviewed_to"] = t
         except Exception:
             pass
         try:
@@ -267,7 +317,7 @@ class DashboardScreen(BaseScreen):
             return
         try:
             pal = _FD if effective_theme() == "dark" else _FL
-            days = [p["day"][5:] for p in pts]
+            days = [_day_label(p["day"]) for p in pts]
             rev = [p["reviewed"] for p in pts]
             bad = [p["bad"] for p in pts]
             plt.style.use("dark_background" if effective_theme() == "dark"
@@ -310,13 +360,12 @@ class DashboardScreen(BaseScreen):
         except Exception:
             fid = None
         try:
+            from ui_compat import period_dates as _pd2
             mode = self.period_combo.currentData() or ""
-            today = _date.today()
-            dfrom = dto = None
-            if mode == "today":
-                dfrom = dto = today.isoformat()
-            elif mode and mode.endswith("d"):
-                dfrom = (today - _td(days=int(mode[:-1]))).isoformat()
+            dfrom, dto = _pd2(mode, self.date_from.date(),
+                              self.date_to.date())
+            dfrom = dfrom or None
+            dto = dto or None
         except Exception:
             dfrom = dto = None
         try:

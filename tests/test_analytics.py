@@ -82,6 +82,33 @@ def test_category_dynamics_two_full_weeks():
     assert row["filters"]["error_category_id"] == cat["category_id"]
 
 
+def test_severity_dist_lists_categories():
+    from taxonomy_service import set_case_error
+    import analytics_service as an
+    p = _proj()
+    ids = get_filtered_case_ids(p, {})
+    bulk_set_status(p, ids, "bad")
+    with db(p) as conn:
+        corr = conn.execute("SELECT category_id FROM error_categories "
+                            "WHERE code='correctness'").fetchone()
+        corr_sub = conn.execute("SELECT category_id FROM error_categories "
+                                "WHERE code='correctness.hallucination'").fetchone()
+        comp = conn.execute("SELECT category_id FROM error_categories "
+                            "WHERE code='completeness'").fetchone()
+        comp_sub = conn.execute("SELECT category_id FROM error_categories "
+                                "WHERE code='completeness.incomplete'").fetchone()
+    set_case_error(p, ids[0], corr["category_id"], corr_sub["category_id"],
+                   "high")
+    set_case_error(p, ids[1], comp["category_id"], comp_sub["category_id"],
+                   "medium")
+    rows = {r["severity"]: r for r in an.severity_dist(p, None)}
+    assert rows["high"]["problems"] == 1
+    assert rows["high"]["cats"] == [
+        {"category_id": corr["category_id"], "name": "Правильность",
+         "n": 1}]
+    assert rows["medium"]["cats"][0]["name"] == "Полнота"
+
+
 def test_files_quality_completeness_and_dirt():
     from report_service import get_files_quality
     p = _proj()

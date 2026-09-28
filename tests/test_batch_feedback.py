@@ -178,6 +178,7 @@ def test_value_search_needs_column():
 def test_checkbox_column_stays_narrow():
     import tempfile as _t
     from PySide6.QtWidgets import QApplication
+    from PySide6.QtCore import Qt as _Qt
     QApplication.instance() or QApplication([])
     from database import init_database as _init
     from importer import import_file as _imp
@@ -186,7 +187,6 @@ def test_checkbox_column_stays_narrow():
     _init(p)
     _imp(p, "f.xlsx", "excel", "S", 0, {"q": "primary_text"},
          [{"q": "q1"}, {"q": "q2"}])
-    from PySide6.QtWidgets import QWidget as _QW, QCheckBox as _QB
     w = ReviewScreen(p)
     try:
         w.show()
@@ -194,18 +194,48 @@ def test_checkbox_column_stays_narrow():
         w.load_table_data()
         assert w.cases_table.columnWidth(0) == 30
 
-        def _boxes():
+        def _states():
+            return [w.cases_table.item(r, 0).checkState()
+                    for r in range(w.cases_table.rowCount())]
+
+        def _widgets():
+            from PySide6.QtWidgets import QWidget as _QW
             return [x for x in w.cases_table.findChildren(_QW)
-                    if isinstance(x, _QB)]
-        assert len(_boxes()) == w.cases_table.rowCount() == 2
-        # Перезагрузки не плодят призраков: боксов ровно столько, сколько строк.
+                    if x.objectName() == "bulk_check_wrap"]
+
+        # Нативные галки: виджетов нет вообще, флаги на месте.
+        assert _widgets() == []
+        assert w.cases_table.rowCount() == 2
+        for r in range(2):
+            it = w.cases_table.item(r, 0)
+            assert bool(it.flags() & _Qt.ItemFlag.ItemIsUserCheckable)
+            assert it.checkState() == _Qt.CheckState.Unchecked
+        # Клик-тумблер через состояние: выбор синхронизируется.
+        w.cases_table.item(0, 0).setCheckState(_Qt.CheckState.Checked)
+        assert w.bulk_selected and len(w.bulk_selected) == 1
+        assert "1" in w.bulk_label.text()
+        # Настоящий клик по галке тоже переключает (QTest, offscreen):
+        # целимся в левый край ячейки, где индикатор, а не в центр.
+        from PySide6.QtTest import QTest
+        from PySide6.QtCore import Qt as _Q2, QPoint as _QP
+        _rect = w.cases_table.visualItemRect(w.cases_table.item(1, 0))
+        _pos = _QP(_rect.left() + 9, _rect.center().y())
+        QTest.mouseClick(w.cases_table.viewport(), _Q2.MouseButton.LeftButton,
+                         _Q2.KeyboardModifier.NoModifier, _pos)
+        assert w.cases_table.item(1, 0).checkState() == _Qt.CheckState.Checked
+        assert len(w.bulk_selected) == 2
+        # Перезагрузки ничего не плодят и выбор держат.
         w.column_filter = "Запрос"
         w.value_search_text = "q1"
         w.load_table_data()
-        assert len(_boxes()) == w.cases_table.rowCount() == 1
+        assert w.cases_table.rowCount() == 1
+        assert _widgets() == []
         w.value_search_text = ""
         w.load_table_data()
-        assert len(_boxes()) == w.cases_table.rowCount() == 2
+        assert w.cases_table.rowCount() == 2
+        assert len(w.bulk_selected) == 2
+        assert w.cases_table.item(0, 0).checkState() == _Qt.CheckState.Checked
+        assert w.cases_table.item(1, 0).checkState() == _Qt.CheckState.Checked
     finally:
         w.close()
 

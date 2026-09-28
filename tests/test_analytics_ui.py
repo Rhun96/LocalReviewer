@@ -284,6 +284,66 @@ def test_quality_dynamics_block():
         assert w.quality_dyn.item(0, 2).text() == "2"
         assert w.quality_dyn.item(0, 3).text() == "+1"
         assert "→" in w.quality_dyn_label.text()
+        # тяжесть: 4-я колонка показывает какие категории внутри
+        assert w.quality_sev.columnCount() == 4
+        assert w.quality_sev.rowCount() == 1
+        assert w.quality_sev.item(0, 0).text() == "Высокая"
+        assert "Правильность" in w.quality_sev.item(0, 3).text()
+        # таблицы влезают целиком (внутреннего скролла нет)
+        for t in (w.quality_verdicts, w.quality_sev,
+                  w.quality_cats, w.quality_dyn):
+            assert t.verticalScrollBar().maximum() == 0
+    finally:
+        w.close()
+
+
+def test_summary_top_drill_reaches_review():
+    """Основные проблемы: клик ведёт в ревью с фильтром причины."""
+    from PySide6.QtWidgets import QApplication
+    QApplication.instance() or QApplication([])
+    from reports_screen import ReportsScreen
+    from bulk_operation_service import bulk_set_status
+    from database import db as _db
+    from filter_service import get_filtered_case_ids
+    from taxonomy_service import set_case_error
+    p, ids = _proj()
+    all_ids = get_filtered_case_ids(p, {})
+    bulk_set_status(p, all_ids, "bad")
+    with _db(p) as conn:
+        cat = conn.execute("SELECT category_id FROM error_categories "
+                           "WHERE code='correctness'").fetchone()
+        sub = conn.execute("SELECT category_id FROM error_categories "
+                           "WHERE code='correctness.hallucination'").fetchone()
+    for cid in all_ids:
+        set_case_error(p, cid, cat["category_id"], sub["category_id"], "high")
+    mw = _MW()
+    w = ReportsScreen(p, None)
+    try:
+        w.parent_window = _PW(mw)
+        w.show()
+        w.tabs.setCurrentWidget(w.summary_tab)
+        w.load_summary_report()
+        assert w.summary_top.count() >= 1
+        w._drill_top(w.summary_top.item(0))
+        assert mw.calls and mw.calls[0][0] == "review"
+        assert mw.calls[0][1].get("error_category_id") == cat["category_id"]
+    finally:
+        w.close()
+
+
+def test_quality_tables_stretch_first_column():
+    """Текст влезает: первая колонка тянется, проценты компактны."""
+    from PySide6.QtWidgets import QApplication, QHeaderView
+    QApplication.instance() or QApplication([])
+    from reports_screen import ReportsScreen
+    p, _ids = _proj()
+    w = ReportsScreen(p, None)
+    try:
+        w.show()
+        for t in (w.quality_verdicts, w.quality_sev,
+                  w.quality_cats, w.quality_dyn):
+            assert t.horizontalHeader().sectionResizeMode(0) == \
+                QHeaderView.ResizeMode.Stretch
     finally:
         w.close()
 

@@ -4,14 +4,16 @@
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QMenu,
     QTableWidget, QTableWidgetItem, QDialog, QAbstractItemView,
+    QStyledItemDelegate, QStyle,
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QRectF, QPointF
+from PySide6.QtGui import QPainter, QPen
 from constants import COLUMN_TO_SQL, TABLE_SYSTEM_COLUMNS
 from database import db
 from filter_dialog import FilterDialog
 from filter_service import get_filtered_case_ids, get_all_case_ids
 from ui_compat import (
-    FCheckBox, FComboBox, FLineEdit, FPushButton, FTable,
+    FComboBox, FLineEdit, FPushButton, FTable,
     accent_button_style, clear_in_fluent,
     confirm, notify, polish_table, warning_button_style,
 )
@@ -20,6 +22,53 @@ import logging
 
 
 logger = logging.getLogger(__name__)
+
+
+class _CheckDelegate(QStyledItemDelegate):
+    """Индикатор галки колонки 0: один, наш, без двойной отрисовки.
+
+    Делегат библиотеки рисует свой бокс, а потом базовый Qt — второй
+    со сдвигом («расходятся» без ховера). Здесь красим сами один раз:
+    скруглённый бокс 19px, выбранный — зелёный с белым тиком.
+    Текста в колонке нет, фон выделения — приглушённый.
+    """
+
+    def paint(self, painter, option, index):
+        from styles import COLORS as _CC
+        from PySide6.QtGui import QColor as _QC
+        painter.save()
+        try:
+            rect = option.rect
+            if option.state & QStyle.StateFlag.State_Selected:
+                painter.fillRect(rect, _QC(_CC["green_deep"]))
+            elif option.state & QStyle.StateFlag.State_MouseOver:
+                painter.fillRect(rect, _QC(_CC["bg_hover"]))
+            try:
+                state = Qt.CheckState(int(index.data(
+                    Qt.ItemDataRole.CheckStateRole)))
+            except (TypeError, ValueError):
+                state = Qt.CheckState.Unchecked
+            box = 19
+            x = rect.x() + 5
+            y = rect.center().y() - box // 2
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            if state == Qt.CheckState.Checked:
+                painter.setPen(_QC(_CC["green_main"]))
+                painter.setBrush(_QC(_CC["green_main"]))
+            else:
+                painter.setPen(_QC(_CC["gray"]))
+                painter.setBrush(_QC(_CC["bg_dark"]))
+            painter.drawRoundedRect(QRectF(x, y, box, box), 4.5, 4.5)
+            if state == Qt.CheckState.Checked:
+                pen = QPen(_QC(_CC["pure_white"]))
+                pen.setWidth(2)
+                pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+                painter.setPen(pen)
+                painter.drawPolyline(
+                    (QPointF(x + 5, y + 10), QPointF(x + 8.5, y + 13.5),
+                     QPointF(x + 14, y + 6)))
+        finally:
+            painter.restore()
 
 
 class TableMixin:
@@ -417,6 +466,17 @@ class TableMixin:
         self.cases_table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
         self.cases_table.setHorizontalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
         self.cases_table.doubleClicked.connect(self.on_table_double_click)
+        try:
+            self.cases_table.itemChanged.connect(self._on_item_changed)
+            self.cases_table.clicked.connect(self._on_table_clicked)
+        except Exception:
+            pass
+        try:
+            # Наш индикатор колонки 0 (без двойной отрисовки библиотеки).
+            self.cases_table.setItemDelegateForColumn(0, _CheckDelegate(self.cases_table))
+            self.cases_table.setMouseTracking(True)
+        except Exception:
+            pass
         layout.addWidget(self.cases_table, 1)
         clear_in_fluent(self.cases_table)
         # Без stretch: у таблицы всегда горизонтальный скролл, колонки шире
@@ -600,27 +660,6 @@ class TableMixin:
                 except Exception as e:
                     logger.warning("checks summary failed: %s", e)
             self.cases_table.blockSignals(True)
-            # Синхронный снос виджетов-боксов: deleteLater не всегда
-            # отрабатывает до следующей отрисовки, и призраки остаются
-            # на старых координатах (пробы 68→78→98).
-            try:
-                from shiboken6 import delete as _sdel
-            except Exception:
-                _sdel = None
-            try:
-                for _r in range(self.cases_table.rowCount()):
-                    _old = self.cases_table.cellWidget(_r, 0)
-                    if _old is not None:
-                        self.cases_table.removeCellWidget(_r, 0)
-                        if _sdel is not None:
-                            try:
-                                _sdel(_old)
-                            except Exception:
-                                _old.deleteLater()
-                        else:
-                            _old.deleteLater()
-            except Exception:
-                pass
             self.cases_table.clear()
             self.cases_table.setColumnCount(len(self.selected_columns) + 2)
             self.cases_table.setRowCount(len(cases))
@@ -659,24 +698,20 @@ class TableMixin:
                         metadata = json.loads(case['metadata_json'])
                     except (ValueError, TypeError):
                         pass
-                # Чекбокс — виджетом: нативный рисует сама библиотека
-                # (QSS ::indicator игнорирует — проверено), получается дёшево.
-                # Виджет строго по центру; снос старых — синхронный (см. выше),
-                # иначе призраки.
+                # Чекбокс — нативный (флаг item'а): делегат рисует его тем же
+                # выравниванием, что текст — дрейф виджетов исключён
+                # конструкцией (попытки отцентровать виджет ломались на
+                # высоких строках/DPI). Призраков и сноса нет.
                 check_item = QTableWidgetItem()
                 check_item.setData(Qt.ItemDataRole.UserRole, case['case_id'])
-                check_item.setFlags(check_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                check_item.setFlags(
+                    (check_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                    | Qt.ItemFlag.ItemIsUserCheckable)
+                check_item.setCheckState(
+                    Qt.CheckState.Checked
+                    if case['case_id'] in self.bulk_selected
+                    else Qt.CheckState.Unchecked)
                 self.cases_table.setItem(row, 0, check_item)
-                check_wrap = QWidget()
-                check_layout = QHBoxLayout(check_wrap)
-                check_layout.setContentsMargins(0, 0, 0, 0)
-                check_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-                check_box = FCheckBox()
-                check_box.setChecked(case['case_id'] in self.bulk_selected)
-                check_box.toggled.connect(
-                    lambda checked, cid=case['case_id']: self._on_bulk_toggled(cid, checked))
-                check_layout.addWidget(check_box)
-                self.cases_table.setCellWidget(row, 0, check_wrap)
                 for col_idx, col_name in enumerate(self.selected_columns, start=1):
                     if col_name == 'ID':
                         # Идентификатор из маппинга (001, 1kij…), иначе внутренний номер
@@ -741,9 +776,8 @@ class TableMixin:
                 self.cases_table.setItem(row, len(self.selected_columns) + 1, checks_item)
             self.cases_table.blockSignals(False)
             self.cases_table.resizeColumnsToContents()
-            # Колонка галочки — фиксированная узкая: бокс ровно напротив
-            # номера строки, без люфта. ResizeMode.Fixed + маленький минимум:
-            # иначе стиль растопыривает секцию и виджеты плывут вправо.
+            # Колонка галки — фиксированная: наш индикатор 19px
+            # с отступом 5 (5..24 — влезает в 30). ResizeMode.Fixed.
             try:
                 from PySide6.QtWidgets import QHeaderView as _QHV
                 _hh = self.cases_table.horizontalHeader()
@@ -793,6 +827,38 @@ class TableMixin:
             self._update_hidden_button()
         except Exception as e:
             self.show_error("Не удалось загрузить таблицу", e)
+
+    def _on_table_clicked(self, index):
+        """Клик по галке: тумблер вручную (NoEditTriggers гасит штатный)."""
+        try:
+            if index.column() != 0:
+                return
+            item = self.cases_table.item(index.row(), 0)
+            if item is None:
+                return
+            item.setCheckState(
+                Qt.CheckState.Unchecked
+                if item.checkState() == Qt.CheckState.Checked
+                else Qt.CheckState.Checked)
+        except Exception:
+            pass
+
+    def _on_item_changed(self, item):
+        """Клик по нативной галке: синхронизируем bulk-выбор."""
+        try:
+            if item is None or item.column() != 0:
+                return
+            cid = item.data(Qt.ItemDataRole.UserRole)
+            if not cid:
+                return
+            checked = item.checkState() == Qt.CheckState.Checked
+            if checked:
+                self.bulk_selected.add(int(cid))
+            else:
+                self.bulk_selected.discard(int(cid))
+            self._update_bulk_label()
+        except Exception:
+            pass
 
     def _on_bulk_toggled(self, case_id: int, checked: bool):
         """Совместимость: выбор теперь идёт через _on_item_changed."""
@@ -1049,6 +1115,10 @@ class TableMixin:
             lay.addWidget(b)
 
     def on_table_double_click(self, index):
+        if index.column() == 0:
+            # Двойной клик по галке: два тумблера = нет изменений,
+            # кейс не открываем (галка — не навигация).
+            return
         if not self._bad_can_leave():
             self.view_stack.setCurrentIndex(0)
             self.btn_toggle_view.setText("📋 Таблица")

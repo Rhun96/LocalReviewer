@@ -851,3 +851,12 @@ def migrate_to_v22(cursor) -> None:
     if "review_duration_s" not in cols:
         cursor.execute("ALTER TABLE annotations ADD COLUMN review_duration_s REAL")
     logger.info("migrated to v22 (review timing)")
+
+
+def migrate_to_v23(cursor) -> None:
+    """Связь дубликатов багов: duplicate_of (NULL — не дубликат).
+    Только ADD COLUMN; старые данные не трогаем."""
+    cols = [r[1] for r in cursor.execute("PRAGMA table_info(bug_reports)").fetchall()]
+    if "duplicate_of" not in cols:
+        cursor.execute("ALTER TABLE bug_reports ADD COLUMN duplicate_of INTEGER")
+    logger.info("migrated to v23 (bug duplicates)")

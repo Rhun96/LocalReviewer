@@ -386,22 +386,41 @@ def severity_dist(project_path: str, scope: dict | None) -> list:
                 f"JOIN cases c ON c.case_id = e.case_id "
                 f"JOIN files f ON f.file_id = c.file_id "
                 f"{where} GROUP BY sev ORDER BY n DESC").fetchall()
+            cat_rows = conn.execute(
+                "SELECT e.severity AS sev, "
+                "COALESCE(e.category_id, e.subcategory_id) AS cat, "
+                "COUNT(DISTINCT e.case_id) AS n "
+                "FROM case_errors e "
+                "JOIN cases c ON c.case_id = e.case_id "
+                "JOIN files f ON f.file_id = c.file_id "
+                f"{where} GROUP BY sev, cat").fetchall()
+            names = {r["category_id"]: r["name"] for r in conn.execute(
+                "SELECT category_id, name FROM error_categories").fetchall()}
     except Exception as e:
         logger.warning("severity_dist failed: %s", e)
         return []
     total = sum(r["n"] for r in rows) or 0
-    names = {"low": "Низкая", "medium": "Средняя", "high": "Высокая",
-             "critical": "Критическая"}
+    names_sev = {"low": "Низкая", "medium": "Средняя", "high": "Высокая",
+                 "critical": "Критическая"}
+    by_sev: dict = {}
+    for r in cat_rows:
+        if not r["sev"] or not r["cat"]:
+            continue
+        by_sev.setdefault(r["sev"], []).append((r["cat"], r["n"]))
     out = []
     for r in rows:
         if not r["sev"]:
             continue
         flt = dict(base, error_severities=[r["sev"]],
                    statuses=reviewed_codes(project_path))
+        top_cats = sorted(by_sev.get(r["sev"], []), key=lambda t: -t[1])[:3]
         out.append({"severity": r["sev"],
-                    "name": names.get(r["sev"], r["sev"]),
+                    "name": names_sev.get(r["sev"], r["sev"]),
                     "problems": r["n"],
                     "share": _pct(r["n"], total),
+                    "cats": [{"category_id": c,
+                              "name": names.get(c, f"#{c}"),
+                              "n": n} for c, n in top_cats],
                     "filters": flt})
     return out
 

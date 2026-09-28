@@ -189,3 +189,11 @@ def test_chart_lazy_renders_on_show():
         assert not w.chart_label.pixmap().isNull()
     finally:
         w.close()
+
+
+def test_day_labels_dd_mm():
+    from dashboard_screen import _day_label
+    assert _day_label("2026-09-28") == "28.09"
+    assert _day_label("2026-01-05") == "05.01"
+    assert _day_label("мусор") == "мусор"
+    assert _day_label("") == ""

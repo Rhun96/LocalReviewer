@@ -630,7 +630,17 @@ class CaseMixin:
                 item.widget().deleteLater()
 
         def _text_widget(text: str):
-            w = QLabel(str(text) if text else "(пусто)")
+            # Ведущие пустые строки срезаем для показа (иначе шапка висит
+            # над пустотой); данные и смещения подсветок не трогаем.
+            if not text:
+                shown = ""
+            else:
+                try:
+                    from highlight_service import ltrim_blank_lines as _trim
+                    shown, _ = _trim(str(text))
+                except Exception:
+                    shown = str(text)
+            w = QLabel(shown if shown else "(пусто)")
             w.setWordWrap(True)
             w.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
             w.setStyleSheet("font-size: 14px; padding: 6px;")
@@ -697,6 +707,7 @@ class CaseMixin:
         if topic:
             box, lay = _box(topic_title)
             lay.addWidget(_text_widget(topic))
+            lay.addStretch(1)
             self.case_layout.addWidget(box, 1)
 
         # 2. Текст (запрос): один смысл — один заголовок.
@@ -725,6 +736,8 @@ class CaseMixin:
             src_text.setStyleSheet(
                 f"font-size: 13px; padding: 6px; color: {_CC['blue']};")
             lay.addWidget(src_text)
+        # Лишняя высота — под контент, а не между заголовком и текстом.
+        lay.addStretch(1)
         self.case_layout.addWidget(box, 2)
 
         # 3. Ответ (шире остальных, чтобы меньше скроллить).
@@ -761,12 +774,17 @@ class CaseMixin:
                 except Exception:
                     pass
                 lay.addWidget(browser)
+                # Лишняя высота панели — браузеру (читать удобно),
+                # а не в щель под заголовком.
+                lay.setStretchFactor(browser, 1)
                 self.answer_browser = browser
                 self._render_answer()
             except Exception:
                 self.answer_browser = None
                 lay.addWidget(_text_widget(
                     self.current_case.get('response_text')))
+        if self.answer_browser is None:
+            lay.addStretch(1)
         self.case_layout.addWidget(box, 4)
 
         # Эталон (ответ оператора + запасные ключи) — чтобы не лазить
@@ -779,6 +797,7 @@ class CaseMixin:
         if reference:
             ref_box, ref_lay = _box("📖 Эталон")
             ref_lay.addWidget(_text_widget(reference))
+            ref_lay.addStretch(1)
             self.case_layout.addWidget(ref_box, 1)
 
         self.case_layout.addStretch(0)
@@ -793,8 +812,18 @@ class CaseMixin:
             browser.setHtml(hl.render_answer_html(
                 self.project_path, self.current_case_id))
             try:
-                h = int(browser.document().size().height()) + 12
-                browser.setFixedHeight(max(60, min(h, 600)))
+                # Замер ПОСЛЕ задания ширины текста: сразу после setHtml
+                # документ ещё не разложен и size() врёт в меньшую сторону
+                # (панель схлопывалась до минимума на длинных ответах).
+                from PySide6.QtWidgets import QSizePolicy as _SP
+                browser.setSizePolicy(_SP.Policy.Preferred,
+                                      _SP.Policy.Expanding)
+                doc = browser.document()
+                w = browser.viewport().width() or browser.width() or 600
+                if w > 0:
+                    doc.setTextWidth(w)
+                h = int(doc.size().height()) + 12
+                browser.setMinimumHeight(max(120, min(h, 600)))
             except Exception:
                 pass
         except Exception as e:
@@ -810,12 +839,15 @@ class CaseMixin:
             notify(self, "warning", "Подсветка",
                    "Выдели фрагмент текста в ответе мышью.")
             return None
-        text = self.current_case.get("response_text") or ""
         try:
-            from highlight_service import (build_doc_map as _map,
+            from highlight_service import (answer_selection_map as _map,
                                            doc_range_to_src as _conv)
-            rng = _conv(_map(text), len(text),
+            _doc, _shift, _len = _map(self.project_path,
+                                      self.current_case_id)
+            rng = _conv(_doc, _len,
                         cursor.selectionStart(), cursor.selectionEnd())
+            if rng is not None:
+                rng = (rng[0] + _shift, rng[1] + _shift)
         except Exception:
             rng = None
         if rng is None:

@@ -231,3 +231,56 @@ def test_bug_export_formats():
         bex.render(p, b, "xml")
     with pytest.raises(ValueError):
         bex.render(p, 999999, "jira")
+
+
+def test_duplicates_mark_unmark_merge():
+    from filter_service import get_filtered_case_ids
+    p = _proj()
+    ids = get_filtered_case_ids(p, {})
+    a = bugs.create_bug(p, "корень", [ids[0]])
+    b = bugs.create_bug(p, "дубль", [ids[1]])
+    c = bugs.create_bug(p, "третий")
+    # связи и статусы
+    bugs.mark_duplicate(p, b, a)
+    got = {r["bug_id"]: r for r in bugs.list_bugs(p)}
+    assert got[b]["status"] == "Duplicate" and got[b]["duplicate_of"] == a
+    assert got[a].get("duplicate_of") is None
+    # валидации
+    with pytest.raises(ValueError):
+        bugs.mark_duplicate(p, a, a)
+    with pytest.raises(ValueError):
+        bugs.mark_duplicate(p, a, b)  # цель сама дубликат
+    with pytest.raises(ValueError):
+        bugs.mark_duplicate(p, 999999, a)
+    bugs.unmark_duplicate(p, b)
+    got = {r["bug_id"]: r for r in bugs.list_bugs(p)}
+    assert got[b].get("duplicate_of") is None  # связь снята, статус цел
+    # слияние: кейсы едут к цели, источники — дубликаты
+    res = bugs.merge_bugs(p, a, [b, c])
+    assert res == {"target": a, "merged": [b, c], "moved_cases": 1}
+    got = {r["bug_id"]: r for r in bugs.list_bugs(p)}
+    assert got[b]["duplicate_of"] == a and got[c]["duplicate_of"] == a
+    assert len(bugs.get_bug(p, a)["cases"]) == 2  # свой + переехавший
+    with pytest.raises(ValueError):
+        bugs.merge_bugs(p, a, [])
+    # цель с дубликатами не удаляется
+    with pytest.raises(ValueError):
+        bugs.delete_bug(p, a)
+    bugs.delete_bug(p, c)
+    bugs.delete_bug(p, b)
+    bugs.delete_bug(p, a)
+    assert bugs.list_bugs(p) == []
+
+
+def test_bulk_update_bugs():
+    p = _proj()
+    a = bugs.create_bug(p, "один")
+    b = bugs.create_bug(p, "два")
+    assert bugs.bulk_update_bugs(p, [], "Fixed") == 0
+    assert bugs.bulk_update_bugs(p, [a, b, b], "Fixed", "High") == 2
+    got = {r["bug_id"]: r for r in bugs.list_bugs(p)}
+    assert got[a]["status"] == "Fixed" and got[a]["severity"] == "High"
+    with pytest.raises(ValueError):
+        bugs.bulk_update_bugs(p, [a], "нетакого")
+    with pytest.raises(ValueError):
+        bugs.bulk_update_bugs(p, [a], None, "нетакой")

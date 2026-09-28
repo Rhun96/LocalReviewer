@@ -23,13 +23,13 @@ def test_schema_v22_columns_and_version():
         ver = conn.execute("PRAGMA user_version").fetchone()[0]
         cols = [r[1] for r in conn.execute(
             "PRAGMA table_info(annotations)").fetchall()]
-    assert ver == 22
+    assert ver == 23
     assert "review_started_at" in cols
     assert "review_duration_s" in cols
     # повторный open — идемпотентно, версия та же
     init_database(p)
     with db(p) as conn:
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 22
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 23
 
 
 def test_duration_helper():

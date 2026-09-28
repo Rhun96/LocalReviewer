@@ -492,6 +492,45 @@ def set_embed_auto(on: bool) -> bool:
     return bool(on)
 
 
+def period_dates(mode, date_from=None, date_to=None) -> tuple:
+    """(reviewed_from, reviewed_to) ISO по пресету или ручным датам.
+
+    date_from/to — QDate или ISO-строка (только для manual).
+    '' = без ограничения. Перепутанные даты (с > по) меняем местами.
+    """
+    if mode == "manual":
+        import re as _re
+        _iso_pat = _re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+        def _iso(v):
+            try:
+                if hasattr(v, "toString"):
+                    s = v.toString("yyyy-MM-dd")
+                else:
+                    s = parse_date_input(str(v or ""))
+            except Exception:
+                return ""
+            s = (s or "").strip()
+            return s if _iso_pat.match(s) else ""
+        f, t = _iso(date_from), _iso(date_to)
+        if f and t and f > t:
+            f, t = t, f
+        return f, t
+    try:
+        from filter_dialog import FilterDialog as _FD
+    except Exception:
+        return "", ""
+    try:
+        if mode == "today":
+            t = _FD._iso_today()
+            return t, t
+        if mode in ("7d", "14d", "30d"):
+            return _FD._iso_days_ago(int(mode[:-1])), _FD._iso_today()
+    except Exception:
+        pass
+    return "", ""
+
+
 def _resolve_effective(mode: str) -> str:
     """system -> light/dark по ОС (через darkdetect из зависимостей Fluent)."""
     if mode in ("light", "dark"):
