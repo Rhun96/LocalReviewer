@@ -206,10 +206,11 @@ def review_time_stats(project_path: str, scope: dict | None) -> dict:
 
 def dynamics(project_path: str, scope: dict | None,
              limit_days: int = 90) -> list:
-    """По дням: [{day, reviewed, bad}]. Агрегация SQL, без вытягивания."""
+    """По дням: [{day, reviewed, good, bad}]. Агрегация SQL, без вытягивания."""
     base = scope_filters(scope)
     codes = reviewed_codes(project_path)
     bad_codes = _codes_by_base(project_path).get("bad", [])
+    good_codes = _codes_by_base(project_path).get("good", [])
     if not codes:
         return []
     conds = ["COALESCE(c.hidden, 0) = 0",
@@ -226,27 +227,31 @@ def dynamics(project_path: str, scope: dict | None,
         params.append(base["reviewed_to"])
     where = "WHERE " + " AND ".join(conds)
     bph = ",".join(["?"] * len(bad_codes)) if bad_codes else ""
+    gph = ",".join(["?"] * len(good_codes)) if good_codes else ""
     q = ("SELECT substr(a.updated_at, 1, 10) AS day, "
          "COUNT(DISTINCT c.case_id) AS reviewed, "
          "COUNT(DISTINCT CASE WHEN COALESCE(a.status,'unreviewed') "
          + (f"IN ({bph}) " if bph else "= '##never##' ")
-         + "THEN c.case_id END) AS bad "
+         + "THEN c.case_id END) AS bad, "
+         "COUNT(DISTINCT CASE WHEN COALESCE(a.status,'unreviewed') "
+         + (f"IN ({gph}) " if gph else "= '##never##' ")
+         + "THEN c.case_id END) AS good "
          "FROM cases c "
          "JOIN files f ON c.file_id = f.file_id "
          "JOIN annotations a ON a.case_id = c.case_id "
          f"{where} "
          "GROUP BY day ORDER BY day DESC LIMIT ?")
     # ВАЖНО: порядок args — строго по порядку плейсхолдеров в строке:
-    # сначала bad-IN из SELECT, потом условия WHERE, потом LIMIT.
-    args = list(bad_codes) + list(params) + [int(limit_days)]
+    # сначала bad-IN и good-IN из SELECT, потом условия WHERE, потом LIMIT.
+    args = list(bad_codes) + list(good_codes) + list(params) + [int(limit_days)]
     try:
         with db(project_path) as conn:
             rows = conn.execute(q, args).fetchall()
     except Exception as e:
         logger.warning("dynamics failed: %s", e)
         return []
-    return [{"day": r["day"], "reviewed": r["reviewed"], "bad": r["bad"]}
-            for r in rows]
+    return [{"day": r["day"], "reviewed": r["reviewed"], "bad": r["bad"],
+             "good": r["good"]} for r in rows]
 
 
 def top_categories(project_path: str, scope: dict | None,
@@ -276,20 +281,37 @@ def top_categories(project_path: str, scope: dict | None,
             rows = cur.execute(q, params + [int(limit)]).fetchall()
             names = {r["category_id"]: r["name"] for r in cur.execute(
                 "SELECT category_id, name FROM error_categories").fetchall()}
+            sub_rows = cur.execute(
+                "SELECT COALESCE(e.category_id, e.subcategory_id) AS cat, "
+                "e.subcategory_id AS sub, COUNT(DISTINCT e.case_id) AS n "
+                "FROM case_errors e "
+                "JOIN cases c ON c.case_id = e.case_id "
+                "JOIN files f ON f.file_id = c.file_id "
+                f"{where} GROUP BY cat, sub").fetchall()
     except Exception as e:
         logger.warning("top_categories failed: %s", e)
         return []
     total = sum(r["n"] for r in rows) or 0
+    by_cat: dict = {}
+    for r in sub_rows:
+        if not r["cat"] or not r["sub"] or r["sub"] == r["cat"]:
+            continue
+        by_cat.setdefault(r["cat"], []).append((r["sub"], r["n"]))
     out = []
     for r in rows:
         if not r["cat"]:
             continue
         flt = dict(base, error_category_id=r["cat"],
                    statuses=reviewed_codes(project_path))
+        top_subs = sorted(by_cat.get(r["cat"], []),
+                          key=lambda t: -t[1])[:3]
         out.append({"category_id": r["cat"],
                     "name": names.get(r["cat"], f"#{r['cat']}"),
                     "problems": r["n"],
                     "share": _pct(r["n"], total),
+                    "subs": [{"subcategory_id": c,
+                              "name": names.get(c, f"#{c}"),
+                              "n": n} for c, n in top_subs],
                     "filters": flt})
     return out
 

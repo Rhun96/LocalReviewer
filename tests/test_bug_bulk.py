@@ -88,11 +88,29 @@ def test_merge_flow_and_delete_guard(monkeypatch):
         w._merge_flow()
         got = {r["bug_id"]: r for r in bugs.list_bugs(p)}
         assert got[b]["duplicate_of"] == a
-        # цель с дубликатами не удаляется через балк
+        # каскад из флоу: цель + дубликат сносятся одним подтверждением
         _select_rows(w, [0, 1])
         w._delete_bugs()
-        remaining = {r["bug_id"] for r in bugs.list_bugs(p)}
-        assert a in remaining
+        assert bugs.list_bugs(p) == []
+    finally:
+        w.close()
+
+
+def test_delete_flow_cascade_covers_kids(monkeypatch):
+    """Цель + дубликат в выборке: одно подтверждение, всё сносится."""
+    _app()
+    import bug_reports_screen as scr
+    monkeypatch.setattr(scr, "confirm", lambda *_a, **_k: True)
+    p = _proj()
+    a = bugs.create_bug(p, "корень")
+    b = bugs.create_bug(p, "дубль")
+    bugs.mark_duplicate(p, b, a)
+    w = _win(p)
+    try:
+        w.show()
+        _select_rows(w, [0, 1])
+        w._delete_bugs()
+        assert bugs.list_bugs(p) == []
     finally:
         w.close()
 

@@ -297,22 +297,43 @@ def bugs_for_case(project_path: str, case_id: int) -> list:
         """, (case_id,)).fetchall()]
 
 
-def delete_bug(project_path: str, bug_id: int) -> None:
+def duplicate_children(project_path: str, bug_id: int) -> list:
+    """ID багов-дубликатов, указывающих на данный."""
+    try:
+        with db(project_path) as conn:
+            return [r["bug_id"] for r in conn.execute(
+                "SELECT bug_id FROM bug_reports WHERE duplicate_of=?",
+                (bug_id,)).fetchall()]
+    except Exception:
+        return []
+
+
+def delete_bug(project_path: str, bug_id: int,
+               cascade: bool = False) -> None:
+    """Удалить баг. Цель с дубликатами: без cascade — ValueError
+    (сначала отвяжи), с cascade — дубликаты сносятся вместе с целью."""
     with db(project_path) as conn:
         cur = conn.cursor()
+        row = cur.execute("SELECT bug_id FROM bug_reports WHERE bug_id=?",
+                          (bug_id,)).fetchone()
+        if not row:
+            raise ValueError("Баг не найден")
         try:
-            kids = cur.execute("SELECT bug_id FROM bug_reports "
-                               "WHERE duplicate_of=?", (bug_id,)).fetchall()
+            kids = [r["bug_id"] for r in cur.execute(
+                "SELECT bug_id FROM bug_reports WHERE duplicate_of=?",
+                (bug_id,)).fetchall()]
         except Exception:
             kids = []
-        if kids:
+        if kids and not cascade:
             raise ValueError(
                 f"Баг #{bug_id} — цель дубликатов "
-                f"({', '.join('#' + str(r['bug_id']) for r in kids)}): "
+                f"({', '.join('#' + str(k) for k in kids)}): "
                 "сначала отвяжи их (Объединить/Дубликат).")
+        if kids:
+            ph = ",".join(["?"] * len(kids))
+            cur.execute(f"DELETE FROM bug_reports WHERE bug_id IN ({ph})",
+                        kids)
         cur.execute("DELETE FROM bug_reports WHERE bug_id=?", (bug_id,))
-        if cur.rowcount == 0:
-            raise ValueError("Баг не найден")
 
 
 def build_from_case(project_path: str, case_id: int) -> dict:

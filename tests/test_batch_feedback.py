@@ -214,16 +214,22 @@ def test_checkbox_column_stays_narrow():
         w.cases_table.item(0, 0).setCheckState(_Qt.CheckState.Checked)
         assert w.bulk_selected and len(w.bulk_selected) == 1
         assert "1" in w.bulk_label.text()
-        # Настоящий клик по галке тоже переключает (QTest, offscreen):
-        # целимся в левый край ячейки, где индикатор, а не в центр.
-        from PySide6.QtTest import QTest
-        from PySide6.QtCore import Qt as _Q2, QPoint as _QP
-        _rect = w.cases_table.visualItemRect(w.cases_table.item(1, 0))
-        _pos = _QP(_rect.left() + 9, _rect.center().y())
-        QTest.mouseClick(w.cases_table.viewport(), _Q2.MouseButton.LeftButton,
-                         _Q2.KeyboardModifier.NoModifier, _pos)
+        # Тумблер — по всей ячейке колонки 0 (30px, мимо некуда);
+        # строка при этом выделяется.
+        _idx1 = w.cases_table.model().index(1, 0)
+        w._on_table_clicked(_idx1)
         assert w.cases_table.item(1, 0).checkState() == _Qt.CheckState.Checked
         assert len(w.bulk_selected) == 2
+        assert w.cases_table.currentRow() == 1
+        _idx0 = w.cases_table.model().index(0, 0)
+        w._on_table_clicked(_idx0)
+        assert w.cases_table.item(0, 0).checkState() == _Qt.CheckState.Unchecked
+        assert w.cases_table.currentRow() == 0
+        assert len(w.bulk_selected) == 1
+        # Даблклик: второй клик в пределах 0.5с не откатывает первый.
+        w._on_table_clicked(_idx0)
+        assert w.cases_table.item(0, 0).checkState() == _Qt.CheckState.Unchecked
+        assert len(w.bulk_selected) == 1
         # Перезагрузки ничего не плодят и выбор держат.
         w.column_filter = "Запрос"
         w.value_search_text = "q1"
@@ -233,8 +239,8 @@ def test_checkbox_column_stays_narrow():
         w.value_search_text = ""
         w.load_table_data()
         assert w.cases_table.rowCount() == 2
-        assert len(w.bulk_selected) == 2
-        assert w.cases_table.item(0, 0).checkState() == _Qt.CheckState.Checked
+        assert len(w.bulk_selected) == 1
+        assert w.cases_table.item(0, 0).checkState() == _Qt.CheckState.Unchecked
         assert w.cases_table.item(1, 0).checkState() == _Qt.CheckState.Checked
     finally:
         w.close()

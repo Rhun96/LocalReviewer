@@ -64,11 +64,40 @@ class ConsistencyDialog(QDialog):
         layout.addWidget(self.cf_info)
         self.cf_list = QListWidget()
         self.cf_list.itemDoubleClicked.connect(self._open_selected)
+        self.cf_list.currentItemChanged.connect(
+            lambda *_a: self._show_conflict_pair())
+        self.cf_list.setMinimumHeight(140)
         layout.addWidget(self.cf_list, 2)
         try:
             clear_in_fluent(self.cf_list)
         except Exception:
             pass
+        from PySide6.QtWidgets import QSplitter, QTextBrowser
+        cf_pair = QSplitter(Qt.Orientation.Horizontal)
+        self.cf_pair_a = QTextBrowser()
+        self.cf_pair_a.setReadOnly(True)
+        self.cf_pair_a.setMinimumHeight(120)
+        self.cf_pair_b = QTextBrowser()
+        self.cf_pair_b.setReadOnly(True)
+        self.cf_pair_b.setMinimumHeight(120)
+        cf_pair.addWidget(self.cf_pair_a)
+        cf_pair.addWidget(self.cf_pair_b)
+        try:
+            clear_in_fluent(self.cf_pair_a, self.cf_pair_b)
+        except Exception:
+            pass
+        layout.addWidget(cf_pair, 1)
+        pair_row = QHBoxLayout()
+        self.btn_pair_a = FPushButton("➡️ Кейс 1")
+        self.btn_pair_a.setToolTip("Открыть первый кейс пары")
+        self.btn_pair_a.clicked.connect(lambda: self._open_pair_case(0))
+        self.btn_pair_b = FPushButton("➡️ Кейс 2")
+        self.btn_pair_b.setToolTip("Открыть второй кейс пары")
+        self.btn_pair_b.clicked.connect(lambda: self._open_pair_case(1))
+        pair_row.addWidget(self.btn_pair_a)
+        pair_row.addWidget(self.btn_pair_b)
+        pair_row.addStretch()
+        layout.addLayout(pair_row)
         orow = QHBoxLayout()
         btn_open = FPushButton("➡️ Открыть выбранный")
         btn_open.clicked.connect(self._open_selected)
@@ -101,8 +130,44 @@ class ConsistencyDialog(QDialog):
             item = QListWidgetItem(
                 f"{pct}% {p['status_a']} vs {p['status_b']} | "
                 f"{p['source_a']} ↔ {p['source_b']}")
-            item.setData(Qt.ItemDataRole.UserRole, p["case_a"])
+            item.setData(Qt.ItemDataRole.UserRole,
+                         (p["case_a"], p["case_b"]))
             self.cf_list.addItem(item)
+        try:
+            if self.cf_list.count():
+                self.cf_list.setCurrentRow(0)
+        except Exception:
+            pass
+        self._show_conflict_pair()
+
+    def _show_conflict_pair(self):
+        """Превью выбранной пары: оба текста рядом, ходить не надо."""
+        try:
+            from similar_dialog import pair_preview
+            item = self.cf_list.currentItem()
+            if item is None:
+                return
+            data = item.data(Qt.ItemDataRole.UserRole)
+            if not isinstance(data, (list, tuple)) or len(data) != 2:
+                return
+            ta, tb = pair_preview(self.project_path, int(data[0]),
+                                  int(data[1]))
+            self.cf_pair_a.setPlainText(ta)
+            self.cf_pair_b.setPlainText(tb)
+            self._pair_ids = (int(data[0]), int(data[1]))
+        except Exception:
+            pass
+
+    def _open_pair_case(self, side: int):
+        """Переход к кейсу 1/2 пары из превью."""
+        try:
+            ids = getattr(self, "_pair_ids", None)
+            if not ids or side not in (0, 1):
+                return
+            self.result_case_id = int(ids[side])
+        except Exception:
+            return
+        self.accept()
 
     # ---- QC-выборка ----
     def _sample_tab(self):
@@ -185,5 +250,13 @@ class ConsistencyDialog(QDialog):
         item = lst.currentItem()
         if not item:
             return
-        self.result_case_id = item.data(Qt.ItemDataRole.UserRole)
-        self.accept()
+        data = item.data(Qt.ItemDataRole.UserRole)
+        try:
+            # пары противоречий несут оба кейса — открываем первый
+            if isinstance(data, (list, tuple)):
+                data = data[0] if data else None
+            self.result_case_id = int(data) if data else None
+        except Exception:
+            return
+        if self.result_case_id:
+            self.accept()

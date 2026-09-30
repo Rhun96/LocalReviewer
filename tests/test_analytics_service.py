@@ -71,6 +71,7 @@ def test_dynamics_groups_by_day():
     total = sum(d["reviewed"] for d in dyn)
     assert total == 3
     assert sum(d["bad"] for d in dyn) == 1
+    assert sum(d["good"] for d in dyn) == 2
     days = [d["day"] for d in dyn]
     assert days == sorted(days, reverse=True)
     assert "2020-01-01" in days

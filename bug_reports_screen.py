@@ -547,13 +547,35 @@ class BugReportsScreen(BaseScreen):
             return
         if not self._guard_card():
             return
-        if not confirm(self, "Подтверждение",
-                       f"Удалить багов: {len(ids)}?"):
+        # Цели с дубликатами — одним подтверждением вместе с ними.
+        casc: dict = {}
+        try:
+            for bid in ids:
+                kids = bugs.duplicate_children(self.project_path, bid)
+                kids = [k for k in kids if k != bid]
+                if kids:
+                    casc[bid] = kids
+        except Exception:
+            pass
+        if casc:
+            parts = "; ".join(f"#{t} (+{', '.join('#' + str(k) for k in ks)})"
+                              for t, ks in casc.items())
+            if not confirm(self, "Подтверждение",
+                           f"Удалить вместе с дубликатами: {parts}?"):
+                return
+        elif not confirm(self, "Подтверждение",
+                         f"Удалить багов: {len(ids)}?"):
             return
         ok, errs = 0, []
+        doomed = {k for ks in casc.values() for k in ks}
         for bid in ids:
+            if bid in doomed:
+                # уже снесён каскадом вместе с целью — не ошибка
+                ok += 1
+                continue
             try:
-                bugs.delete_bug(self.project_path, bid)
+                bugs.delete_bug(self.project_path, bid,
+                                cascade=bid in casc)
                 ok += 1
             except ValueError as e:
                 errs.append(f"#{bid}: {e}")

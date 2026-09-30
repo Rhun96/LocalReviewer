@@ -27,11 +27,30 @@ logger = logging.getLogger(__name__)
 class _CheckDelegate(QStyledItemDelegate):
     """Индикатор галки колонки 0: один, наш, без двойной отрисовки.
 
-    Делегат библиотеки рисует свой бокс, а потом базовый Qt — второй
-    со сдвигом («расходятся» без ховера). Здесь красим сами один раз:
-    скруглённый бокс 19px, выбранный — зелёный с белым тиком.
+    Геометрия — из стиля Qt (subElementRect): тот же прямоугольник
+    использует хит-тест, поэтому нарисованное и кликабельное совпадают
+    на любых метриках. Выбранный — зелёный с белым тиком.
     Текста в колонке нет, фон выделения — приглушённый.
     """
+
+    @staticmethod
+    def box_rect(style, option) -> tuple:
+        """(x, y, s): квадрат индикатора в координатах ячейки.
+
+        Виджет в subElementRect НЕ передаём: в paint он может быть
+        уже наполовину снесён (ловили access violation в тестах) —
+        дефолтных метрик достаточно, они детерминированы.
+        """
+        try:
+            r = style.subElementRect(
+                QStyle.SubElement.SE_ItemViewItemCheckIndicator,
+                option, None)
+            s = min(r.width(), r.height())
+            if s >= 12:
+                return r.x(), r.y(), s
+        except Exception:
+            pass
+        return option.rect.x() + 5, option.rect.center().y() - 9, 19
 
     def paint(self, painter, option, index):
         from styles import COLORS as _CC
@@ -48,9 +67,11 @@ class _CheckDelegate(QStyledItemDelegate):
                     Qt.ItemDataRole.CheckStateRole)))
             except (TypeError, ValueError):
                 state = Qt.CheckState.Unchecked
-            box = 19
-            x = rect.x() + 5
-            y = rect.center().y() - box // 2
+            try:
+                from PySide6.QtWidgets import QApplication as _QA
+                x, y, s = self.box_rect(_QA.style(), option)
+            except Exception:
+                x, y, s = rect.x() + 5, rect.center().y() - 9, 19
             painter.setRenderHint(QPainter.RenderHint.Antialiasing)
             if state == Qt.CheckState.Checked:
                 painter.setPen(_QC(_CC["green_main"]))
@@ -58,15 +79,16 @@ class _CheckDelegate(QStyledItemDelegate):
             else:
                 painter.setPen(_QC(_CC["gray"]))
                 painter.setBrush(_QC(_CC["bg_dark"]))
-            painter.drawRoundedRect(QRectF(x, y, box, box), 4.5, 4.5)
+            painter.drawRoundedRect(QRectF(x, y, s, s), 4.5, 4.5)
             if state == Qt.CheckState.Checked:
                 pen = QPen(_QC(_CC["pure_white"]))
-                pen.setWidth(2)
+                pen.setWidth(max(2, s // 9))
                 pen.setCapStyle(Qt.PenCapStyle.RoundCap)
                 painter.setPen(pen)
                 painter.drawPolyline(
-                    (QPointF(x + 5, y + 10), QPointF(x + 8.5, y + 13.5),
-                     QPointF(x + 14, y + 6)))
+                    (QPointF(x + s * 0.26, y + s * 0.52),
+                     QPointF(x + s * 0.45, y + s * 0.71),
+                     QPointF(x + s * 0.74, y + s * 0.32)))
         finally:
             painter.restore()
 
@@ -468,7 +490,9 @@ class TableMixin:
         self.cases_table.doubleClicked.connect(self.on_table_double_click)
         try:
             self.cases_table.itemChanged.connect(self._on_item_changed)
-            self.cases_table.clicked.connect(self._on_table_clicked)
+            # pressed, а не clicked: срабатывает раньше всех потребителей
+            # события (часть релизов clicked вообще не доходит).
+            self.cases_table.pressed.connect(self._on_table_clicked)
         except Exception:
             pass
         try:
@@ -829,10 +853,36 @@ class TableMixin:
             self.show_error("Не удалось загрузить таблицу", e)
 
     def _on_table_clicked(self, index):
-        """Клик по галке: тумблер вручную (NoEditTriggers гасит штатный)."""
+        """Клик по колонке галок: строка выделяется всегда + тумблер.
+
+        Тумблер — по всей ячейке (колонка 30px, мимо квадрата
+        промахнуться некуда). Антидребезг 0.5с на строке: вторая
+        половина даблклика иначе молча откатывает первую.
+        """
         try:
             if index.column() != 0:
                 return
+            try:
+                self.cases_table.blockSignals(True)
+                self.cases_table.selectRow(index.row())
+                self.cases_table.setCurrentCell(index.row(), 0)
+            except Exception:
+                pass
+            finally:
+                try:
+                    self.cases_table.blockSignals(False)
+                except Exception:
+                    pass
+            try:
+                import time as _time
+                _last = getattr(self, "_last_toggle", None) or {}
+                _now = _time.monotonic()
+                if _now - float(_last.get(index.row(), 0.0)) < 0.5:
+                    return
+                _last[index.row()] = _now
+                self._last_toggle = _last
+            except Exception:
+                pass
             item = self.cases_table.item(index.row(), 0)
             if item is None:
                 return

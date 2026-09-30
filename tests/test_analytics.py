@@ -109,6 +109,27 @@ def test_severity_dist_lists_categories():
     assert rows["medium"]["cats"][0]["name"] == "Полнота"
 
 
+def test_top_categories_include_subs():
+    from taxonomy_service import set_case_error
+    import analytics_service as an
+    p = _proj()
+    ids = get_filtered_case_ids(p, {})
+    bulk_set_status(p, ids, "bad")
+    with db(p) as conn:
+        cat = conn.execute("SELECT category_id FROM error_categories "
+                           "WHERE code='correctness'").fetchone()
+        sub = conn.execute("SELECT category_id FROM error_categories "
+                           "WHERE code='correctness.hallucination'").fetchone()
+    set_case_error(p, ids[0], cat["category_id"], sub["category_id"], "high")
+    set_case_error(p, ids[1], cat["category_id"], sub["category_id"], "high")
+    top = an.top_categories(p, {})
+    assert len(top) == 1
+    assert top[0]["name"] == "Правильность"
+    assert top[0]["subs"] == [
+        {"subcategory_id": sub["category_id"], "name": "Галлюцинация",
+         "n": 2}]
+
+
 def test_files_quality_completeness_and_dirt():
     from report_service import get_files_quality
     p = _proj()

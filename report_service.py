@@ -217,10 +217,20 @@ def get_personal_stats(project_path: str) -> dict:
     with db(project_path) as conn:
         cur = conn.cursor()
         overall = get_overall_report(project_path)
+        # Тренд — по дню ПЕРВОГО вердикта (MIN status_changed), а не
+        # последнего касания: комментарии/переразметки/bulk двигают
+        # annotations.updated_at и врали разбивку по дням. Без истории
+        # (импортные unreviewed) — не размечено, в тренд не входит.
         by_day = [dict(r) for r in cur.execute("""
-            SELECT date(updated_at) AS day, COUNT(*) AS n FROM annotations
-            WHERE updated_at IS NOT NULL
-            GROUP BY date(updated_at) ORDER BY day DESC LIMIT 30
+            SELECT day, COUNT(*) AS n FROM (
+                SELECT substr(MIN(h.created_at), 1, 10) AS day
+                FROM history h
+                JOIN cases c ON c.case_id = h.case_id
+                JOIN files f ON f.file_id = c.file_id
+                WHERE h.event_type = 'status_changed'
+                  AND COALESCE(c.hidden, 0) = 0
+                GROUP BY h.case_id
+            ) GROUP BY day ORDER BY day DESC LIMIT 30
         """).fetchall()]
         errors = [dict(r) for r in cur.execute("""
             SELECT COALESCE(ec.name, '(без категории)') AS category,

@@ -46,6 +46,40 @@ def test_conflicts_default_threshold_catches_paraphrase():
     assert res["total"] == 1, res
 
 
+def test_conflicts_pair_preview_and_open():
+    """Превью пары без прыжков; открыть — первый кейс пары."""
+    from PySide6.QtWidgets import QApplication
+    QApplication.instance() or QApplication([])
+    from consistency_dialog import ConsistencyDialog
+    p = _proj([{"q": "как обменять билет на поезд на другую дату"},
+               {"q": "как обменять билет на поезд на другую дату!"},
+               {"q": "нужна ли виза в турцию"}])
+    ids = get_filtered_case_ids(p, {})
+    bulk_set_status(p, [ids[0]], "good")
+    bulk_set_status(p, [ids[1]], "bad")
+    d = ConsistencyDialog(p, None)
+    try:
+        d.show()
+        for i in range(d.cf_thr.count()):
+            if d.cf_thr.itemData(i) == 0.3:
+                d.cf_thr.setCurrentIndex(i)
+                break
+        d._find_conflicts()
+        assert d.cf_list.count() == 1
+        assert d.cf_pair_a.toPlainText() and d.cf_pair_b.toPlainText()
+        assert "обменять билет" in d.cf_pair_a.toPlainText()
+        d._open_selected()
+        assert d.result_case_id in (ids[0], ids[1])
+        # кнопки пары ведут к кейсам 1 и 2
+        d._pair_ids = (ids[0], ids[1])
+        d._open_pair_case(0)
+        assert d.result_case_id == ids[0]
+        d._open_pair_case(1)
+        assert d.result_case_id == ids[1]
+    finally:
+        d.close()
+
+
 def test_qc_sample():
     import consistency_service as qc
     p = _proj([{"q": "a1"}, {"q": "a2"}, {"q": "a3"}, {"q": "a4"}, {"q": "a5"}])

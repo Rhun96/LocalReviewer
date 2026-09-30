@@ -1082,6 +1082,12 @@ class CaseMixin:
         if new != prev.strip():
             self._last_single = {"kind": "comment", "case_id": self.current_case_id,
                                  "old": prev, "new": new}
+            # Таблица иначе показывает старый комментарий до первой
+            # перезагрузки (фильтр «с комментарием» — тем более).
+            try:
+                self.load_table_data()
+            except Exception:
+                pass
 
     def toggle_hide_current(self):
         """Скрыть/показать текущий кейс (не удаление!). После скрытия — дальше."""
@@ -1213,6 +1219,10 @@ class CaseMixin:
         self._last_single = None
         self._review_finished = False
         notify(self, "success", "Отмена", "Действие отменено")
+        try:
+            self.load_table_data()
+        except Exception:
+            pass
         if act["kind"] in ("hide", "unhide"):
             # Возвращённый кейс снова в ротации: пересобрать выборку.
             try:
@@ -1395,6 +1405,15 @@ class CaseMixin:
                             (case_id, event_type, field_name, old_value, new_value, created_at)
                         VALUES (?, 'status_changed', 'status', ?, ?, ?)
                     """, (self.current_case_id, old_status, status, now))
+            if not is_bad:
+                # Причина от «Плохо» не живёт на не-плохом вердикте:
+                # слетает и нигде не хранится (в истории — только факт
+                # снятия). set_case_error(None) молчит, если причины не было.
+                try:
+                    from taxonomy_service import set_case_error as _clear_err
+                    _clear_err(self.project_path, self.current_case_id, None)
+                except Exception:
+                    pass
             self.current_case['status'] = status
             self.current_case['comment'] = comment or None
             if old_status != status:

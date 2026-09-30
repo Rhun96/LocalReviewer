@@ -59,6 +59,12 @@ def bulk_set_status(project_path: str, case_ids: list, status: str,
     if not case_ids:
         return 0
     now = utcnow()
+    try:
+        from review_profile_service import code_to_base as _c2b
+        _base = (_c2b(project_path) or {}).get(status, status)
+    except Exception:
+        _base = status
+    _clear_causes = (_base != "bad")
     with db(project_path) as conn:
         cur = conn.cursor()
         cur.execute(
@@ -68,6 +74,7 @@ def bulk_set_status(project_path: str, case_ids: list, status: str,
         )
         op_id = cur.lastrowid
         done = 0
+        changed: list = []
         for chunk in _tracked(case_ids, progress_callback, cancel_event):
             ph = ",".join(["?"] * len(chunk))
             old = {r["case_id"]: r["status"] for r in cur.execute(
@@ -86,6 +93,27 @@ def bulk_set_status(project_path: str, case_ids: list, status: str,
                 cur.execute(
                     _ITEMS_INSERT, (op_id, cid, "status", old_status, status))
                 done += 1
+                changed.append(cid)
+        if _clear_causes and changed:
+            # Причины от «Плохо» слетают пакетно (история — только факт).
+            for i in range(0, len(changed), 500):
+                _ch = changed[i:i + 500]
+                _ph = ",".join(["?"] * len(_ch))
+                _had = {r["case_id"] for r in cur.execute(
+                    f"SELECT case_id FROM case_errors WHERE case_id IN ({_ph})",
+                    _ch)}
+                if not _had:
+                    continue
+                _hp = ",".join(["?"] * len(_had))
+                cur.execute(f"DELETE FROM case_errors WHERE case_id IN ({_hp})",
+                            list(_had))
+                cur.executemany("""
+                    INSERT INTO history
+                        (case_id, event_type, field_name, old_value,
+                         new_value, created_at)
+                    VALUES (?, 'category_changed', 'error', 'set',
+                            'cleared', ?)
+                """, [(c, now) for c in _had])
         cur.execute("UPDATE bulk_operations SET case_count=? WHERE operation_id=?",
                     (done, op_id))
     logger.info("bulk set_status=%s done=%s/%s op=%s",

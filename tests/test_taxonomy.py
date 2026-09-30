@@ -76,3 +76,55 @@ def test_custom_and_rename():
         raise AssertionError("should raise")
     except ValueError:
         pass
+
+
+def _comp_ids(p):
+    from database import db
+    with db(p) as conn:
+        cat = conn.execute("SELECT category_id FROM error_categories "
+                           "WHERE code='correctness'").fetchone()
+        sub = conn.execute("SELECT category_id FROM error_categories "
+                           "WHERE code='correctness.hallucination'").fetchone()
+    return cat["category_id"], sub["category_id"]
+
+
+def test_cause_drops_when_leaving_bad_single():
+    """Плохо → Хорошо: причина слетает и нигде не хранится."""
+    from PySide6.QtWidgets import QApplication
+    QApplication.instance() or QApplication([])
+    from bulk_operation_service import bulk_set_status
+    from database import db
+    from filter_service import get_filtered_case_ids
+    from review_screen import ReviewScreen
+    p = _proj()
+    ids = get_filtered_case_ids(p, {})
+    bulk_set_status(p, [ids[0]], "bad")
+    cat, sub = _comp_ids(p)
+    set_case_error(p, ids[0], cat, sub, "high")
+    assert get_case_error(p, ids[0]) is not None
+    w = ReviewScreen(p)
+    try:
+        w.show()
+        w.load_case(w.case_ids.index(ids[0]))
+        w.set_status("good")
+        assert get_case_error(p, ids[0]) is None
+        with db(p) as conn:
+            n = conn.execute("SELECT COUNT(*) AS c FROM case_errors "
+                             "WHERE case_id=?", (ids[0],)).fetchone()["c"]
+            assert n == 0
+    finally:
+        w.close()
+
+
+def test_cause_drops_when_leaving_bad_bulk():
+    from bulk_operation_service import bulk_set_status
+    from filter_service import get_filtered_case_ids
+    p = _proj()
+    ids = get_filtered_case_ids(p, {})
+    bulk_set_status(p, ids, "bad")
+    cat, sub = _comp_ids(p)
+    for cid in ids:
+        set_case_error(p, cid, cat, sub, "high")
+    bulk_set_status(p, ids, "good")
+    for cid in ids:
+        assert get_case_error(p, cid) is None

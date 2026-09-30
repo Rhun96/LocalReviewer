@@ -289,6 +289,14 @@ def test_quality_dynamics_block():
         assert w.quality_sev.rowCount() == 1
         assert w.quality_sev.item(0, 0).text() == "Высокая"
         assert "Правильность" in w.quality_sev.item(0, 3).text()
+        # категории: 4-я колонка — подкатегории; сводка — тоже с ними
+        assert w.quality_cats.columnCount() == 4
+        assert "Галлюцинация" in w.quality_cats.item(0, 3).text()
+        w.tabs.setCurrentWidget(w.summary_tab)
+        w.load_summary_report()
+        _top_texts = [w.summary_top.item(r).text()
+                      for r in range(w.summary_top.count())]
+        assert any("Галлюцинация" in t for t in _top_texts)
         # таблицы влезают целиком (внутреннего скролла нет)
         for t in (w.quality_verdicts, w.quality_sev,
                   w.quality_cats, w.quality_dyn):

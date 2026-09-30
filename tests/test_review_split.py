@@ -236,3 +236,41 @@ def test_answer_browser_readable_height():
         assert b.sizePolicy().verticalPolicy() == QSizePolicy.Policy.Expanding
     finally:
         w.close()
+
+
+def _comment_cell(w, case_id: int):
+    from PySide6.QtCore import Qt
+    col = list(w.selected_columns).index("Комментарий") + 1
+    for r in range(w.cases_table.rowCount()):
+        item = w.cases_table.item(r, 1)
+        if item is not None and item.data(Qt.ItemDataRole.UserRole) == case_id:
+            return w.cases_table.item(r, col).text()
+    return None
+
+
+def test_comment_save_and_undo_refresh_table():
+    """Комментарий в таблице — живой: правится и откатывается без
+    ручной перезагрузки."""
+    from PySide6.QtWidgets import QApplication
+    from constants import TABLE_SYSTEM_COLUMNS
+    w = _make_window()
+    try:
+        app = QApplication.instance()
+        w.show()
+        app.processEvents()
+        w.selected_columns = list(TABLE_SYSTEM_COLUMNS)
+        w.load_case(0)
+        cid = w.current_case_id
+        w.comment_edit.setPlainText("hello")
+        w.save_comment_manual()
+        app.processEvents()
+        assert _comment_cell(w, cid) == "hello"
+        w.comment_edit.clear()
+        w.save_comment_manual()
+        app.processEvents()
+        assert _comment_cell(w, cid) == ""
+        w.undo_single()
+        app.processEvents()
+        assert _comment_cell(w, cid) == "hello"
+    finally:
+        w.close()

@@ -212,6 +212,25 @@ def test_case_context_and_personal_stats():
     assert stats["regressions"]["total"] == 0
 
 
+def test_personal_trend_counts_first_verdict_day():
+    """Тренд — день первого вердикта, а не последнего касания;
+    неразмеченные в тренд не входят."""
+    from database import db
+    from report_service import get_personal_stats
+    p = _proj()
+    ids = get_filtered_case_ids(p, {})
+    from bulk_operation_service import bulk_set_status
+    bulk_set_status(p, [ids[0]], "good")
+    bulk_set_status(p, [ids[0]], "bad")  # переразметка позже
+    with db(p) as conn:
+        conn.execute("UPDATE history SET created_at='2020-05-01 10:00:00' "
+                     "WHERE case_id=?", (ids[0],))
+        conn.execute("UPDATE annotations SET updated_at='2026-09-28 10:00:00' "
+                     "WHERE case_id=?", (ids[0],))
+    by_day = get_personal_stats(p)["by_day"]
+    assert by_day == [{"day": "2020-05-01", "n": 1}]
+
+
 def test_bug_export_formats():
     import bug_export_service as bex
     p = _proj()
@@ -269,6 +288,19 @@ def test_duplicates_mark_unmark_merge():
     bugs.delete_bug(p, c)
     bugs.delete_bug(p, b)
     bugs.delete_bug(p, a)
+    assert bugs.list_bugs(p) == []
+
+
+def test_delete_cascade_with_duplicates():
+    p = _proj()
+    a = bugs.create_bug(p, "корень")
+    b = bugs.create_bug(p, "дубль")
+    bugs.mark_duplicate(p, b, a)
+    assert bugs.duplicate_children(p, a) == [b]
+    assert bugs.duplicate_children(p, b) == []
+    with pytest.raises(ValueError):
+        bugs.delete_bug(p, a)
+    bugs.delete_bug(p, a, cascade=True)
     assert bugs.list_bugs(p) == []
 
 

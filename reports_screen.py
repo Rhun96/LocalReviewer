@@ -493,9 +493,9 @@ class ReportsScreen(BaseScreen):
         layout.addWidget(QLabel("Категории (клик — кейсы):"))
         from PySide6.QtWidgets import QTableWidget as _TW2
         self.quality_cats = _TW2()
-        self.quality_cats.setColumnCount(3)
+        self.quality_cats.setColumnCount(4)
         self.quality_cats.setHorizontalHeaderLabels(
-            ["Категория", "Проблем", "Доля %"])
+            ["Категория", "Проблем", "Доля %", "Подкатегории"])
         self.quality_cats.itemClicked.connect(self._drill_cat)
         layout.addWidget(self.quality_cats)
         self.quality_dyn_label = QLabel("Динамика причин по неделям:")
@@ -715,7 +715,11 @@ class ReportsScreen(BaseScreen):
             self.summary_top.addItem(it)
         for t in top:
             share = f" — {t['share']}%" if t["share"] is not None else ""
-            it = _LWI(f"{t['name']}: {t['problems']}{share}")
+            subs = ", ".join(f"{s['name']}: {s['n']}"
+                             for s in (t.get("subs") or []))
+            if subs:
+                subs = f" ({subs})"
+            it = _LWI(f"{t['name']}: {t['problems']}{share}{subs}")
             it.setData(_Qt.ItemDataRole.UserRole, t["category_id"])
             self.summary_top.addItem(it)
 
@@ -786,6 +790,9 @@ class ReportsScreen(BaseScreen):
             self.quality_cats.setItem(i, 1, QTableWidgetItem(str(t["problems"])))
             share = "" if t["share"] is None else f"{t['share']}%"
             self.quality_cats.setItem(i, 2, QTableWidgetItem(share))
+            _subs_txt = ", ".join(
+                f"{s['name']} ({s['n']})" for s in (t.get("subs") or []))
+            self.quality_cats.setItem(i, 3, QTableWidgetItem(_subs_txt))
         self.quality_cats.resizeColumnsToContents()
         self._fit_table_to_content(self.quality_cats)
         try:
@@ -1182,7 +1189,8 @@ class ReportsScreen(BaseScreen):
             rows.append(("Замеров", _t["count"]))
             rows.append(("Итого времени", _an.fmt_duration(_t["total_s"])))
             for _s in (_t.get("slowest") or [])[:5]:
-                rows.append((f"Долго: {_s['source_id'] or _s['case_id']}",
+                _sid = str(_s['source_id'] or _s['case_id'])
+                rows.append((f"Долго: {_sid[:8]}",
                              _an.fmt_duration(_s["duration_s"])))
         else:
             rows.append(("Замеры", "нет (копятся с этого обновления)"))

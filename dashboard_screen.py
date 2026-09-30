@@ -319,6 +319,7 @@ class DashboardScreen(BaseScreen):
             pal = _FD if effective_theme() == "dark" else _FL
             days = [_day_label(p["day"]) for p in pts]
             rev = [p["reviewed"] for p in pts]
+            good = [p.get("good", 0) for p in pts]
             bad = [p["bad"] for p in pts]
             plt.style.use("dark_background" if effective_theme() == "dark"
                           else "default")
@@ -327,6 +328,8 @@ class DashboardScreen(BaseScreen):
             ax.set_facecolor(pal["bg"])
             ax.plot(days, rev, marker="o", markersize=3,
                     color=_SEM["success"], linewidth=2, label="Проверено")
+            ax.plot(days, good, marker="o", markersize=3,
+                    color=_SEM["info"], linewidth=2, label="Хороших")
             ax.plot(days, bad, marker="o", markersize=3,
                     color=_SEM["danger"], linewidth=2, label="Плохих")
             ax.grid(True, alpha=0.25, linestyle="--")
@@ -336,7 +339,8 @@ class DashboardScreen(BaseScreen):
                 tick.set_rotation(30)
                 tick.set_ha("right")
             ax.legend(facecolor=pal["bg"], edgecolor=pal["text"],
-                      labelcolor=pal["text"], fontsize=9)
+                      labelcolor=pal["text"], fontsize=9,
+                      bbox_to_anchor=(1.02, 1.0), loc="upper left")
             for spine in ax.spines.values():
                 spine.set_color(pal["border"])
             fig.tight_layout()
