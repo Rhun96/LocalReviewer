@@ -85,6 +85,37 @@ def test_compare_and_preferences():
         m.compare_runs(p, a, 9999)
 
 
+def test_roundrobin_matrix_and_standings():
+    """Круговая таблица: все пары разом, места из предпочтений."""
+    p = _proj()
+    a = m.create_run(p, "A", "mx")
+    b = m.create_run(p, "B", "mx")
+    c = m.create_run(p, "C", "mx")
+    for r in (a, b, c):
+        m.import_run_rows(p, r, [
+            {"source_id": "k1", "answer": f"ans {r} 1"},
+            {"source_id": "k2", "answer": f"ans {r} 2"}])
+    m.set_preference(p, a, b, "src:k1", "a_better")
+    m.set_preference(p, a, b, "src:k2", "tie")
+    m.set_preference(p, b, c, "src:k1", "b_better")
+    m.set_preference(p, c, a, "src:k2", "a_better")
+    res = m.roundrobin_matrix(p, [a, b, c])
+    assert [r["run_id"] for r in res["runs"]] == [a, b, c]
+    assert len(res["pairs"]) == 3
+    by_pair = {(x["a"], x["b"]): x for x in res["pairs"]}
+    ab = by_pair[(a, b)]
+    assert (ab["wins_a"], ab["wins_b"], ab["ties"]) == (1, 0, 1)
+    assert ab["common"] == 2 and ab["unjudged"] == 0
+    bc = by_pair[(b, c)]
+    assert bc["wins_b"] == 1 and bc["unjudged"] == 1
+    assert [s["run_id"] for s in res["standings"]] == [c, a, b]
+    assert res["standings"][0]["score"] == 2.0
+    with pytest.raises(ValueError):
+        m.roundrobin_matrix(p, [a])
+    with pytest.raises(ValueError):
+        m.roundrobin_matrix(p, [a, 9999])
+
+
 def test_run_answer_product_and_metadata():
     import json as _json
     p = _proj()
@@ -186,5 +217,181 @@ def test_compare_side_marks_and_severity():
         dlg.show()
         assert "Критичность: высокая" in dlg.pane_a.toPlainText()
         assert "Плохих A: 1" in dlg.stats.text(), dlg.stats.text()
+        assert "Δ Bad" in dlg.stats.text(), dlg.stats.text()
     finally:
         dlg.close()
+
+
+def test_bulk_review_marks_cells_and_copies():
+    """Массовая разметка: ячейка, автопереход, копия на все ответы кейса."""
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtWidgets import QApplication
+    QApplication.instance() or QApplication([])
+    import regression_service as rg
+    from bulk_review_dialog import BulkReviewDialog
+    p = _proj()
+    a = m.create_run(p, "A", "mx")
+    b = m.create_run(p, "B", "mx")
+    for r in (a, b):
+        m.import_run_rows(p, r, [{"source_id": "k1", "answer": "xa"},
+                                 {"source_id": "k2", "answer": "xb"}])
+    d = BulkReviewDialog(p, [a, b], None)
+    try:
+        d.show()
+        assert len(d._keys) == 2 and len(d.panes) == 2
+        d.keys_list.setCurrentRow(0)
+        d._set_status("good")
+        assert rg.output_review_stats(p, a)["reviewed"] == 1
+        assert d._active == 1 and d._current_key() == "src:k1"
+        d._select_run(a)
+        d._apply_to_all()
+        assert rg.output_review_stats(p, b)["reviewed"] == 1
+        assert "2/4" in d.title.text(), d.title.text()
+    finally:
+        d.close()
+
+
+def test_bulk_review_comment_autosaves_like_review():
+    """Коммент живёт без статуса: уход с ячейки сохраняет, как в ревью."""
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtWidgets import QApplication
+    QApplication.instance() or QApplication([])
+    import regression_service as rg
+    from bulk_review_dialog import BulkReviewDialog
+    p = _proj()
+    a = m.create_run(p, "A", "mx")
+    m.import_run_rows(p, a, [{"source_id": "k1", "answer": "xa"},
+                             {"source_id": "k2", "answer": "xb"}])
+    rg.set_output_review(p, a, "src:k1", "good", "старый коммент")
+    d = BulkReviewDialog(p, [a], None)
+    try:
+        d.show()
+        d.keys_list.setCurrentRow(0)
+        # открытие не затёрло коммент пустотой
+        assert d.comment_edit.toPlainText() == "старый коммент"
+        assert rg.list_output_reviews(p, a)[0]["review_comment"] == \
+            "старый коммент"
+        # набрали новый, ушли без статуса — сохранился, статус цел
+        d.comment_edit.setPlainText("новый коммент")
+        d.keys_list.setCurrentRow(1)
+        rows = {r["stable_key"]: r
+                for r in rg.list_output_reviews(p, a)}
+        assert rows["src:k1"]["review_comment"] == "новый коммент"
+        assert rows["src:k1"]["review_status"] == "good"
+        assert rows["src:k2"]["review_comment"] in (None, "")
+    finally:
+        d.close()
+
+
+def test_run_surfaces_show_case_topic():
+    """Тема видна при разметке/сравнении прогонов (и своя «Тема»)."""
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtWidgets import QApplication
+    QApplication.instance() or QApplication([])
+    from importer import import_file
+    import tempfile
+    from database import init_database
+    p = tempfile.mkdtemp()
+    init_database(p)
+    import_file(p, "t.xlsx", "excel", "S", 0,
+                {"q": "primary_text", "t": "custom:Тема", "i": "source_id"},
+                [{"q": "где билет", "t": "Возвраты", "i": "k1"}])
+    a = m.create_run(p, "A", "mx")
+    b = m.create_run(p, "B", "mx")
+    for r in (a, b):
+        m.import_run_rows(p, r, [{"source_id": "k1", "answer": "ans"}])
+    assert m.compare_runs(p, a, b)["rows"][0]["topic_case"] == "Возвраты"
+    from run_review_dialog import RunReviewDialog
+    d1 = RunReviewDialog(p, a, None)
+    try:
+        d1.show()
+        assert "Возвраты" in d1.prompt_label.text(), \
+            d1.prompt_label.text()
+    finally:
+        d1.close()
+    from bulk_review_dialog import BulkReviewDialog
+    d2 = BulkReviewDialog(p, [a, b], None)
+    try:
+        d2.show()
+        assert "Возвраты" in d2.prompt_label.text(), \
+            d2.prompt_label.text()
+    finally:
+        d2.close()
+    from compare_dialog import CompareDialog
+    d3 = CompareDialog(p, a, b, None)
+    try:
+        d3.show()
+        assert "Возвраты" in d3.prompt_label.text(), \
+            d3.prompt_label.text()
+    finally:
+        d3.close()
+
+
+def test_export_run_marks_roundtrip():
+    """Выгрузка разметки читается импортом 1-в-1 (круг без потерь)."""
+    import os
+    import regression_service as rg
+    import export_service as ex
+    from run_marks_io_service import read_marks_table, preview_marks
+    p = _proj()
+    a = m.create_run(p, "A", "mx")
+    m.import_run_rows(p, a, [{"source_id": "k1", "answer": "xa"},
+                             {"source_id": "k2", "answer": "xb"}])
+    rg.set_output_review(p, a, "src:k1", "bad", "Критичность: высокая\nплохо")
+    rg.set_output_review(p, a, "src:k2", "good", None)
+    path = os.path.join(p, "marks.xlsx")
+    out = ex.export_run_marks(p, a, path)
+    assert os.path.exists(out)
+    from openpyxl import load_workbook
+    wb = load_workbook(out)
+    ws = wb.active
+    assert [c.value for c in ws[1]] == ["ID", "Вопрос", "Ответ", "Статус",
+                                        "Комментарий", "Тяжесть"]
+    assert ws.max_row == 3
+    headers, rows, errors = read_marks_table(out)
+    assert not errors
+    mapping = {"id": "ID", "status": "Статус", "comment": "Комментарий",
+               "severity": "Тяжесть"}
+    rep = preview_marks(p, a, rows, mapping)
+    assert rep["errors"] == [] and rep["not_found"] == []
+    assert len(rep["unchanged"]) == 2
+    import pytest as _pt
+    with _pt.raises(ValueError):
+        ex.export_run_marks(p, 999999, os.path.join(p, "x.xlsx"))
+
+
+def test_export_run_marks_multi_sheet():
+    """Мульти-выгрузка: по листу на прогон, каждый читается импортом."""
+    import os
+    import export_service as ex
+    from run_marks_io_service import read_marks_table, preview_marks
+    p = _proj()
+    a = m.create_run(p, "A", "mx")
+    b = m.create_run(p, "B", "mx")
+    m.import_run_rows(p, a, [{"source_id": "k1", "answer": "xa"}])
+    m.import_run_rows(p, b, [{"source_id": "k1", "answer": "xb"},
+                             {"source_id": "k2", "answer": "xc"}])
+    import regression_service as rg
+    rg.set_output_review(p, b, "src:k1", "bad", None)
+    path = os.path.join(p, "multi.xlsx")
+    out = ex.export_run_marks(p, [a, b], path)
+    assert os.path.exists(out)
+    from openpyxl import load_workbook
+    wb = load_workbook(out)
+    assert wb.sheetnames == ["A", "B"]
+    assert wb["A"].max_row == 2 and wb["B"].max_row == 3
+    for sheet, rid in (("A", a), ("B", b)):
+        headers, rows, errors = read_marks_table(out, sheet)
+        assert not errors
+        mapping = {"id": "ID", "status": "Статус", "comment": "Комментарий",
+                   "severity": "Тяжесть"}
+        rep = preview_marks(p, rid, rows, mapping)
+        assert rep["errors"] == [] and rep["not_found"] == []
+        n = len(rows)
+        assert len(rep["unchanged"]) == n, (sheet, rep)
+    import pytest as _pt
+    with _pt.raises(ValueError):
+        ex.export_run_marks(p, [], os.path.join(p, "e.xlsx"))

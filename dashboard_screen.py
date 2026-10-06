@@ -136,6 +136,18 @@ class DashboardScreen(BaseScreen):
             _w.setVisible(False)
         layout.addLayout(scope_row)
 
+        att_title = QLabel("⚠️ Требует внимания")
+        att_title.setStyleSheet("font-size: 13px; font-weight: bold;")
+        layout.addWidget(att_title)
+        self.attention_list = QListWidget()
+        self.attention_list.setMaximumHeight(170)
+        self.attention_list.itemClicked.connect(self._open_attention)
+        layout.addWidget(self.attention_list)
+        try:
+            clear_in_fluent(self.attention_list)
+        except Exception:
+            pass
+
         from styles import SEMANTIC as _SEM
         cards_row = QHBoxLayout()
         cards_row.setSpacing(8)
@@ -299,7 +311,144 @@ class DashboardScreen(BaseScreen):
                 _QT.singleShot(100, self._maybe_render_chart)
         except Exception:
             pass
+        self._refresh_attention()
         self._load_recent()
+
+    def _refresh_attention(self):
+        """Быстрые детекторы сразу, тяжёлые пары — в фоне следом."""
+        import attention_service as _att
+        try:
+            fid = self.scope_combo.currentData()
+        except Exception:
+            fid = None
+        try:
+            self._attention_rows = _att.fast_snapshot(
+                self.project_path, fid)
+        except Exception:
+            self._attention_rows = []
+        self._render_attention()
+        try:
+            from PySide6.QtCore import QTimer as _QT
+            _QT.singleShot(200, self._refresh_attention_heavy)
+        except Exception:
+            pass
+
+    def _render_attention(self):
+        from PySide6.QtWidgets import QListWidgetItem as _LWI
+        from PySide6.QtCore import Qt as _Q
+        marks = {"critical": "🛑", "warning": "⚠️", "info": "ℹ️"}
+        try:
+            self.attention_list.clear()
+        except Exception:
+            return
+        rows = getattr(self, "_attention_rows", []) or []
+        if not rows:
+            it = _LWI("Тихо — ничего не требует внимания")
+            it.setFlags(it.flags() & ~_Q.ItemFlag.ItemIsSelectable)
+            self.attention_list.addItem(it)
+            return
+        for i, r in enumerate(rows):
+            it = _LWI(f"{marks.get(r['level'], '')} {r['title']}: "
+                      f"{r['count']} — {r.get('detail', '')}")
+            it.setData(_Q.ItemDataRole.UserRole, i)
+            self.attention_list.addItem(it)
+
+    def _refresh_attention_heavy(self):
+        import threading
+        import attention_service as _att
+        from workers import run_in_background as _run
+        proj = self.project_path
+        try:
+            fid = self.scope_combo.currentData()
+        except Exception:
+            fid = None
+        cancel_event = threading.Event()
+        try:
+            old = getattr(self, "_attention_cancel", None)
+            if old is not None:
+                try:
+                    old.set()
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        self._attention_cancel = cancel_event
+        stamp = int(getattr(self, "_attention_stamp", 0) or 0) + 1
+        self._attention_stamp = stamp
+
+        def _work():
+            holder: dict = {}
+            worker = _run(_att.heavy_counts, proj, fid, None,
+                          cancel_event)
+            holder["w"] = worker
+            worker.signals.progress.connect(lambda *_a: None)
+            worker.signals.finished.connect(_done)
+            worker.signals.error.connect(lambda _m: None)
+
+        def _done(extra):
+            try:
+                if getattr(self, "project_path", None) != proj:
+                    return
+                if getattr(self, "_attention_stamp", 0) != stamp:
+                    return
+                rows = list(getattr(self, "_attention_rows", []) or [])
+                seen = {r["code"] for r in rows}
+                for r in (extra or []):
+                    if r["code"] not in seen:
+                        rows.append(r)
+                self._attention_rows = rows
+                self._render_attention()
+            except Exception:
+                pass
+
+        try:
+            from PySide6.QtCore import QTimer as _QT
+            _QT.singleShot(0, _work)
+        except Exception:
+            pass
+
+    def _open_attention(self, item):
+        try:
+            idx = item.data(Qt.ItemDataRole.UserRole)
+            rows = getattr(self, "_attention_rows", []) or []
+            hit = rows[int(idx)] if idx is not None else None
+        except Exception:
+            hit = None
+        if not hit:
+            return
+        act = hit.get("action") or {}
+        screen = act.get("screen") or ""
+        try:
+            mw = getattr(getattr(self, "parent_window", None),
+                         "main_window", None)
+            if screen == "review":
+                if mw is None or not hasattr(mw, "show_screen"):
+                    return
+                mw.show_screen("review", dict(act.get("filters") or {}))
+                return
+            if screen in ("bugs", "launches"):
+                if mw is None or not hasattr(mw, "show_screen"):
+                    return
+                mw.show_screen(screen)
+                return
+            if screen == "consistency":
+                from consistency_dialog import ConsistencyDialog
+                ConsistencyDialog(self.project_path, self).exec()
+                try:
+                    self.refresh()
+                except Exception:
+                    pass
+                return
+            if screen == "maintenance":
+                from maintenance_dialog import IntegrityDialog
+                IntegrityDialog(self.project_path, self).exec()
+                try:
+                    self.refresh()
+                except Exception:
+                    pass
+                return
+        except Exception:
+            pass
 
     def _draw_chart(self, dyn):
         pts = sorted(dyn, key=lambda d: d["day"])[-30:]

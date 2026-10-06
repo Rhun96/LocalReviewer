@@ -574,3 +574,89 @@ def export_management_report(project_path: str, output_path: str, file_id=None) 
 
     _atomic_save(wb, out)
     return True
+
+
+def _run_marks_sheet_name(name: str, used: set) -> str:
+    """Имя листа: без запрещённых скобок и : * ? /, до 31 символа."""
+    base = "".join("_" if ch in '[]:*?/\\' else ch
+                   for ch in (name or "run").strip())[:31].strip() or "run"
+    title, n = base, 2
+    while title in used:
+        suffix = f"_{n}"
+        title = base[:31 - len(suffix)] + suffix
+        n += 1
+    used.add(title)
+    return title
+
+
+def export_run_marks(project_path: str, run_id, output_path: str) -> str:
+    """Разметка прогонов в xlsx — пара к импорту «Оценок из Excel».
+
+    Один ID — один лист «marks» (как раньше); список — по листу
+    на прогон (имя = прогон). Колонки ID/Статус/Комментарий/Тяжесть
+    читаются импортом 1-в-1 (круг выгрузка → правки → загрузка,
+    загрузка — по одному листу за раз); Вопрос/Ответ — контекст.
+    Тяжесть вынимается из префикса комментария («Критичность: ...»).
+    """
+    from openpyxl import Workbook
+    from run_marks_io_service import split_comment
+    if isinstance(run_id, (list, tuple, set)):
+        try:
+            rids = list(dict.fromkeys(int(r) for r in run_id))
+        except (TypeError, ValueError):
+            raise ValueError("Плохие ID прогонов") from None
+    else:
+        try:
+            rids = [int(run_id)]
+        except (TypeError, ValueError):
+            raise ValueError("Плохой ID прогона") from None
+    if not rids:
+        raise ValueError("Нужен хотя бы один прогон")
+    with db(project_path) as conn:
+        cur = conn.cursor()
+        names = {}
+        for rid in rids:
+            run = cur.execute("SELECT name FROM model_runs WHERE run_id=?",
+                              (rid,)).fetchone()
+            if not run:
+                raise ValueError(f"Прогон #{rid} не найден")
+            names[rid] = run["name"] or f"run_{rid}"
+        data = {}
+        for rid in rids:
+            data[rid] = cur.execute("""
+                SELECT a.stable_key, a.case_id, a.answer_text,
+                       c.source_id, c.primary_text,
+                       r.status AS review_status, r.comment AS review_comment
+                FROM run_answers a
+                LEFT JOIN cases c ON c.case_id = a.case_id
+                LEFT JOIN output_reviews r
+                  ON r.run_id = a.run_id AND r.stable_key = a.stable_key
+                WHERE a.run_id = ?
+                ORDER BY a.stable_key
+            """, (rid,)).fetchall()
+    out = _resolve_output(output_path)
+    wb = Workbook()
+    used: set = set()
+    first = True
+    for rid in rids:
+        ws = wb.active if first else wb.create_sheet()
+        first = False
+        ws.title = ("marks" if len(rids) == 1
+                    else _run_marks_sheet_name(names[rid], used))
+        ws.append(["ID", "Вопрос", "Ответ", "Статус", "Комментарий",
+                   "Тяжесть"])
+        for r in data[rid]:
+            ident = r["source_id"] or (str(r["case_id"]) if r["case_id"]
+                                       else r["stable_key"])
+            sev, body = split_comment(r["review_comment"] or "")
+            ws.append([
+                safe_cell(ident),
+                safe_cell((r["primary_text"] or "")[:500]),
+                safe_cell((r["answer_text"] or "")[:2000]),
+                safe_cell(r["review_status"] or ""),
+                safe_cell(body),
+                safe_cell(sev or ""),
+            ])
+    _atomic_save(wb, out)
+    logger.info("run marks exported: runs=%s -> %s", rids, out)
+    return str(out)

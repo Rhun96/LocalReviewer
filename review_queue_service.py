@@ -184,3 +184,67 @@ def queue_stats(project_path: str, file_id=None) -> dict:
         """, p).fetchone()["c"]
     return {"total": total, "reviewed": reviewed, "problematic": problematic,
             "bad": bad, "remaining": max(0, total - reviewed), "file_id": file_id}
+
+
+QUEUE_MODE_NAMES = {"normal": "обычная", "unreviewed": "непроверенные",
+                    "problematic": "проблемные"}
+
+
+def why_here(project_path: str, case_id: int,
+             queue_mode: str = "normal") -> dict:
+    """Почему кейс в очереди: режим + факторы ТОЙ ЖЕ формулы, что строит
+    очередь (compute_priority). Никаких объяснений постфактум: в normal
+    скоринга нет — reasons пустые, честно."""
+    try:
+        cid = int(case_id)
+    except (TypeError, ValueError):
+        return {"mode": queue_mode or "normal", "score": None, "reasons": []}
+    mode = queue_mode if queue_mode in QUEUE_MODES else "normal"
+    if mode == "normal":
+        return {"mode": mode, "score": None, "reasons": []}
+    reasons: list = [f"очередь: {QUEUE_MODE_NAMES.get(mode, mode)}"]
+    try:
+        with db(project_path) as conn:
+            cur = conn.cursor()
+            row = cur.execute("""
+                SELECT COALESCE(a.status, 'unreviewed') AS status
+                FROM cases c LEFT JOIN annotations a
+                    ON a.case_id = c.case_id
+                WHERE c.case_id = ?
+            """, (cid,)).fetchone()
+            if not row:
+                return {"mode": mode, "score": None, "reasons": reasons}
+            status = row["status"] or "unreviewed"
+            checks = cur.execute(
+                "SELECT severity FROM case_checks WHERE case_id=?",
+                (cid,)).fetchall()
+            discuss = bool(cur.execute("""
+                SELECT 1 FROM case_tags ct JOIN tags t
+                    ON t.tag_id = ct.tag_id
+                WHERE ct.case_id = ? AND t.tag_code = 'needs_discussion'
+            """, (cid,)).fetchone())
+        from review_profile_service import code_to_base as _ctb
+        try:
+            base = (_ctb(project_path) or {}).get(status, status)
+        except Exception:
+            base = status
+        n = len(checks)
+        wmap = {"critical": 100, "error": 60, "warning": 20, "info": 5}
+        max_w = max([wmap.get((r["severity"] or ""), 0) for r in checks],
+                    default=0)
+        if max_w >= 60:
+            max_sev = "error"
+        elif max_w >= 20:
+            max_sev = "warning"
+        else:
+            max_sev = "info"
+        weights = get_priority_weights(project_path)
+        score, fac = compute_priority(
+            bool(n), max_sev, n,
+            "unreviewed" if base == "unreviewed" else "good",
+            discuss, weights)
+        reasons.extend(fac)
+    except Exception as e:
+        logger.warning("why_here failed: %s", e)
+        return {"mode": mode, "score": None, "reasons": reasons}
+    return {"mode": mode, "score": score, "reasons": reasons}

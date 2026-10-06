@@ -368,6 +368,8 @@ class CaseMixin:
         menu.addSeparator()
         a_qc = menu.addAction("⚖️ Контроль качества")
         a_qc.triggered.connect(self.open_consistency)
+        a_ready = menu.addAction("✅ Проверить готовность")
+        a_ready.triggered.connect(self.open_readiness)
         anchor = getattr(self, "btn_more", None) or self
         try:
             menu.exec(anchor.mapToGlobal(anchor.rect().bottomLeft()))
@@ -686,7 +688,8 @@ class CaseMixin:
         mapping = self.current_file_mapping
         primary_cols = [col for col, role in mapping.items() if role == 'primary_text']
         response_cols = [col for col, role in mapping.items() if role == 'response_text']
-        topic = (metadata.get('topic') or '').strip()
+        from constants import topic_from_metadata as _topic_of
+        topic = _topic_of(metadata)
         topic_title = "📌 Тема"
         text_cols = list(primary_cols)
         if not topic and len(primary_cols) >= 2:
@@ -951,6 +954,25 @@ class CaseMixin:
             self.info_label.setToolTip(full)
         except Exception:
             pass
+        try:
+            from review_queue_service import why_here as _why
+            _w = _why(self.project_path, self.current_case_id,
+                      getattr(self, "queue_mode", "normal"))
+            _rs = [r for r in (_w.get("reasons") or [])]
+            if _rs:
+                _txt = "Почему здесь: " + "; ".join(_rs)
+                if _w.get("score") is not None:
+                    _txt += f" (приоритет {_w['score']})"
+                self.why_label.setText(_txt)
+                self.why_label.setToolTip(_txt)
+                self.why_label.setVisible(True)
+            else:
+                self.why_label.setVisible(False)
+        except Exception:
+            try:
+                self.why_label.setVisible(False)
+            except Exception:
+                pass
         self.update_finish_button()
         try:
             from bug_report_service import bugs_for_case

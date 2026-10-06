@@ -207,6 +207,12 @@ def import_file(
                     val = get_role_value(row, role)
                     if val:
                         metadata[_custom_name(role)] = val
+            # Свою «Тему» дублируем в topic (явная роль сильнее — её не трогаем).
+            for _k, _v in list(metadata.items()):
+                if str(_k).strip().lower() == "тема" and str(_v or "").strip():
+                    if not str(metadata.get("topic") or "").strip():
+                        metadata["topic"] = str(_v).strip()
+                    break
 
             content_hash = compute_content_hash(row)
             if content_hash in seen_hashes:

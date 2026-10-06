@@ -344,3 +344,24 @@ def test_runs_bulk_delete():
         _ = (ra, rb)
     finally:
         w.close()
+
+
+def test_custom_tema_alias_sets_topic():
+    """Своя категория «Тема» тоже считается темой (а не мёртвым полем)."""
+    from constants import topic_from_metadata as _tof
+    assert _tof({"topic": "Явная"}) == "Явная"
+    assert _tof({"Тема": "Своя"}) == "Своя"
+    assert _tof({"тема": "Своя"}) == "Своя"
+    assert _tof({"topic": "Явная", "Тема": "Своя"}) == "Явная"
+    assert _tof({}) == "" and _tof(None) == ""
+    p = tempfile.mkdtemp()
+    init_database(p)
+    import_file(p, "t.xlsx", "excel", "S", 0,
+                {"q": "primary_text", "t": "custom:Тема", "i": "source_id"},
+                [{"q": "q1", "t": "Про билеты", "i": "k1"}])
+    from database import db as _db
+    import json as _json
+    with _db(p) as conn:
+        md = _json.loads(conn.execute(
+            "SELECT metadata_json FROM cases").fetchone()[0])
+    assert md["topic"] == "Про билеты" and md["Тема"] == "Про билеты"

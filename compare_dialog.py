@@ -219,7 +219,22 @@ class CompareDialog(QDialog):
             f"Кейсов: {total} (оба: {c['both']}, только A: {c['only_a']}, "
             f"только B: {c['only_b']}) | Оценено: {judged} | "
             f"A лучше: {c['a_better']}, B лучше: {c['b_better']}, "
-            f"одинаково: {c['tie']}{self._side_summary()}")
+            f"одинаково: {c['tie']}{self._side_summary()}{self._delta_line()}")
+
+    def _delta_line(self) -> str:
+        """Δ Bad-rate сторон (факт, без «лучше»)."""
+        try:
+            n = len(self._rows)
+            if not n:
+                return ""
+            ba = sum(1 for r in self._rows if _side_is_bad(
+                self.project_path, r.get("status_a") or "unreviewed"))
+            bb = sum(1 for r in self._rows if _side_is_bad(
+                self.project_path, r.get("status_b") or "unreviewed"))
+            ra, rb = 100.0 * ba / n, 100.0 * bb / n
+            return f" | Δ Bad: {ra:.1f}% → {rb:.1f}% ({rb - ra:+.1f} п.п.)"
+        except Exception:
+            return ""
 
     def _current(self) -> dict | None:
         if 0 <= self._idx < len(self._rows):
@@ -252,7 +267,9 @@ class CompareDialog(QDialog):
         self.prompt_label.setText(
             f"📌 {prompt[:400]}{'…' if len(prompt) > 400 else ''}"
             f"\n🆔 {row.get('source_id') or row['stable_key']}"
-            + (f"\n🏷️ {prod}" if prod else ""))
+            + (f"\n🏷️ {prod}" if prod else "")
+            + (f"\n📰 Тема: {(row.get('topic_case') or '')[:120]}"
+               if (row.get("topic_case") or "").strip() else ""))
         html_a, html_b = _diff_html(row["answer_a"], row["answer_b"])
         try:
             from review_profile_service import status_display_name as _sdn

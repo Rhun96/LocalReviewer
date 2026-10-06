@@ -482,16 +482,24 @@ class ModelRunsScreen(BaseScreen):
         btn_import.clicked.connect(self._import_answers)
         btn_review = FPushButton("📝 Разметить ответы")
         btn_review.clicked.connect(self._review_answers)
+        btn_bulk = FPushButton("📝 Массово")
+        btn_bulk.setToolTip("Кейс + все ответы рядом: выдели прогоны (Ctrl+клик)")
+        btn_bulk.clicked.connect(self._bulk_review)
         btn_marks = FPushButton("📥 Оценки из Excel")
         btn_marks.setToolTip("Импорт разметки ответов из таблицы: маппинг "
                              "колонок задаётся один раз и запоминается")
         btn_marks.clicked.connect(self._import_marks)
+        btn_exp = FPushButton("📤 Разметка в Excel")
+        btn_exp.setToolTip("Выгрузка разметки ответов: круг с импортом оценок")
+        btn_exp.clicked.connect(self._export_marks)
         btn_del = FPushButton("🗑 Удалить")
         btn_del.clicked.connect(self._delete_run)
         row.addWidget(btn_new)
         row.addWidget(btn_import)
         row.addWidget(btn_review)
+        row.addWidget(btn_bulk)
         row.addWidget(btn_marks)
+        row.addWidget(btn_exp)
         row.addWidget(btn_del)
         layout.addLayout(row)
         self.detail = QLabel("Выбери прогон")
@@ -504,6 +512,10 @@ class ModelRunsScreen(BaseScreen):
         btn_cmp = FPushButton("⇄ Сравнить")
         btn_cmp.clicked.connect(self._compare)
         cmp_row.addWidget(btn_cmp)
+        btn_rr = FPushButton("🏆 Круговая таблица")
+        btn_rr.setToolTip("Каждый с каждым: выдели 2+ прогона (Ctrl+клик)")
+        btn_rr.clicked.connect(self._roundrobin)
+        cmp_row.addWidget(btn_rr)
         btn_sheets = FPushButton("⇄ Листы файла")
         btn_sheets.setToolTip("Структура листов xlsx/ods: сравнить, упорядочить, выгрузить")
         btn_sheets.clicked.connect(self._compare_sheets)
@@ -733,6 +745,24 @@ class ModelRunsScreen(BaseScreen):
         from compare_dialog import CompareDialog
         CompareDialog(self.project_path, self._run_id, run_b, self).exec()
 
+    def _roundrobin(self):
+        from PySide6.QtCore import Qt as _Q
+        ids = []
+        try:
+            for it in self.runs_list.selectedItems():
+                rid = it.data(_Q.ItemDataRole.UserRole)
+                if rid and rid not in ids:
+                    ids.append(rid)
+        except Exception:
+            ids = []
+        if len(ids) < 2:
+            notify(self, "warning", "Круговая таблица",
+                   "Выдели 2+ прогона слева (Ctrl+клик, Shift+клик)")
+            return
+        from roundrobin_dialog import RoundRobinDialog
+        RoundRobinDialog(self.project_path, ids, self).exec()
+        self.refresh()
+
     def _compare_sheets(self):
         """Сравнение листов прямо с экрана: Прогоны → «⇄ Листы файла»."""
         from PySide6.QtWidgets import QFileDialog as _FD
@@ -752,6 +782,25 @@ class ModelRunsScreen(BaseScreen):
         RunReviewDialog(self.project_path, self._run_id, self).exec()
         self._on_run_selected()
 
+    def _bulk_review(self):
+        from PySide6.QtCore import Qt as _Q
+        ids = []
+        try:
+            for it in self.runs_list.selectedItems():
+                rid = it.data(_Q.ItemDataRole.UserRole)
+                if rid and rid not in ids:
+                    ids.append(rid)
+        except Exception:
+            ids = []
+        if not ids and self._run_id is not None:
+            ids = [self._run_id]
+        if not ids:
+            notify(self, "warning", "Внимание", "Сначала выбери прогон")
+            return
+        from bulk_review_dialog import BulkReviewDialog
+        BulkReviewDialog(self.project_path, ids, self).exec()
+        self._on_run_selected()
+
     def _import_marks(self):
         if self._run_id is None:
             notify(self, "warning", "Внимание", "Сначала выбери прогон")
@@ -767,6 +816,38 @@ class ModelRunsScreen(BaseScreen):
         ImportRunMarksDialog(self.project_path, self._run_id, name,
                              self, initial_file=src).exec()
         self._on_run_selected()
+
+    def _export_marks(self):
+        from PySide6.QtCore import Qt as _Q
+        ids = []
+        try:
+            for it in self.runs_list.selectedItems():
+                rid = it.data(_Q.ItemDataRole.UserRole)
+                if rid and rid not in ids:
+                    ids.append(rid)
+        except Exception:
+            ids = []
+        if not ids and self._run_id is not None:
+            ids = [self._run_id]
+        if not ids:
+            notify(self, "warning", "Внимание", "Сначала выбери прогон")
+            return
+        from PySide6.QtWidgets import QFileDialog as _QFD
+        from datetime import datetime as _dt
+        path, _ = _QFD.getSaveFileName(
+            self, "Разметка прогонов в Excel",
+            f"run_marks_{_dt.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+            "Excel (*.xlsx)")
+        if not path:
+            return
+        try:
+            import export_service as _ex
+            out = _ex.export_run_marks(self.project_path, ids, path)
+        except Exception as e:
+            notify(self, "error", "Ошибка", str(e))
+            return
+        notify(self, "success", "Экспорт",
+               f"Прогонов: {len(ids)}\nСохранено:\n{out}")
 
     def _regression(self):
         from regression_dialog import RegressionDialog

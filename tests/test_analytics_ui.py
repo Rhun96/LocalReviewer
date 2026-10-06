@@ -339,6 +339,44 @@ def test_summary_top_drill_reaches_review():
         w.close()
 
 
+def test_summary_top_sub_rows_drill():
+    """Подкатегории — отдельные кликабельные строки цепочки."""
+    from PySide6.QtWidgets import QApplication
+    QApplication.instance() or QApplication([])
+    from reports_screen import ReportsScreen
+    from bulk_operation_service import bulk_set_status
+    from database import db as _db
+    from filter_service import get_filtered_case_ids
+    from taxonomy_service import set_case_error
+    p, ids = _proj()
+    all_ids = get_filtered_case_ids(p, {})
+    bulk_set_status(p, all_ids, "bad")
+    with _db(p) as conn:
+        cat = conn.execute("SELECT category_id FROM error_categories "
+                           "WHERE code='correctness'").fetchone()
+        sub = conn.execute("SELECT category_id FROM error_categories "
+                           "WHERE code='correctness.hallucination'").fetchone()
+    for cid in all_ids:
+        set_case_error(p, cid, cat["category_id"], sub["category_id"], "high")
+    mw = _MW()
+    w = ReportsScreen(p, None)
+    try:
+        w.parent_window = _PW(mw)
+        w.show()
+        w.tabs.setCurrentWidget(w.summary_tab)
+        w.load_summary_report()
+        texts = [w.summary_top.item(i).text()
+                 for i in range(w.summary_top.count())]
+        sub_rows = [t for t in texts if t.startswith("↳")]
+        assert len(sub_rows) == 1 and "Галлюцинация" in sub_rows[0]
+        idx = texts.index(sub_rows[0])
+        w._drill_top(w.summary_top.item(idx))
+        assert mw.calls and mw.calls[0][0] == "review"
+        assert mw.calls[0][1].get("error_category_id") == sub["category_id"]
+    finally:
+        w.close()
+
+
 def test_quality_tables_stretch_first_column():
     """Текст влезает: первая колонка тянется, проценты компактны."""
     from PySide6.QtWidgets import QApplication, QHeaderView
@@ -378,5 +416,33 @@ def test_files_quality_tab_and_drill():
         w._drill_file(w.files_table.item(0, 0))
         assert mw.calls and mw.calls[0][0] == "review"
         assert mw.calls[0][1] == {"file_id": fid}
+    finally:
+        w.close()
+
+
+def test_single_click_no_drill_double_click_drills():
+    """Одиночный клик выделяет, в ревью ведёт только двойной."""
+    from PySide6.QtWidgets import QApplication
+    from PySide6.QtTest import QTest
+    from PySide6.QtCore import Qt
+    QApplication.instance() or QApplication([])
+    from reports_screen import ReportsScreen
+    p, ids = _proj()
+    mw = _MW()
+    w = ReportsScreen(p, None)
+    try:
+        w.parent_window = _PW(mw)
+        w.show()
+        w.tabs.setCurrentWidget(w.quality_tab)
+        w.load_quality_report()
+        assert w.badcomp_list.count() >= 1
+        pos = w.badcomp_list.visualItemRect(
+            w.badcomp_list.item(0)).center()
+        QTest.mouseClick(w.badcomp_list.viewport(), Qt.LeftButton,
+                         pos=pos)
+        assert mw.calls == []
+        QTest.mouseDClick(w.badcomp_list.viewport(), Qt.LeftButton,
+                          pos=pos)
+        assert len(mw.calls) == 1 and mw.calls[0][0] == "review"
     finally:
         w.close()

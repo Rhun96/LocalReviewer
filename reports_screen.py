@@ -124,7 +124,7 @@ class ReportsScreen(BaseScreen):
             }}
         """)
 
-        # Вкладка 0: Сводка (ТЗ Analytics — цифра → клик → кейсы)
+        # Вкладка 0: Сводка (ТЗ Analytics — цифра → двойной клик → кейсы)
         self.summary_tab = self.create_summary_tab()
         self.tabs.addTab(self.summary_tab, "📌 Сводка")
 
@@ -252,13 +252,13 @@ class ReportsScreen(BaseScreen):
     def create_files_tab(self):
         widget = QWidget()
         layout = QVBoxLayout()
-        hint = QLabel("Файлы: полнота и грязь (клик — кейсы файла). "
+        hint = QLabel("Файлы: полнота и грязь (двойной клик — кейсы файла). "
                       "Сортировка — клик по шапке.")
         hint.setWordWrap(True)
         layout.addWidget(hint)
         self.files_table = FTable()
         self.files_table.setStyleSheet(classic_table_style())
-        self.files_table.itemClicked.connect(self._drill_file)
+        self.files_table.itemDoubleClicked.connect(self._drill_file)
         layout.addWidget(self.files_table)
         clear_in_fluent(self.files_table)
         polish_table(self.files_table, stretch_last=True)
@@ -391,7 +391,7 @@ class ReportsScreen(BaseScreen):
                  ("uncertain", "Сомневаюсь"), ("bugs", "Баги"))):
             btn = FPushButton(f"{title}\n—")
             btn.setMinimumHeight(64)
-            btn.setToolTip("Клик — открыть эти кейсы в ревью")
+            btn.setToolTip("Двойной клик — открыть эти кейсы в ревью")
             btn.clicked.connect(lambda _c, k=key: self._drill_card(k))
             grid.addWidget(btn, i // 3, i % 3)
             self.summary_cards[key] = btn
@@ -400,21 +400,34 @@ class ReportsScreen(BaseScreen):
         self.summary_empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.summary_empty.setWordWrap(True)
         layout.addWidget(self.summary_empty)
+        ch_group = QGroupBox("Главные изменения за период (двойной клик — кейсы)")
+        ch_layout = QVBoxLayout()
+        self.ch_label = QLabel("")
+        self.ch_label.setWordWrap(True)
+        ch_layout.addWidget(self.ch_label)
+        from PySide6.QtWidgets import QListWidget as _CHLW
+        self.ch_list = _CHLW()
+        self.ch_list.setMaximumHeight(110)
+        self.ch_list.setToolTip("Двойной клик — открыть эти кейсы (время — факт)")
+        self.ch_list.itemDoubleClicked.connect(self._drill_change)
+        ch_layout.addWidget(self.ch_list)
+        ch_group.setLayout(ch_layout)
+        layout.addWidget(ch_group)
         mid = QHBoxLayout()
         left_box = QVBoxLayout()
-        self.summary_dyn_label = QLabel("Динамика по дням (клик — кейсы дня):")
+        self.summary_dyn_label = QLabel("Динамика по дням (двойной клик — кейсы дня):")
         left_box.addWidget(self.summary_dyn_label)
         self.summary_dyn = QTableWidget()
         self.summary_dyn.setColumnCount(3)
         self.summary_dyn.setHorizontalHeaderLabels(
             ["День", "Проверено", "Плохих"])
-        self.summary_dyn.itemClicked.connect(self._drill_day)
+        self.summary_dyn.itemDoubleClicked.connect(self._drill_day)
         left_box.addWidget(self.summary_dyn)
         mid.addLayout(left_box, 1)
         right_box = QVBoxLayout()
-        right_box.addWidget(QLabel("Основные проблемы (клик — кейсы):"))
+        right_box.addWidget(QLabel("Основные проблемы (двойной клик — кейсы):"))
         self.summary_top = _LW()
-        self.summary_top.itemClicked.connect(self._drill_top)
+        self.summary_top.itemDoubleClicked.connect(self._drill_top)
         right_box.addWidget(self.summary_top)
         mid.addLayout(right_box, 1)
         layout.addLayout(mid)
@@ -457,9 +470,46 @@ class ReportsScreen(BaseScreen):
         cmp_layout.addWidget(self.cmp_table)
         cmp_group.setLayout(cmp_layout)
         layout.addWidget(cmp_group)
+        reg_group = QGroupBox("Регрессии: новые / исправленные / оставшиеся")
+        reg_layout = QVBoxLayout()
+        self.reg_label = QLabel("Нет данных — запусков регрессии пока нет.")
+        self.reg_label.setWordWrap(True)
+        reg_layout.addWidget(self.reg_label)
+        from PySide6.QtWidgets import QListWidget as _RLW
+        self.reg_list = _RLW()
+        self.reg_list.setMaximumHeight(96)
+        self.reg_list.setToolTip("Двойной клик — открыть эти кейсы в ревью")
+        self.reg_list.itemDoubleClicked.connect(self._drill_regression)
+        reg_layout.addWidget(self.reg_list)
+        reg_btn_row = QHBoxLayout()
+        btn_launches = FPushButton("Открыть запуски")
+        btn_launches.setToolTip("Перейти к запускам регрессии")
+        btn_launches.clicked.connect(self._open_launches)
+        reg_btn_row.addWidget(btn_launches)
+        reg_btn_row.addStretch()
+        reg_layout.addLayout(reg_btn_row)
+        reg_group.setLayout(reg_layout)
+        layout.addWidget(reg_group)
+        anom_group = QGroupBox("Аномалии: отклонения от обычного")
+        anom_layout = QVBoxLayout()
+        self.anom_label = QLabel("Тихо — отклонений от обычного нет.")
+        self.anom_label.setWordWrap(True)
+        anom_layout.addWidget(self.anom_label)
+        from PySide6.QtWidgets import QListWidget as _ALW
+        self.anom_list = _ALW()
+        self.anom_list.setMaximumHeight(96)
+        self.anom_list.setToolTip("Двойной клик — открыть эти кейсы в ревью")
+        self.anom_list.itemDoubleClicked.connect(self._drill_anomaly)
+        anom_layout.addWidget(self.anom_list)
+        anom_group.setLayout(anom_layout)
+        layout.addWidget(anom_group)
         try:
             clear_in_fluent(self.cmp_table)
             polish_table(self.cmp_table, stretch_last=True)
+        except Exception:
+            pass
+        try:
+            clear_in_fluent(self.reg_list, self.anom_list, self.ch_list)
         except Exception:
             pass
         return self._scroll_wrap(widget, layout)
@@ -470,33 +520,33 @@ class ReportsScreen(BaseScreen):
         layout = QVBoxLayout()
         cols = QHBoxLayout()
         vbox = QVBoxLayout()
-        vbox.addWidget(QLabel("Вердикты (клик — кейсы):"))
+        vbox.addWidget(QLabel("Вердикты (двойной клик — кейсы):"))
         from PySide6.QtWidgets import QTableWidget as _TW
         self.quality_verdicts = _TW()
         self.quality_verdicts.setColumnCount(2)
         self.quality_verdicts.setHorizontalHeaderLabels(["Вердикт", "Кейсов"])
-        self.quality_verdicts.itemClicked.connect(self._drill_verdict)
+        self.quality_verdicts.itemDoubleClicked.connect(self._drill_verdict)
         vbox.addWidget(self.quality_verdicts)
         vbox.addStretch(1)
         cols.addLayout(vbox, 1)
         sbox = QVBoxLayout()
-        sbox.addWidget(QLabel("Тяжесть (клик — кейсы):"))
+        sbox.addWidget(QLabel("Тяжесть (двойной клик — кейсы):"))
         self.quality_sev = _TW()
         self.quality_sev.setColumnCount(4)
         self.quality_sev.setHorizontalHeaderLabels(
             ["Тяжесть", "Проблем", "Доля %", "Категории"])
-        self.quality_sev.itemClicked.connect(self._drill_sev)
+        self.quality_sev.itemDoubleClicked.connect(self._drill_sev)
         sbox.addWidget(self.quality_sev)
         sbox.addStretch(1)
         cols.addLayout(sbox, 1)
         layout.addLayout(cols)
-        layout.addWidget(QLabel("Категории (клик — кейсы):"))
+        layout.addWidget(QLabel("Категории (двойной клик — кейсы):"))
         from PySide6.QtWidgets import QTableWidget as _TW2
         self.quality_cats = _TW2()
         self.quality_cats.setColumnCount(4)
         self.quality_cats.setHorizontalHeaderLabels(
             ["Категория", "Проблем", "Доля %", "Подкатегории"])
-        self.quality_cats.itemClicked.connect(self._drill_cat)
+        self.quality_cats.itemDoubleClicked.connect(self._drill_cat)
         layout.addWidget(self.quality_cats)
         self.quality_dyn_label = QLabel("Динамика причин по неделям:")
         layout.addWidget(self.quality_dyn_label)
@@ -505,12 +555,20 @@ class ReportsScreen(BaseScreen):
         self.quality_dyn.setColumnCount(4)
         self.quality_dyn.setHorizontalHeaderLabels(
             ["Категория", "Прошлая", "Эта", "Δ"])
-        self.quality_dyn.itemClicked.connect(self._drill_dyn)
+        self.quality_dyn.itemDoubleClicked.connect(self._drill_dyn)
         layout.addWidget(self.quality_dyn)
+        layout.addWidget(QLabel("Состав Bad: категории → типы (двойной клик — кейсы):"))
+        from PySide6.QtWidgets import QListWidget as _BLW
+        self.badcomp_list = _BLW()
+        self.badcomp_list.setMaximumHeight(140)
+        self.badcomp_list.setToolTip("Категория — плохие кейсы, ↳ тип — его кейсы")
+        self.badcomp_list.itemDoubleClicked.connect(self._drill_badcomp)
+        layout.addWidget(self.badcomp_list)
         layout.addStretch(1)
         try:
             clear_in_fluent(self.quality_verdicts, self.quality_sev,
-                            self.quality_cats, self.quality_dyn)
+                            self.quality_cats, self.quality_dyn,
+                            self.badcomp_list)
             polish_table(self.quality_verdicts, stretch_last=False)
             polish_table(self.quality_sev, stretch_last=False)
             polish_table(self.quality_cats, stretch_last=False)
@@ -684,7 +742,7 @@ class ReportsScreen(BaseScreen):
         dyn = dyn_full[:30]
         try:
             self.summary_dyn_label.setText(
-                "Динамика по дням (клик — кейсы дня):"
+                "Динамика по дням (двойной клик — кейсы дня):"
                 + (f" первые 30 из {len(dyn_full)}" if len(dyn_full) > 30
                    else ""))
         except Exception:
@@ -715,13 +773,187 @@ class ReportsScreen(BaseScreen):
             self.summary_top.addItem(it)
         for t in top:
             share = f" — {t['share']}%" if t["share"] is not None else ""
-            subs = ", ".join(f"{s['name']}: {s['n']}"
-                             for s in (t.get("subs") or []))
-            if subs:
-                subs = f" ({subs})"
-            it = _LWI(f"{t['name']}: {t['problems']}{share}{subs}")
+            it = _LWI(f"{t['name']}: {t['problems']}{share}")
             it.setData(_Qt.ItemDataRole.UserRole, t["category_id"])
             self.summary_top.addItem(it)
+            for s in (t.get("subs") or [])[:3]:
+                sub = _LWI(f"↳ {s['name']}: {s['n']}")
+                sub.setData(_Qt.ItemDataRole.UserRole,
+                            s.get("subcategory_id"))
+                self.summary_top.addItem(sub)
+                try:
+                    _sflt = dict(scope or {})
+                    _sflt["error_category_id"] = s.get("subcategory_id")
+                    _sflt["statuses"] = _an.reviewed_codes(
+                        self.project_path)
+                except Exception:
+                    _sflt = {}
+                self._summary_top_rows = list(
+                    self._summary_top_rows or []) + [{
+                        "category_id": s.get("subcategory_id"),
+                        "filters": _sflt}]
+        try:
+            reg = _an.regression_analytics(self.project_path, scope)
+        except Exception:
+            reg = {"present": False}
+        self._reg_rows = reg
+        try:
+            from PySide6.QtWidgets import QListWidgetItem as _RLI
+            from PySide6.QtCore import Qt as _RQ
+            self.reg_list.clear()
+            if not reg.get("present"):
+                self.reg_label.setText(
+                    "Нет данных — запусков регрессии пока нет.")
+                it = _RLI("Запусти регрессию во вкладке «Запуски»")
+                it.setFlags(it.flags() & ~_RQ.ItemFlag.ItemIsSelectable)
+                self.reg_list.addItem(it)
+            else:
+                lat = reg.get("latest") or {}
+                prv = reg.get("prev")
+                if prv:
+                    self.reg_label.setText(
+                        f"«{lat.get('name', '')}» vs "
+                        f"«{prv.get('name', '')}» "
+                        f"[{lat.get('gate_result', '')}]: "
+                        f"новых {len(reg.get('new_ids', []))}, "
+                        f"исправлено {len(reg.get('fixed_ids', []))}, "
+                        f"осталось {len(reg.get('stayed_ids', []))}.")
+                else:
+                    self.reg_label.setText(
+                        f"«{lat.get('name', '')}» "
+                        f"[{lat.get('gate_result', '')}]: "
+                        f"регрессий {len(reg.get('regress_ids', []))}, "
+                        f"улучшений {len(reg.get('improved_ids', []))}. "
+                        f"Второй запуск покажет новые/исправленные.")
+                rows = [("new", "Новых проблем",
+                         reg.get("new_ids", []) if prv
+                         else reg.get("regress_ids", [])),
+                        ("fixed", "Исправлено",
+                         reg.get("fixed_ids", []) if prv
+                         else reg.get("improved_ids", [])),
+                        ("stayed", "Осталось",
+                         reg.get("stayed_ids", []))]
+                for code, title, ids in rows:
+                    it = _RLI(f"{title}: {len(ids)} — двойной клик открывает кейсы")
+                    it.setData(_RQ.ItemDataRole.UserRole, code)
+                    self.reg_list.addItem(it)
+        except Exception:
+            pass
+        try:
+            anoms = _an.detect_anomalies(self.project_path, scope)
+        except Exception:
+            anoms = []
+        self._anom_rows = anoms
+        try:
+            from PySide6.QtWidgets import QListWidgetItem as _ALI
+            from PySide6.QtCore import Qt as _AQ
+            marks = {"critical": "🛑", "warning": "⚠️", "info": "ℹ️"}
+            self.anom_list.clear()
+            if not anoms:
+                self.anom_label.setText("Тихо — отклонений от обычного нет.")
+                it = _ALI("Мало данных или всё в норме")
+                it.setFlags(it.flags() & ~_AQ.ItemFlag.ItemIsSelectable)
+                self.anom_list.addItem(it)
+            else:
+                self.anom_label.setText(
+                    f"Отклонений: {len(anoms)} — двойной клик открывает кейсы.")
+                for i, a in enumerate(anoms):
+                    it = _ALI(f"{marks.get(a['level'], '')} "
+                              f"{a['title']}: {a['detail']}")
+                    it.setData(_AQ.ItemDataRole.UserRole, i)
+                    self.anom_list.addItem(it)
+        except Exception:
+            pass
+        try:
+            ch = _an.main_changes(self.project_path, scope)
+        except Exception:
+            ch = {"period": {}, "prev": {}, "items": []}
+        self._ch_rows = (ch or {}).get("items", [])
+        try:
+            from PySide6.QtWidgets import QListWidgetItem as _CHI
+            from PySide6.QtCore import Qt as _CQ
+            self.ch_list.clear()
+            per = (ch or {}).get("period", {})
+            if per:
+                self.ch_label.setText(
+                    f"Период {per.get('from', '')} — {per.get('to', '')}: "
+                    f"каждый показатель открывается двойным кликом.")
+            if not self._ch_rows:
+                it = _CHI("Нет данных")
+                it.setFlags(it.flags() & ~_CQ.ItemFlag.ItemIsSelectable)
+                self.ch_list.addItem(it)
+            else:
+                for i, r in enumerate(self._ch_rows):
+                    mark = "" if r.get("nodrill") else "→ "
+                    it = _CHI(f"{mark}{r['title']}: {r['cur']} "
+                              f"({r['detail']})")
+                    it.setData(_CQ.ItemDataRole.UserRole, i)
+                    self.ch_list.addItem(it)
+        except Exception:
+            pass
+
+    def _drill_change(self, item):
+        try:
+            from PySide6.QtCore import Qt as _CQ2
+            idx = item.data(_CQ2.ItemDataRole.UserRole)
+            hit = (getattr(self, "_ch_rows", []) or [])[int(idx)]
+        except Exception:
+            hit = None
+        if not hit or hit.get("nodrill"):
+            return
+        if hit.get("target") == "bugs":
+            try:
+                mw = getattr(getattr(self, "parent_window", None),
+                             "main_window", None)
+                if mw is not None and hasattr(mw, "show_screen"):
+                    mw.show_screen("bugs")
+            except Exception:
+                pass
+            return
+        if hit.get("case_ids"):
+            self._drill_to_review({"case_ids": list(hit["case_ids"])})
+
+    def _drill_anomaly(self, item):
+        try:
+            from PySide6.QtCore import Qt as _AQ2
+            idx = item.data(_AQ2.ItemDataRole.UserRole)
+            hit = (getattr(self, "_anom_rows", []) or [])[int(idx)]
+        except Exception:
+            hit = None
+        if hit and hit.get("case_ids"):
+            self._drill_to_review({"case_ids": list(hit["case_ids"])})
+
+    def _drill_regression(self, item):
+        try:
+            from PySide6.QtCore import Qt as _R2
+            code = item.data(_R2.ItemDataRole.UserRole)
+        except Exception:
+            code = None
+        reg = getattr(self, "_reg_rows", {}) or {}
+        if not reg.get("present") or not code:
+            return
+        if code == "new":
+            ids = (reg.get("new_ids", []) if reg.get("prev") is not None
+                   else reg.get("regress_ids", []))
+        elif code == "fixed":
+            ids = (reg.get("fixed_ids", []) if reg.get("prev") is not None
+                   else reg.get("improved_ids", []))
+        elif code == "stayed":
+            ids = reg.get("stayed_ids", [])
+        else:
+            return
+        if not ids:
+            return
+        self._drill_to_review({"case_ids": list(ids)})
+
+    def _open_launches(self):
+        try:
+            mw = getattr(getattr(self, "parent_window", None),
+                         "main_window", None)
+            if mw is not None and hasattr(mw, "show_screen"):
+                mw.show_screen("launches")
+        except Exception:
+            pass
 
     def _drill_day(self, item):
         try:
@@ -814,6 +1046,35 @@ class ReportsScreen(BaseScreen):
                 i, 3, QTableWidgetItem(f"+{_d}" if _d > 0 else str(_d)))
         self.quality_dyn.resizeColumnsToContents()
         self._fit_table_to_content(self.quality_dyn)
+        try:
+            comp = _an.bad_breakdown(self.project_path, scope)
+        except Exception:
+            comp = {"total": 0, "rows": []}
+        self._badcomp_rows = (comp or {}).get("rows", [])
+        try:
+            from PySide6.QtWidgets import QListWidgetItem as _BCI
+            from PySide6.QtCore import Qt as _BQ
+            self.badcomp_list.clear()
+            if not self._badcomp_rows:
+                it = _BCI("Плохих кейсов нет — разбирать нечего")
+                it.setFlags(it.flags() & ~_BQ.ItemFlag.ItemIsSelectable)
+                self.badcomp_list.addItem(it)
+            else:
+                for t in self._badcomp_rows:
+                    share = (f" — {t['share']}%" if t["share"] is not None
+                             else "")
+                    it = _BCI(f"{t['name']}: {t['n']}{share}")
+                    it.setData(_BQ.ItemDataRole.UserRole,
+                               ("cat", t["category_id"]))
+                    self.badcomp_list.addItem(it)
+                    for s in (t.get("subs") or []):
+                        sub = _BCI(f"↳ {s['name']}: {s['n']}")
+                        sub.setData(_BQ.ItemDataRole.UserRole,
+                                    ("sub", t["category_id"],
+                                     s.get("subcategory_id")))
+                        self.badcomp_list.addItem(sub)
+        except Exception:
+            pass
 
     def _fit_table_to_content(self, table, max_h: int = 420) -> None:
         """Высота таблицы под содержимое: маленькие видны целиком,
@@ -864,6 +1125,29 @@ class ReportsScreen(BaseScreen):
         except Exception:
             return
         self._drill_to_review(hit.get("filters", {}))
+
+    def _drill_badcomp(self, item):
+        try:
+            from PySide6.QtCore import Qt as _BQ2
+            tag = item.data(_BQ2.ItemDataRole.UserRole)
+        except Exception:
+            tag = None
+        if not tag:
+            return
+        rows = getattr(self, "_badcomp_rows", []) or []
+        if tag[0] == "cat":
+            hit = next((t for t in rows
+                        if t["category_id"] == tag[1]), None)
+            if hit:
+                self._drill_to_review(hit.get("filters", {}))
+        elif tag[0] == "sub":
+            hit = next((t for t in rows
+                        if t["category_id"] == tag[1]), None)
+            if hit:
+                sub = next((s for s in (hit.get("subs") or [])
+                            if s.get("subcategory_id") == tag[2]), None)
+                if sub:
+                    self._drill_to_review(sub.get("filters", {}))
 
     def _compare_periods(self):
         """A (текущий охват) vs B (тот же файл, другой период)."""
@@ -1087,6 +1371,36 @@ class ReportsScreen(BaseScreen):
         # выбивается из общего стиля.
         clear_in_fluent(self.models_table)
         polish_table(self.models_table, stretch_last=True)
+        ver_group = QGroupBox("Версии: срез качества (факты, двойной клик — кейсы)")
+        ver_layout = QVBoxLayout()
+        ver_row = QHBoxLayout()
+        ver_row.addWidget(QLabel("Срез:"))
+        self.ver_dim_combo = FComboBox()
+        self.ver_dim_combo.addItem("Модель", "model_name")
+        self.ver_dim_combo.addItem("Версия модели", "model_version")
+        self.ver_dim_combo.addItem("Версия промпта", "prompt_version")
+        self.ver_dim_combo.addItem("Системный промпт",
+                                   "system_prompt_version")
+        self.ver_dim_combo.addItem("Датасет", "dataset")
+        self.ver_dim_combo.setCurrentIndex(1)
+        self.ver_dim_combo.setToolTip("Группировка без домыслов про LLM")
+        self.ver_dim_combo.currentIndexChanged.connect(
+            self._reload_versions)
+        ver_row.addWidget(self.ver_dim_combo)
+        ver_row.addStretch()
+        ver_layout.addLayout(ver_row)
+        from PySide6.QtWidgets import QListWidget as _VLW
+        self.ver_list = _VLW()
+        self.ver_list.setMaximumHeight(120)
+        self.ver_list.setToolTip("Двойной клик — открыть плохие кейсы версии в ревью")
+        self.ver_list.itemDoubleClicked.connect(self._drill_version)
+        ver_layout.addWidget(self.ver_list)
+        ver_group.setLayout(ver_layout)
+        layout.addWidget(ver_group)
+        try:
+            clear_in_fluent(self.ver_list)
+        except Exception:
+            pass
         widget.setLayout(layout)
         return widget
 
@@ -1112,6 +1426,51 @@ class ReportsScreen(BaseScreen):
             self.models_table.setItem(
                 row, 7, QTableWidgetItem(f"{b['gates_passed']}/{b['gates']}"))
         self.models_table.resizeColumnsToContents()
+        self._reload_versions()
+
+    def _reload_versions(self):
+        import analytics_service as _an
+        try:
+            dim = self.ver_dim_combo.currentData() or "model_version"
+        except Exception:
+            dim = "model_version"
+        try:
+            res = _an.version_breakdown(self.project_path, dim,
+                                        self._analytics_scope())
+            rows = res.get("rows", [])
+        except Exception:
+            rows = []
+        self._ver_rows = rows
+        try:
+            from PySide6.QtWidgets import QListWidgetItem as _VI
+            from PySide6.QtCore import Qt as _VQ
+            self.ver_list.clear()
+            if not rows:
+                it = _VI("Нет данных для среза — разметки/версий пока нет")
+                it.setFlags(it.flags() & ~_VQ.ItemFlag.ItemIsSelectable)
+                self.ver_list.addItem(it)
+                return
+            for r in rows[:20]:
+                rate = (f"{r['rate']}%" if r["rate"] is not None
+                        else "нет данных")
+                it = _VI(f"{r['value']}: плохих {r['bad']} "
+                         f"из {r['total']} ({rate}, "
+                         f"прогонов/версий: {r['runs']})")
+                it.setData(_VQ.ItemDataRole.UserRole, r["value"])
+                self.ver_list.addItem(it)
+        except Exception:
+            pass
+
+    def _drill_version(self, item):
+        try:
+            from PySide6.QtCore import Qt as _VQ2
+            val = item.data(_VQ2.ItemDataRole.UserRole)
+        except Exception:
+            val = None
+        hit = next((r for r in (getattr(self, "_ver_rows", []) or [])
+                    if r["value"] == val), None)
+        if hit and hit.get("case_ids"):
+            self._drill_to_review({"case_ids": list(hit["case_ids"])})
 
     def create_personal_tab(self):
         """Вкладка личной аналитики (§23)."""

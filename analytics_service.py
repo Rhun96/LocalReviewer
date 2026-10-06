@@ -696,3 +696,800 @@ def compare_periods(project_path: str, scope_a: dict | None,
             "top_a": top_categories(project_path, scope_a, limit=5),
             "top_b": top_categories(project_path, scope_b, limit=5),
             "scope_a": scope_a or {}, "scope_b": scope_b or {}}
+
+
+def version_delta(project_path: str, version_a: int,
+                  version_b: int) -> dict:
+    """Что изменилось между версиями датасета: Bad-rate и причины.
+
+    Только факты из слепков (статус + категория), без вердикта «лучше».
+    {rate_a, rate_b, delta_pp, cats, drill}.
+    """
+    from review_profile_service import code_to_base
+    try:
+        mapping = code_to_base(project_path) or {}
+    except Exception:
+        mapping = {}
+
+    def _bad_base(status: str) -> bool:
+        return mapping.get(status or "", status or "") == "bad"
+
+    try:
+        with db(project_path) as conn:
+            cur = conn.cursor()
+            cols = {r[1] for r in cur.execute(
+                "PRAGMA table_info(dataset_cases)").fetchall()}
+            has_err = "error_category_id" in cols
+            snap = {}
+            for vid in (version_a, version_b):
+                if not cur.execute("SELECT 1 FROM dataset_versions "
+                                   "WHERE version_id=?", (vid,)).fetchone():
+                    raise ValueError(f"Версии #{vid} нет")
+                q = ("SELECT case_id, status" +
+                     (", error_category_id" if has_err else "") +
+                     " FROM dataset_cases WHERE version_id=?")
+                snap[vid] = [dict(r) for r in cur.execute(q, (vid,))]
+            names = {r["category_id"]: r["name"] for r in cur.execute(
+                "SELECT category_id, name FROM error_categories").fetchall()}
+    except ValueError:
+        raise
+    except Exception as e:
+        logger.warning("version_delta failed: %s", e)
+        return {"rate_a": None, "rate_b": None, "delta_pp": None,
+                "cats": [], "drill": {}}
+    out = {}
+    for tag, vid in (("a", version_a), ("b", version_b)):
+        rows = snap[vid]
+        bad = [r for r in rows if _bad_base(r.get("status") or "")]
+        out[tag] = {"total": len(rows), "bad": len(bad),
+                    "rate": (100.0 * len(bad) / len(rows)) if rows else None,
+                    "bad_ids": [r["case_id"] for r in bad],
+                    "cats": {}}
+        if has_err:
+            for r in rows:
+                cid = r.get("error_category_id")
+                if cid:
+                    out[tag]["cats"][cid] = \
+                        out[tag]["cats"].get(cid, 0) + 1
+    cats = []
+    for cid in sorted(set(out["a"]["cats"]) | set(out["b"]["cats"]),
+                      key=lambda c: -abs(out["b"]["cats"].get(c, 0) -
+                                         out["a"]["cats"].get(c, 0))):
+        ca, cb = out["a"]["cats"].get(cid, 0), out["b"]["cats"].get(cid, 0)
+        cats.append({"category_id": cid, "name": names.get(cid, f"#{cid}"),
+                     "a": ca, "b": cb, "delta": cb - ca})
+    cats = cats[:10]
+    ra, rb = out["a"]["rate"], out["b"]["rate"]
+    return {"rate_a": ra, "rate_b": rb,
+            "delta_pp": (round(rb - ra, 1)
+                         if ra is not None and rb is not None else None),
+            "total_a": out["a"]["total"], "total_b": out["b"]["total"],
+            "cats": cats,
+            "drill": {"bad_a": out["a"]["bad_ids"],
+                      "bad_b": out["b"]["bad_ids"]}}
+
+
+def regression_analytics(project_path: str, scope: dict | None = None) -> dict:
+    """Аналитика регрессий (V2 §3): новые / исправленные / оставшиеся.
+
+    Источник — штатные regression_runs/results, новых таблиц нет.
+    Только факты, без вердикта «лучше/хуже»:
+    - один запуск: новые = его REGRESSION, исправленные = его IMPROVED;
+    - два+: новые/исправленные/оставшиеся между prev и latest
+      по stable_key (REGRESSION был/стал), drill — по case_id.
+    scope file_id — режет drill-списки до файла (скоп-правило проекта).
+    Пусто — {"present": False} («Нет запусков», а не нули).
+    """
+    import regression_service as _rg
+    base = scope_filters(scope)
+    try:
+        runs = _rg.list_regressions(project_path) or []
+    except Exception as e:
+        logger.warning("regression_analytics list failed: %s", e)
+        return {"present": False}
+    if not runs:
+        return {"present": False}
+    latest = runs[0]
+    prev = runs[1] if len(runs) > 1 else None
+
+    def _reg_ids(rid: int, result: str) -> tuple:
+        """(stable_keys, case_ids) для результата запуска."""
+        try:
+            rows = _rg.list_regression_results(project_path, rid,
+                                               result=result)
+        except Exception:
+            return set(), []
+        keys = {r["stable_key"] for r in rows if r.get("stable_key")}
+        cids = sorted({r["case_id"] for r in rows if r.get("case_id")})
+        return keys, cids
+
+    lat_keys, lat_cids = _reg_ids(latest["regression_id"], "REGRESSION")
+    _imp_keys, imp_cids = _reg_ids(latest["regression_id"], "IMPROVED")
+    if prev is None:
+        new_keys, new_cids = set(lat_keys), list(lat_cids)
+        fixed_keys, fixed_cids = set(), []
+        stayed_keys, stayed_cids = set(), []
+        prev_reg_keys: set = set()
+    else:
+        prev_rows = {}
+        try:
+            prev_rows = {r["stable_key"]: r for r in
+                         _rg.list_regression_results(project_path,
+                                                     prev["regression_id"])}
+        except Exception:
+            prev_rows = {}
+        lat_rows = {}
+        try:
+            lat_rows = {r["stable_key"]: r for r in
+                        _rg.list_regression_results(project_path,
+                                                    latest["regression_id"])}
+        except Exception:
+            lat_rows = {}
+        prev_reg_keys = {k for k, r in prev_rows.items()
+                         if r.get("result") == "REGRESSION"}
+        new_keys = {k for k in lat_keys if k not in prev_reg_keys}
+        fixed_keys = {k for k in prev_reg_keys if k not in lat_keys}
+        stayed_keys = set(lat_keys) & set(prev_reg_keys)
+        key_to_cid = {r["stable_key"]: r["case_id"] for r in
+                      lat_rows.values() if r.get("case_id")}
+        prev_cid = {r["stable_key"]: r["case_id"] for r in
+                    prev_rows.values() if r.get("case_id")}
+        new_cids = sorted({key_to_cid[k] for k in new_keys
+                           if key_to_cid.get(k)})
+        fixed_cids = sorted({prev_cid.get(k) or key_to_cid.get(k)
+                             for k in fixed_keys
+                             if prev_cid.get(k) or key_to_cid.get(k)})
+        stayed_cids = sorted({key_to_cid[k] for k in stayed_keys
+                              if key_to_cid.get(k)})
+    if base.get("file_id"):
+        try:
+            with db(project_path) as conn:
+                in_file = {r["case_id"] for r in conn.execute(
+                    "SELECT case_id FROM cases WHERE file_id = ?",
+                    (base["file_id"],)).fetchall()}
+
+            def _cut(ids: list) -> list:
+                return sorted(set(ids) & in_file)
+            new_cids, fixed_cids = _cut(new_cids), _cut(fixed_cids)
+            stayed_cids = _cut(stayed_cids)
+            lat_cids, imp_cids = _cut(lat_cids), _cut(imp_cids)
+        except Exception:
+            pass
+    return {"present": True, "latest": latest, "prev": prev,
+            "new_keys": sorted(new_keys), "fixed_keys": sorted(fixed_keys),
+            "stayed_keys": sorted(stayed_keys),
+            "new_ids": new_cids, "fixed_ids": fixed_cids,
+            "stayed_ids": stayed_cids,
+            "regress_ids": lat_cids, "improved_ids": imp_cids,
+            "prev_reg_keys": sorted(prev_reg_keys)}
+
+
+VERSION_DIMS = ("model_name", "model_version", "prompt_version",
+                "system_prompt_version", "dataset")
+
+
+def version_breakdown(project_path: str, dim: str,
+                      scope: dict | None = None) -> dict:
+    """Универсальный срез качества по версиям (V2 §4): факты + drill.
+
+    dim: model_name / model_version / prompt_version /
+    system_prompt_version (группировка прогонов по разметке ответов)
+    или dataset (слепки версий датасетов: Bad-rate + причины без вердикта).
+    Никаких предположений про LLM: пустые значения — группа «—».
+    Возврат: {"dim", "rows": [{value, runs, total, bad, rate, case_ids,
+    filters}]}. Пусто — {"rows": []} (блок прячем, а не нули).
+    """
+    if dim not in VERSION_DIMS:
+        raise ValueError(f"Плохой срез: {dim!r}")
+    base = scope_filters(scope)
+    try:
+        from review_profile_service import code_to_base
+        mapping = code_to_base(project_path) or {}
+    except Exception:
+        mapping = {}
+
+    def _is_bad(status: str) -> bool:
+        return mapping.get(status or "", status or "") == "bad"
+
+    if dim == "dataset":
+        try:
+            with db(project_path) as conn:
+                cur = conn.cursor()
+                vers = cur.execute("""
+                    SELECT v.version_id, v.version_number, d.name
+                    FROM dataset_versions v
+                    JOIN datasets d ON d.dataset_id = v.dataset_id
+                    ORDER BY d.name, v.version_number
+                """).fetchall()
+                if not vers:
+                    return {"dim": dim, "rows": []}
+                rows = []
+                for ver in vers:
+                    snap = cur.execute(
+                        "SELECT case_id, status FROM dataset_cases "
+                        "WHERE version_id = ?",
+                        (ver["version_id"],)).fetchall()
+                    bad_ids = [r["case_id"] for r in snap
+                               if _is_bad(r["status"] or "")]
+                    if base.get("file_id"):
+                        in_f = {r["case_id"] for r in cur.execute(
+                            "SELECT case_id FROM cases WHERE file_id = ?",
+                            (base["file_id"],)).fetchall()}
+                        bad_ids = sorted(set(bad_ids) & in_f)
+                        total = sum(1 for r in snap if r["case_id"] in in_f)
+                    else:
+                        total = len(snap)
+                    n_bad = len(bad_ids)
+                    rows.append({
+                        "value": f"{ver['name']} v{ver['version_number']}",
+                        "runs": 1, "total": total, "bad": n_bad,
+                        "rate": (round(100.0 * n_bad / total, 1)
+                                 if total else None),
+                        "case_ids": sorted(set(bad_ids)),
+                        "filters": ({"case_ids": sorted(set(bad_ids))}
+                                    if bad_ids else {}),
+                        "version_id": ver["version_id"]})
+        except Exception as e:
+            logger.warning("version_breakdown dataset failed: %s", e)
+            return {"dim": dim, "rows": []}
+        rows.sort(key=lambda r: (-(r["bad"] or 0), r["value"]))
+        return {"dim": dim, "rows": rows}
+    try:
+        with db(project_path) as conn:
+            cur = conn.cursor()
+            tables = {r["name"] for r in cur.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+            if "model_runs" not in tables or "output_reviews" not in tables:
+                return {"dim": dim, "rows": []}
+            runs = cur.execute(
+                f"SELECT run_id, COALESCE({dim}, '') AS v FROM model_runs"
+            ).fetchall()
+            by_val: dict = {}
+            for r in runs:
+                by_val.setdefault(r["v"] or "", []).append(r["run_id"])
+            if not by_val:
+                return {"dim": dim, "rows": []}
+            rev = cur.execute(
+                "SELECT run_id, status, case_id FROM output_reviews "
+                "WHERE status IS NOT NULL AND status != 'unreviewed'"
+            ).fetchall()
+            agg: dict = {}
+            for r in rev:
+                for val, rids in by_val.items():
+                    if r["run_id"] in rids:
+                        cell = agg.setdefault(val, {"total": 0, "bad": 0,
+                                                    "ids": set()})
+                        cell["total"] += 1
+                        if _is_bad(r["status"] or ""):
+                            cell["bad"] += 1
+                            if r["case_id"]:
+                                cell["ids"].add(r["case_id"])
+                        break
+            if base.get("file_id"):
+                in_f = {x["case_id"] for x in cur.execute(
+                    "SELECT case_id FROM cases WHERE file_id = ?",
+                    (base["file_id"],)).fetchall()}
+                for cell in agg.values():
+                    keep = set(cell["ids"]) & in_f
+                    cell["ids"] = keep
+    except Exception as e:
+        logger.warning("version_breakdown runs failed: %s", e)
+        return {"dim": dim, "rows": []}
+    rows = []
+    for val, rids in sorted(by_val.items()):
+        cell = agg.get(val, {"total": 0, "bad": 0, "ids": set()})
+        tot, bad = cell["total"], cell["bad"]
+        ids = sorted(cell["ids"])
+        rows.append({"value": val or "—", "runs": len(rids),
+                     "total": tot, "bad": bad,
+                     "rate": (round(100.0 * bad / tot, 1) if tot else None),
+                     "case_ids": ids,
+                     "filters": ({"case_ids": ids} if ids else {})})
+    rows.sort(key=lambda r: (-(r["bad"] or 0), -(r["total"] or 0)))
+    return {"dim": dim, "rows": rows}
+
+
+# Пороги аномалий (V2 §5): честная статистика, без «ИИ нашёл проблему».
+# Маленькие выборки молчат (MIN_N), чтобы не орать на пустом месте.
+ANOM_RECENT_DAYS = 7
+ANOM_BASE_DAYS = 21
+ANOM_MIN_N = 10
+ANOM_BAD_PP_WARN = 10.0
+ANOM_BAD_PP_CRIT = 20.0
+ANOM_CAT_MIN_RECENT = 3
+ANOM_CAT_RATIO = 3.0
+ANOM_UNIFORM_DAYS = 14
+ANOM_UNIFORM_MIN = 5
+ANOM_UNIFORM_SHARE = 0.6
+
+
+def detect_anomalies(project_path: str, scope: dict | None = None) -> list:
+    """Аномалии (V2 §5): Bad-шип, всплеск категории, однотипные ошибки.
+
+    Сравнение с историей (недавнее окно vs базовое), только факты:
+    [{code, level, title, detail, case_ids, filters}].
+    Мало данных — пусто (молчим, а не выдумываем). Тяжёлое O(n^2)
+    (дубли) сюда не тянем — оно уже в «Требует внимания» фоном.
+    """
+    from datetime import datetime as _dt, timedelta as _td, UTC as _UTC
+    base = scope_filters(scope)
+    now = _dt.now(_UTC).date()
+    recent_from = (now - _td(days=ANOM_RECENT_DAYS - 1)).isoformat()
+    base_from = (now - _td(days=ANOM_RECENT_DAYS + ANOM_BASE_DAYS - 1))
+    base_from = base_from.isoformat()
+    base_to = (now - _td(days=ANOM_RECENT_DAYS)).isoformat()
+    uniform_from = (now - _td(days=ANOM_UNIFORM_DAYS - 1)).isoformat()
+    out: list = []
+    try:
+        from review_profile_service import code_to_base
+        mapping = code_to_base(project_path) or {}
+    except Exception:
+        mapping = {}
+    bad_codes = [c for c, b in mapping.items() if b == "bad"] or ["bad"]
+    rev_codes = [c for c, b in mapping.items()
+                 if b in ("good", "bad", "uncertain", "skip", "duplicate")]
+    if not rev_codes:
+        rev_codes = ["good", "bad", "uncertain", "skip", "duplicate"]
+    try:
+        with db(project_path) as conn:
+            cur = conn.cursor()
+
+            def _win_stats(d_from: str, d_to: str | None) -> tuple:
+                conds = ["COALESCE(c.hidden, 0) = 0",
+                         "substr(a.updated_at, 1, 10) >= ?"]
+                params: list = [d_from]
+                if d_to is not None:
+                    conds.append("substr(a.updated_at, 1, 10) <= ?")
+                    params.append(d_to)
+                if base.get("file_id"):
+                    conds.append("c.file_id = ?")
+                    params.append(base["file_id"])
+                rph = ",".join(["?"] * len(rev_codes))
+                bph = ",".join(["?"] * len(bad_codes))
+                where = "WHERE " + " AND ".join(conds)
+                row = cur.execute(
+                    f"SELECT COUNT(DISTINCT c.case_id) AS n, "
+                    f"COUNT(DISTINCT CASE WHEN a.status IN ({bph}) "
+                    f"THEN c.case_id END) AS bad "
+                    f"FROM cases c "
+                    f"JOIN files f ON f.file_id = c.file_id "
+                    f"JOIN annotations a ON a.case_id = c.case_id "
+                    f"{where} AND a.status IN ({rph})",
+                    (*bad_codes, *params, *rev_codes)).fetchone()
+                return (row["n"] or 0, row["bad"] or 0)
+
+            rn, rb = _win_stats(recent_from, None)
+            bn, bb = _win_stats(base_from, base_to)
+            if rn >= ANOM_MIN_N and bn >= ANOM_MIN_N:
+                rr, br = 100.0 * rb / rn, 100.0 * bb / bn
+                delta = round(rr - br, 1)
+                if delta >= ANOM_BAD_PP_WARN:
+                    conds = ["COALESCE(c.hidden, 0) = 0",
+                             "substr(a.updated_at, 1, 10) >= ?"]
+                    params = [recent_from]
+                    if base.get("file_id"):
+                        conds.append("c.file_id = ?")
+                        params.append(base["file_id"])
+                    bph = ",".join(["?"] * len(bad_codes))
+                    rows = cur.execute(
+                        f"SELECT DISTINCT c.case_id AS cid FROM cases c "
+                        f"JOIN files f ON f.file_id = c.file_id "
+                        f"JOIN annotations a ON a.case_id = c.case_id "
+                        f"WHERE {' AND '.join(conds)} AND a.status IN ({bph})",
+                        (*params, *bad_codes)).fetchall()
+                    ids = sorted({r["cid"] for r in rows if r["cid"]})
+                    out.append({"code": "bad_spike",
+                                "level": ("critical" if delta >=
+                                          ANOM_BAD_PP_CRIT else "warning"),
+                                "title": "Доля Bad выше обычной",
+                                "detail": (f"{rr:.1f}% против {br:.1f}% "
+                                           f"(+{delta:.1f} п.п., "
+                                           f"неделя {rn}, база {bn})"),
+                                "case_ids": ids,
+                                "filters": ({"case_ids": ids} if ids else {})})
+
+            def _cat_counts(d_from: str, d_to: str | None) -> dict:
+                conds = ["COALESCE(c.hidden, 0) = 0",
+                         "substr(e.updated_at, 1, 10) >= ?"]
+                params = [d_from]
+                if d_to is not None:
+                    conds.append("substr(e.updated_at, 1, 10) <= ?")
+                    params.append(d_to)
+                if base.get("file_id"):
+                    conds.append("c.file_id = ?")
+                    params.append(base["file_id"])
+                where = "WHERE " + " AND ".join(conds)
+                rows = cur.execute(
+                    f"SELECT COALESCE(e.category_id, e.subcategory_id) AS cat,"
+                    f" COUNT(DISTINCT e.case_id) AS n FROM case_errors e "
+                    f"JOIN cases c ON c.case_id = e.case_id "
+                    f"JOIN files f ON f.file_id = c.file_id "
+                    f"{where} GROUP BY cat", params).fetchall()
+                return {r["cat"]: r["n"] for r in rows if r["cat"]}
+
+            recent_cats = _cat_counts(recent_from, None)
+            base_cats = _cat_counts(base_from, base_to)
+            names = {r["category_id"]: r["name"] for r in cur.execute(
+                "SELECT category_id, name FROM error_categories").fetchall()}
+            for cat, recent_n in recent_cats.items():
+                if recent_n < ANOM_CAT_MIN_RECENT:
+                    continue
+                expected = base_cats.get(cat, 0) / ANOM_BASE_DAYS * \
+                    ANOM_RECENT_DAYS
+                if expected < 1:
+                    fire = recent_n >= 5 and base_cats.get(cat, 0) == 0
+                    ratio = None
+                else:
+                    ratio = recent_n / expected
+                    fire = ratio >= ANOM_CAT_RATIO
+                if not fire:
+                    continue
+                conds = ["COALESCE(c.hidden, 0) = 0",
+                         "substr(e.updated_at, 1, 10) >= ?",
+                         "(e.category_id = ? OR e.subcategory_id = ?)"]
+                params = [recent_from, cat, cat]
+                if base.get("file_id"):
+                    conds.append("c.file_id = ?")
+                    params.append(base["file_id"])
+                rows = cur.execute(
+                    f"SELECT DISTINCT e.case_id AS cid FROM case_errors e "
+                    f"JOIN cases c ON c.case_id = e.case_id "
+                    f"JOIN files f ON f.file_id = c.file_id "
+                    f"WHERE {' AND '.join(conds)}", params).fetchall()
+                ids = sorted({r["cid"] for r in rows if r["cid"]})
+                nm = names.get(cat, f"#{cat}")
+                if ratio is None:
+                    detail = (f"«{nm}»: {recent_n} за неделю, "
+                              f"раньше не было")
+                else:
+                    detail = (f"«{nm}»: {recent_n} против обычных "
+                              f"{expected:.1f} (в {ratio:.1f} раза больше)")
+                out.append({"code": "cat_surge", "level": "warning",
+                            "title": "Всплеск категории",
+                            "detail": detail, "case_ids": ids,
+                            "filters": ({"case_ids": ids} if ids else {}),
+                            "category_id": cat})
+            uni = _cat_counts(uniform_from, None)
+            uni_total_rows = cur.execute(
+                "SELECT COUNT(DISTINCT e.case_id) AS n FROM case_errors e "
+                "JOIN cases c ON c.case_id = e.case_id "
+                "JOIN files f ON f.file_id = c.file_id "
+                "WHERE COALESCE(c.hidden, 0) = 0 "
+                "AND substr(e.updated_at, 1, 10) >= ?"
+                + (" AND c.file_id = ?" if base.get("file_id") else ""),
+                ([uniform_from] + ([base["file_id"]]
+                                   if base.get("file_id") else []))).fetchone()
+            uni_total = uni_total_rows["n"] or 0
+            if uni_total >= ANOM_UNIFORM_MIN and uni:
+                top_cat = max(uni, key=lambda k: uni[k])
+                share = uni[top_cat] / uni_total
+                if share >= ANOM_UNIFORM_SHARE:
+                    conds = ["COALESCE(c.hidden, 0) = 0",
+                             "substr(e.updated_at, 1, 10) >= ?",
+                             "(e.category_id = ? OR e.subcategory_id = ?)"]
+                    params = [uniform_from, top_cat, top_cat]
+                    if base.get("file_id"):
+                        conds.append("c.file_id = ?")
+                        params.append(base["file_id"])
+                    rows = cur.execute(
+                        f"SELECT DISTINCT e.case_id AS cid FROM case_errors e "
+                        f"JOIN cases c ON c.case_id = e.case_id "
+                        f"JOIN files f ON f.file_id = c.file_id "
+                        f"WHERE {' AND '.join(conds)}", params).fetchall()
+                    ids = sorted({r["cid"] for r in rows if r["cid"]})
+                    nm = names.get(top_cat, f"#{top_cat}")
+                    out.append({
+                        "code": "uniform", "level": "info",
+                        "title": "Однотипные ошибки",
+                        "detail": (f"«{nm}» — {uni[top_cat]} из {uni_total} "
+                                   f"({share * 100:.0f}% за 14 дней)"),
+                        "case_ids": ids,
+                        "filters": ({"case_ids": ids} if ids else {}),
+                        "category_id": top_cat})
+    except Exception as e:
+        logger.warning("detect_anomalies failed: %s", e)
+        return []
+    order = {"critical": 0, "warning": 1, "info": 2}
+    out.sort(key=lambda r: (order.get(r["level"], 3), r["code"]))
+    return out
+
+
+def main_changes(project_path: str, scope: dict | None = None) -> dict:
+    """Главные изменения (V2 §6): компактно, что изменилось за период.
+
+    Период — из скоупа (reviewed_from/to) либо последние 30 дней;
+    база — такое же окно сразу перед периодом. Только факты:
+    новые кейсы / Bad / новые баги / время проверки (среднее) /
+    новые категории ошибок. Каждый пункт — с drill (кроме времени:
+    среднее никуда не ведёт, честно без клика).
+    """
+    from datetime import datetime as _dt, timedelta as _td, UTC as _UTC
+    base = scope_filters(scope)
+    try:
+        from review_profile_service import code_to_base
+        mapping = code_to_base(project_path) or {}
+    except Exception:
+        mapping = {}
+    bad_codes = [c for c, b in mapping.items() if b == "bad"] or ["bad"]
+    today = _dt.now(_UTC).date()
+    p_from = str(base.get("reviewed_from") or "")[:10]
+    p_to = str(base.get("reviewed_to") or "")[:10]
+    try:
+        d_to = _dt.strptime(p_to, "%Y-%m-%d").date() if p_to else today
+    except ValueError:
+        d_to = today
+    try:
+        d_from = _dt.strptime(p_from, "%Y-%m-%d").date() if p_from else \
+            (d_to - _td(days=29))
+    except ValueError:
+        d_from = d_to - _td(days=29)
+    if d_from > d_to:
+        d_from, d_to = d_to, d_from
+    days = (d_to - d_from).days + 1
+    b_to = d_from - _td(days=1)
+    b_from = b_to - _td(days=days - 1)
+    pf, pt = d_from.isoformat(), d_to.isoformat()
+    bf, bt = b_from.isoformat(), b_to.isoformat()
+    items: list = []
+    try:
+        with db(project_path) as conn:
+            cur = conn.cursor()
+            fcond = "AND c.file_id = ?" if base.get("file_id") else ""
+            fpar = [base["file_id"]] if base.get("file_id") else []
+
+            def _cases_created(d0: str, d1: str) -> list:
+                return sorted({r["cid"] for r in cur.execute(
+                    f"SELECT c.case_id AS cid FROM cases c "
+                    f"JOIN files f ON f.file_id = c.file_id "
+                    f"WHERE COALESCE(c.hidden, 0) = 0 {fcond} "
+                    f"AND substr(c.created_at, 1, 10) >= ? "
+                    f"AND substr(c.created_at, 1, 10) <= ?",
+                    (*fpar, d0, d1)).fetchall() if r["cid"]})
+
+            new_cur, new_prev = _cases_created(pf, pt), _cases_created(bf, bt)
+            bph = ",".join(["?"] * len(bad_codes))
+
+            def _bad_ids(d0: str, d1: str) -> list:
+                return sorted({r["cid"] for r in cur.execute(
+                    f"SELECT DISTINCT c.case_id AS cid FROM cases c "
+                    f"JOIN files f ON f.file_id = c.file_id "
+                    f"JOIN annotations a ON a.case_id = c.case_id "
+                    f"WHERE COALESCE(c.hidden, 0) = 0 {fcond} "
+                    f"AND substr(a.updated_at, 1, 10) >= ? "
+                    f"AND substr(a.updated_at, 1, 10) <= ? "
+                    f"AND a.status IN ({bph})",
+                    (*fpar, d0, d1, *bad_codes)).fetchall() if r["cid"]})
+
+            bad_cur, bad_prev = _bad_ids(pf, pt), _bad_ids(bf, bt)
+            tables = {r["name"] for r in cur.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+            if "bug_reports" in tables:
+                bjoin = ""
+                if base.get("file_id"):
+                    bjoin = ("JOIN bug_report_cases bc ON bc.bug_id = b.bug_id "
+                             "JOIN cases c ON c.case_id = bc.case_id "
+                             "AND c.file_id = ?")
+                    bpar = [base["file_id"]]
+                else:
+                    bpar = []
+                bugs_cur = cur.execute(
+                    f"SELECT COUNT(*) AS n FROM bug_reports b {bjoin} "
+                    f"WHERE substr(b.created_at, 1, 10) >= ? "
+                    f"AND substr(b.created_at, 1, 10) <= ?",
+                    (*bpar, pf, pt)).fetchone()["n"] or 0
+                bugs_prev = cur.execute(
+                    f"SELECT COUNT(*) AS n FROM bug_reports b {bjoin} "
+                    f"WHERE substr(b.created_at, 1, 10) >= ? "
+                    f"AND substr(b.created_at, 1, 10) <= ?",
+                    (*bpar, bf, bt)).fetchone()["n"] or 0
+                if "bug_report_cases" in tables:
+                    link = cur.execute(
+                        "SELECT DISTINCT bc.case_id AS cid FROM bug_reports b "
+                        "JOIN bug_report_cases bc ON bc.bug_id = b.bug_id "
+                        "WHERE substr(b.created_at, 1, 10) >= ? "
+                        "AND substr(b.created_at, 1, 10) <= ?",
+                        (pf, pt)).fetchall()
+                    bug_ids = sorted({r["cid"] for r in link if r["cid"]})
+                    if base.get("file_id"):
+                        in_f = set(_cases_created("0001-01-01", "9999-12-31"))
+                        bug_ids = sorted(set(bug_ids) & in_f)
+                else:
+                    bug_ids = []
+            else:
+                bugs_cur, bugs_prev, bug_ids = 0, 0, []
+            avg_cur = cur.execute(
+                f"SELECT AVG(a.review_duration_s) AS v FROM annotations a "
+                f"JOIN cases c ON c.case_id = a.case_id "
+                f"WHERE COALESCE(c.hidden, 0) = 0 {fcond} "
+                f"AND a.review_duration_s IS NOT NULL "
+                f"AND substr(a.updated_at, 1, 10) >= ? "
+                f"AND substr(a.updated_at, 1, 10) <= ?",
+                (*fpar, pf, pt)).fetchone()["v"]
+            avg_prev = cur.execute(
+                f"SELECT AVG(a.review_duration_s) AS v FROM annotations a "
+                f"JOIN cases c ON c.case_id = a.case_id "
+                f"WHERE COALESCE(c.hidden, 0) = 0 {fcond} "
+                f"AND a.review_duration_s IS NOT NULL "
+                f"AND substr(a.updated_at, 1, 10) >= ? "
+                f"AND substr(a.updated_at, 1, 10) <= ?",
+                (*fpar, bf, bt)).fetchone()["v"]
+
+            def _cats(d0: str, d1: str) -> dict:
+                rows = cur.execute(
+                    f"SELECT COALESCE(e.category_id, e.subcategory_id) AS cat,"
+                    f" COUNT(DISTINCT e.case_id) AS n FROM case_errors e "
+                    f"JOIN cases c ON c.case_id = e.case_id "
+                    f"JOIN files f ON f.file_id = c.file_id "
+                    f"WHERE COALESCE(c.hidden, 0) = 0 {fcond} "
+                    f"AND substr(e.updated_at, 1, 10) >= ? "
+                    f"AND substr(e.updated_at, 1, 10) <= ? "
+                    f"GROUP BY cat", (*fpar, d0, d1)).fetchall()
+                return {r["cat"]: r["n"] for r in rows if r["cat"]}
+
+            cats_cur, cats_prev = _cats(pf, pt), _cats(bf, bt)
+            fresh_cats = sorted(set(cats_cur) - set(cats_prev))
+            if fresh_cats:
+                fc = fresh_cats[0]
+                fc_ids = sorted({r["cid"] for r in cur.execute(
+                    f"SELECT DISTINCT e.case_id AS cid FROM case_errors e "
+                    f"JOIN cases c ON c.case_id = e.case_id "
+                    f"JOIN files f ON f.file_id = c.file_id "
+                    f"WHERE COALESCE(c.hidden, 0) = 0 {fcond} "
+                    f"AND substr(e.updated_at, 1, 10) >= ? "
+                    f"AND substr(e.updated_at, 1, 10) <= ? "
+                    f"AND (e.category_id = ? OR e.subcategory_id = ?)",
+                    (*fpar, pf, pt, fc, fc)).fetchall() if r["cid"]})
+            else:
+                fc, fc_ids = None, []
+    except Exception as e:
+        logger.warning("main_changes failed: %s", e)
+        return {"period": {}, "prev": {}, "items": []}
+
+    def _item(key, title, cur_n, prev_n, ids, target="review",
+              suffix="", nodrill=False):
+        delta = cur_n - prev_n
+        if delta > 0:
+            txt = f"+{delta}{suffix}"
+        elif delta < 0:
+            txt = f"{delta}{suffix}"
+        else:
+            txt = f"без изменений{suffix}"
+        return {"key": key, "title": title, "cur": cur_n, "prev": prev_n,
+                "delta": delta, "detail": txt, "case_ids": ids,
+                "filters": ({"case_ids": ids} if ids and not nodrill else {}),
+                "target": (target if ids and not nodrill else ""),
+                "nodrill": nodrill or not ids}
+
+    items.append(_item("new_cases", "Новых кейсов", len(new_cur),
+                       len(new_prev), new_cur))
+    items.append(_item("bad", "Bad", len(bad_cur), len(bad_prev), bad_cur))
+    items.append(_item("bugs", "Новых багов", bugs_cur, bugs_prev, bug_ids,
+                       target=("review" if bug_ids else "bugs")))
+    if avg_cur is None and avg_prev is None:
+        items.append({"key": "time", "title": "Время проверки",
+                      "cur": None, "prev": None, "delta": None,
+                      "detail": "замеров нет", "case_ids": [],
+                      "filters": {}, "target": "", "nodrill": True})
+    else:
+        dc = (round(avg_cur - avg_prev, 1)
+              if avg_cur is not None and avg_prev is not None else None)
+        items.append({"key": "time", "title": "Время проверки",
+                      "cur": (round(avg_cur, 1)
+                              if avg_cur is not None else None),
+                      "prev": (round(avg_prev, 1)
+                               if avg_prev is not None else None),
+                      "delta": dc,
+                      "detail": (f"{dc:+.1f} с к среднему" if dc is not None
+                                 else "нет базы для сравнения"),
+                      "case_ids": [], "filters": {}, "target": "",
+                      "nodrill": True})
+    items.append(_item("new_cats", "Новых категорий ошибок",
+                       len(fresh_cats), 0, fc_ids))
+    return {"period": {"from": pf, "to": pt},
+            "prev": {"from": bf, "to": bt}, "items": items}
+
+
+def bad_breakdown(project_path: str, scope: dict | None = None) -> dict:
+    """Состав Bad (V2 §1): Bad → категории → типы → кейсы.
+
+    Только плохие кейсы скоупа: категории и подкатегории с числом
+    кейсов + готовые drill-фильтры (статусы=bad + категория).
+    Пусто — {"total": 0, "rows": []} (блок прячем).
+    """
+    base = scope_filters(scope)
+    try:
+        from review_profile_service import code_to_base
+        mapping = code_to_base(project_path) or {}
+    except Exception:
+        mapping = {}
+    bad_codes = [c for c, b in mapping.items() if b == "bad"] or ["bad"]
+    try:
+        with db(project_path) as conn:
+            cur = conn.cursor()
+            conds = ["COALESCE(c.hidden, 0) = 0"]
+            params: list = []
+            if base.get("file_id"):
+                conds.append("c.file_id = ?")
+                params.append(base["file_id"])
+            if base.get("reviewed_from"):
+                conds.append("substr(a.updated_at, 1, 10) >= ?")
+                params.append(base["reviewed_from"])
+            if base.get("reviewed_to"):
+                conds.append("substr(a.updated_at, 1, 10) <= ?")
+                params.append(base["reviewed_to"])
+            bph = ",".join(["?"] * len(bad_codes))
+            where = "WHERE " + " AND ".join(conds)
+            bad_ids = sorted({r["cid"] for r in cur.execute(
+                f"SELECT DISTINCT c.case_id AS cid FROM cases c "
+                f"JOIN files f ON f.file_id = c.file_id "
+                f"JOIN annotations a ON a.case_id = c.case_id "
+                f"{where} AND a.status IN ({bph})",
+                (*params, *bad_codes)).fetchall() if r["cid"]})
+            if not bad_ids:
+                return {"total": 0, "rows": []}
+            iph = ",".join(["?"] * len(bad_ids))
+            cat_rows = cur.execute(
+                f"SELECT COALESCE(e.category_id, e.subcategory_id) AS cat, "
+                f"COUNT(DISTINCT e.case_id) AS n FROM case_errors e "
+                f"WHERE e.case_id IN ({iph}) GROUP BY cat",
+                tuple(bad_ids)).fetchall()
+            sub_rows = cur.execute(
+                f"SELECT COALESCE(e.category_id, e.subcategory_id) AS cat, "
+                f"e.subcategory_id AS sub, COUNT(DISTINCT e.case_id) AS n "
+                f"FROM case_errors e WHERE e.case_id IN ({iph}) "
+                f"GROUP BY cat, sub", tuple(bad_ids)).fetchall()
+            with_err = {r["cid"] for r in cur.execute(
+                f"SELECT DISTINCT case_id AS cid FROM case_errors "
+                f"WHERE case_id IN ({iph})",
+                tuple(bad_ids)).fetchall()}
+            names = {r["category_id"]: r["name"] for r in cur.execute(
+                "SELECT category_id, name FROM error_categories").fetchall()}
+    except Exception as e:
+        logger.warning("bad_breakdown failed: %s", e)
+        return {"total": 0, "rows": []}
+    total = len(bad_ids)
+    by_cat: dict = {}
+    for r in sub_rows:
+        if not r["cat"] or not r["sub"] or r["sub"] == r["cat"]:
+            continue
+        by_cat.setdefault(r["cat"], []).append((r["sub"], r["n"]))
+    cat_case_ids: dict = {}
+    try:
+        with db(project_path) as conn:
+            for r in cat_rows:
+                if not r["cat"]:
+                    continue
+                cids = sorted({x["cid"] for x in conn.execute(
+                    f"SELECT DISTINCT case_id AS cid FROM case_errors "
+                    f"WHERE (category_id = ? OR subcategory_id = ?) "
+                    f"AND case_id IN ({iph})",
+                    (r["cat"], r["cat"], *bad_ids)).fetchall()})
+                cat_case_ids[r["cat"]] = cids
+    except Exception:
+        cat_case_ids = {}
+    rows = []
+    nocat_ids = sorted(set(bad_ids) - with_err)
+    for r in sorted(cat_rows, key=lambda x: -x["n"]):
+        if not r["cat"]:
+            continue
+        flt = dict(base, error_category_id=r["cat"], statuses=list(bad_codes))
+        subs = sorted(by_cat.get(r["cat"], []), key=lambda t: -t[1])[:5]
+        rows.append({"category_id": r["cat"],
+                     "name": names.get(r["cat"], f"#{r['cat']}"),
+                     "n": r["n"],
+                     "share": _pct(r["n"], total),
+                     "case_ids": cat_case_ids.get(r["cat"], []),
+                     "subs": [{"subcategory_id": c,
+                               "name": names.get(c, f"#{c}"), "n": n,
+                               "filters": dict(
+                                   base, error_category_id=c,
+                                   statuses=list(bad_codes))}
+                              for c, n in subs],
+                     "filters": flt})
+    if nocat_ids:
+        rows.append({"category_id": "",
+                     "name": "Без категории", "n": len(nocat_ids),
+                     "share": _pct(len(nocat_ids), total), "subs": [],
+                     "case_ids": nocat_ids,
+                     "filters": {"case_ids": nocat_ids}})
+    return {"total": total, "rows": rows}

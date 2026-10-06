@@ -134,6 +134,24 @@ class RunReviewDialog(QDialog):
             return self._rows[self._idx]
         return None
 
+    def _case_topic(self, case_id) -> str:
+        """Тема кейса для шапки разметки (своя «Тема» тоже считается)."""
+        if not case_id:
+            return ""
+        try:
+            import json as _json
+            from database import db as _db
+            from constants import topic_from_metadata as _tof
+            with _db(self.project_path) as _conn:
+                _m = _conn.execute(
+                    "SELECT metadata_json FROM cases WHERE case_id=?",
+                    (case_id,)).fetchone()
+            if _m and _m["metadata_json"]:
+                return _tof(_json.loads(_m["metadata_json"] or "{}"))
+        except Exception:
+            pass
+        return ""
+
     def _on_key(self):
         self._idx = self.keys_list.currentRow()
         self._show()
@@ -143,9 +161,11 @@ class RunReviewDialog(QDialog):
         if not row:
             return
         prompt = row.get("primary_text") or row.get("prompt_text") or ""
+        topic = self._case_topic(row.get("case_id"))
         self.prompt_label.setText(
             f"📌 {prompt[:400]}{'…' if len(prompt) > 400 else ''}"
-            f"\n🆔 {row.get('source_id') or row['stable_key']}")
+            f"\n🆔 {row.get('source_id') or row['stable_key']}"
+            + (f"\n📰 Тема: {topic[:120]}" if topic else ""))
         self.answer_pane.setPlainText(row.get("answer_text") or "(пусто)")
         self.comment_edit.setPlainText(row.get("review_comment") or "")
         ref = ""

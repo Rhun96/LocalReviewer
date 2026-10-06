@@ -333,6 +333,23 @@ class DatasetsWidget(QWidget):
         except Exception as e:
             notify(self, "error", "Ошибка", str(e))
 
+    def _delta_text(self, va, vb) -> str:
+        """Δ Bad-rate и причин между версиями (факты, без «лучше»)."""
+        try:
+            import analytics_service as _an
+            d = _an.version_delta(self.project_path, va, vb)
+        except Exception:
+            return ""
+        if d.get("rate_a") is None or d.get("rate_b") is None:
+            return ""
+        parts = [f"\nΔ Bad-rate: {d['rate_a']:.1f}% → {d['rate_b']:.1f}% "
+                 f"({d['delta_pp']:+.1f} п.п.)"]
+        for t in (d.get("cats") or [])[:5]:
+            if t["delta"]:
+                parts.append(f"{t['name']}: {t['a']} → {t['b']} "
+                             f"({t['delta']:+d})")
+        return "\n".join(parts)
+
     def _compare(self):
         va, vb = self.combo_a.currentData(), self.combo_b.currentData()
         if not va or not vb:
@@ -357,7 +374,7 @@ class DatasetsWidget(QWidget):
             f"A vs B (по source_id/хэшу): добавлено {c['added']}, "
             f"удалено {c['removed']}, изменено {c['changed']}, "
             f"без изменений {c['unchanged']}, конфликтов {c['conflicted']}."
-            f"{agree_line}")
+            f"{agree_line}{self._delta_text(va, vb)}")
         self.cmp_details.clear()
         for d in res["details"][:200]:
             ch = ",".join(d.get("changes", []) or [])

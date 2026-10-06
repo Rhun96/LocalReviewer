@@ -103,6 +103,27 @@ def metadata_column_label(key: str) -> str:
     """Подпись колонки для показа; ключи и системные имена — как есть."""
     return METADATA_COLUMN_LABELS.get(key, key)
 
+
+def topic_from_metadata(metadata) -> str:
+    """Тема кейса из метаданных: явная + своя категория «Тема».
+
+    Свою категорию с именем «Тема» (любой регистр) считаем темой тоже,
+    иначе она молча лежит мёртвой. Пусто — "" (показываем «Без темы»)."""
+    if not isinstance(metadata, dict):
+        return ""
+    hit = str(metadata.get("topic") or "").strip()
+    if hit:
+        return hit
+    for key, val in metadata.items():
+        try:
+            if str(key).strip().lower() == "тема":
+                hit = str(val or "").strip()
+                if hit:
+                    return hit
+        except Exception:
+            continue
+    return ""
+
 # V2.1 §15: типы regression assertions (без LLM, только формальные условия).
 ASSERTION_TYPES = [
     ("not_empty", "Непустой ответ"),

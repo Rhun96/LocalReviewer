@@ -344,6 +344,16 @@ def _case_product(metadata_json: str | None) -> str:
     return str(meta.get("product") or "").strip()
 
 
+def _case_topic(metadata_json: str | None) -> str:
+    """Тема кейса для сравнения (своя «Тема» тоже считается)."""
+    try:
+        from constants import topic_from_metadata as _tof
+        meta = json.loads(metadata_json or "") or {}
+    except (TypeError, ValueError):
+        return ""
+    return _tof(meta)
+
+
 def compare_runs(project_path: str, run_a: int, run_b: int) -> dict:
     """A vs B рядом: ответы по общим ключам + вердикты + absolute кейса.
 
@@ -437,6 +447,7 @@ def compare_runs(project_path: str, run_a: int, run_b: int) -> dict:
             "prompt_a": (ra or {}).get("prompt_text") or "",
             "prompt_b": (rb or {}).get("prompt_text") or "",
             "product_case": _case_product(info.get("metadata_json")),
+            "topic_case": _case_topic(info.get("metadata_json")),
             "answer_a": ra["answer_text"] if ra else None,
             "answer_b": rb["answer_text"] if rb else None,
             "verdict": pref.get("verdict", "unknown") if pref else "unknown",
@@ -493,3 +504,89 @@ def preference_stats(project_path: str, run_a: int, run_b: int) -> dict:
             out[r["verdict"]] = r["c"]
         out["total"] = sum(out.values())
         return out
+
+
+def roundrobin_matrix(project_path: str, run_ids: list) -> dict:
+    """Круговая таблица «каждый с каждым»: все пары разом + места.
+
+    Пара: общие ключи (оба ответили), победы/ничьи обеих ориентаций
+    хранения (A,B) и (B,A) сливаются, unknown не судят.
+    Места: очки Копленда (победа 1, ничья 0.5) по парам, дальше —
+    число побед. Только факты из run_preferences, без автовыводов.
+    """
+    try:
+        ids = list(dict.fromkeys(int(r) for r in (run_ids or [])))
+    except (TypeError, ValueError):
+        raise ValueError("Плохие ID прогонов") from None
+    if len(ids) < 2:
+        raise ValueError("Выбери хотя бы 2 прогона")
+    with db(project_path) as conn:
+        cur = conn.cursor()
+        names = {}
+        for rid in ids:
+            row = cur.execute("SELECT name FROM model_runs WHERE run_id=?",
+                              (rid,)).fetchone()
+            if not row:
+                raise ValueError(f"Прогон #{rid} не найден")
+            names[rid] = row["name"]
+        keys = {}
+        for rid in ids:
+            keys[rid] = {r["stable_key"] for r in cur.execute(
+                "SELECT stable_key FROM run_answers WHERE run_id=?",
+                (rid,)).fetchall()}
+        prefs = {}
+        for r in cur.execute("SELECT run_a_id, run_b_id, stable_key, verdict"
+                             " FROM run_preferences").fetchall():
+            prefs[(r["run_a_id"], r["run_b_id"], r["stable_key"])] = \
+                r["verdict"]
+    pairs = []
+    for x in range(len(ids)):
+        for y in range(x + 1, len(ids)):
+            a, b = ids[x], ids[y]
+            common = sorted(keys[a] & keys[b])
+            wa = wb = ties = 0
+            judged_keys = []
+            for k in common:
+                v = prefs.get((a, b, k))
+                flip = False
+                if v is None:
+                    v = prefs.get((b, a, k))
+                    flip = v is not None
+                if v == "a_better":
+                    if flip:
+                        wb += 1
+                    else:
+                        wa += 1
+                    judged_keys.append(k)
+                elif v == "b_better":
+                    if flip:
+                        wa += 1
+                    else:
+                        wb += 1
+                    judged_keys.append(k)
+                elif v == "tie":
+                    ties += 1
+                    judged_keys.append(k)
+            pairs.append({"a": a, "b": b, "name_a": names[a],
+                          "name_b": names[b], "common": len(common),
+                          "wins_a": wa, "wins_b": wb, "ties": ties,
+                          "judged": len(judged_keys),
+                          "unjudged": len(common) - len(judged_keys)})
+    score: dict = {rid: 0.0 for rid in ids}
+    wins: dict = {rid: 0 for rid in ids}
+    for p in pairs:
+        if p["wins_a"] > p["wins_b"]:
+            score[p["a"]] += 1.0
+            wins[p["a"]] += 1
+        elif p["wins_b"] > p["wins_a"]:
+            score[p["b"]] += 1.0
+            wins[p["b"]] += 1
+        elif p["judged"]:
+            score[p["a"]] += 0.5
+            score[p["b"]] += 0.5
+    standings = sorted(
+        ({"run_id": rid, "name": names[rid], "score": score[rid],
+          "wins": wins[rid]} for rid in ids),
+        key=lambda r: (-r["score"], -r["wins"], r["name"]))
+    return {"runs": [{"run_id": rid, "name": names[rid]} for rid in ids],
+            "pairs": pairs, "standings": standings}

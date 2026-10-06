@@ -426,6 +426,17 @@ class VerdictsMixin:
         if dlg.exec() == QDialog.DialogCode.Accepted and dlg.result_case_id:
             self._jump_to_case(dlg.result_case_id)
 
+    def open_readiness(self):
+        """Проверка готовности набора: вердикт + drill (диалог сам
+        ставит фильтры ревью)."""
+        from readiness_dialog import ReadinessDialog
+        try:
+            fid = (self.filters or {}).get("file_id")
+        except Exception:
+            fid = None
+        dlg = ReadinessDialog(self.project_path, fid, self)
+        dlg.exec()
+
     def open_bug_report(self):
         """Полный Bug Report из текущего кейса (контекст подставляется)."""
         if not self.current_case_id:

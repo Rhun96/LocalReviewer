@@ -322,6 +322,59 @@ def delete_regression(project_path: str, regression_id: int) -> None:
             raise ValueError("Запуск не найден")
 
 
+def compare_launches(project_path: str, id_a: int, id_b: int,
+                     limit: int = 500) -> dict:
+    """Что изменилось между запусками: gate, счётчики, по ключам.
+
+    fixed — была REGRESSION, стала нет; broken — наоборот.
+    Без автовывода «лучше/хуже»: только факты + drill по case_id
+    (где stable_key привязан к кейсу).
+    """
+    try:
+        a, b = int(id_a), int(id_b)
+    except (TypeError, ValueError):
+        raise ValueError("Плохие ID запусков") from None
+    if a == b:
+        raise ValueError("Выбери два разных запуска")
+    ra = get_regression(project_path, a)
+    rb = get_regression(project_path, b)
+    if ra is None or rb is None:
+        raise ValueError("Запуск не найден")
+    ma = {r["stable_key"]: r for r in list_regression_results(project_path, a)}
+    mb = {r["stable_key"]: r for r in list_regression_results(project_path, b)}
+    rows = []
+    for key in sorted(set(ma) | set(mb)):
+        ra_, rb_ = ma.get(key), mb.get(key)
+        sa = (ra_ or {}).get("result")
+        sb = (rb_ or {}).get("result")
+        ra_reg, rb_reg = sa == "REGRESSION", sb == "REGRESSION"
+        if ra_ is None:
+            kind = "only_b"
+        elif rb_ is None:
+            kind = "only_a"
+        elif ra_reg and not rb_reg:
+            kind = "fixed"
+        elif rb_reg and not ra_reg:
+            kind = "broken"
+        else:
+            kind = "same"
+        cid = (ra_ or {}).get("case_id") or (rb_ or {}).get("case_id")
+        rows.append({"stable_key": key,
+                     "case_id": cid,
+                     "res_a": sa, "res_b": sb, "kind": kind})
+    fixed = [r for r in rows if r["kind"] == "fixed"]
+    broken = [r for r in rows if r["kind"] == "broken"]
+
+    def _case_ids(rs):
+        return sorted({r["case_id"] for r in rs if r["case_id"]})
+
+    return {"a": ra, "b": rb, "rows": rows[:max(1, limit)],
+            "truncated": len(rows) > limit,
+            "fixed": fixed, "broken": broken,
+            "fixed_ids": _case_ids(fixed),
+            "broken_ids": _case_ids(broken)}
+
+
 def list_regression_results(project_path: str, regression_id: int,
                             result: str | None = None,
                             severity: str | None = None) -> list:

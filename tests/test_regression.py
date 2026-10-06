@@ -89,6 +89,30 @@ def test_baseline_from_run_and_new_removed():
     assert crit == []
 
 
+def test_compare_launches_fixed_broken():
+    p = _proj()
+    ids = get_filtered_case_ids(p, {})
+    bulk_set_status(p, ids, "good")
+    ds = create_dataset(p, "T", dataset_type="test")
+    v = create_version(p, ds)
+    freeze_version(p, v)
+    c = _run_with_answers(p)
+    rg.set_output_review(p, c, "src:k0", "bad")
+    rg.set_output_review(p, c, "src:k1", "good")
+    r1 = rg.run_regression(p, "r1", "dataset_version", v, "run", c)
+    rg.set_output_review(p, c, "src:k0", "good")
+    rg.set_output_review(p, c, "src:k1", "bad")
+    r2 = rg.run_regression(p, "r2", "dataset_version", v, "run", c)
+    res = rg.compare_launches(p, r1, r2)
+    assert [r["stable_key"] for r in res["fixed"]] == ["src:k0"]
+    assert [r["stable_key"] for r in res["broken"]] == ["src:k1"]
+    assert len(res["fixed_ids"]) == 1 and len(res["broken_ids"]) == 1
+    with pytest.raises(ValueError):
+        rg.compare_launches(p, r1, r1)
+    with pytest.raises(ValueError):
+        rg.compare_launches(p, r1, 999999)
+
+
 def test_custom_base_in_matrix():
     from review_profile_service import create_profile, set_active_profile
     p = _proj(2)

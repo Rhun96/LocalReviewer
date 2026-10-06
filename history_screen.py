@@ -1,6 +1,6 @@
 from PySide6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QLabel,
-    QTableWidget, QTableWidgetItem, QTextBrowser
+    QTableWidget, QTableWidgetItem, QTextBrowser, QDialog,
 )
 from PySide6.QtCore import Qt, Signal
 from database import db
@@ -92,6 +92,14 @@ class HistoryScreen(BaseScreen):
 
         # Таблица истории
         self.history_table = QTableWidget()
+        try:
+            from PySide6.QtWidgets import QAbstractItemView as _AIV
+            self.history_table.setSelectionBehavior(
+                _AIV.SelectionBehavior.SelectRows)
+            self.history_table.setSelectionMode(
+                _AIV.SelectionMode.ExtendedSelection)
+        except Exception:
+            pass
         from styles import COLORS as _CC
         self.history_table.setStyleSheet(f"""
             QTableWidget {{
@@ -126,15 +134,32 @@ class HistoryScreen(BaseScreen):
         btn_open.setToolTip("Открыть выбранную запись в ревью")
         btn_open.clicked.connect(self.open_case)
 
+        btn_compare = FPushButton("⇄ Сравнить 2 записи")
+        btn_compare.setToolTip("Выдели ровно 2 записи одного кейса: "
+                               "что было / что стало")
+        btn_compare.clicked.connect(self.compare_selected)
+        self.btn_compare = btn_compare
+
+        btn_now = FPushButton("⇄ С текущим")
+        btn_now.setToolTip("Выдели 1 запись: сравнить её с нынешним "
+                           "состоянием кейса")
+        btn_now.clicked.connect(self.compare_with_now)
+        buttons_layout.addWidget(btn_now)
+
         btn_back = FPushButton("Назад к проекту")
         btn_back.setObjectName("danger")
         btn_back.clicked.connect(self.on_back)
 
         buttons_layout.addWidget(btn_refresh)
         buttons_layout.addWidget(btn_open)
+        buttons_layout.addWidget(btn_compare)
         buttons_layout.addStretch()
         buttons_layout.addWidget(btn_back)
         layout.addLayout(buttons_layout)
+
+        self.lifecycle_label = QLabel("")
+        self.lifecycle_label.setWordWrap(True)
+        layout.addWidget(self.lifecycle_label)
 
         self.detail = QTextBrowser()
         self.detail.setMaximumHeight(120)
@@ -198,6 +223,7 @@ class HistoryScreen(BaseScreen):
             notify(self, "error", "Ошибка", f"Не удалось загрузить историю: {str(e)}")
             return
         self._events = events
+        self._refresh_lifecycle(case_ids)
         self.history_table.clear()
         self.history_table.setColumnCount(7)
         self.history_table.setRowCount(len(events))
@@ -326,3 +352,147 @@ class HistoryScreen(BaseScreen):
             mw.show_screen("project")
         else:
             self.history_closed.emit()
+
+    def _refresh_lifecycle(self, case_ids: list | None) -> None:
+        """Одна строка жизненного цикла, если в игре ровно один кейс."""
+        try:
+            self.lifecycle_label.setText("")
+        except Exception:
+            pass
+        ids = list(dict.fromkeys(case_ids or []))
+        if len(ids) != 1:
+            return
+        try:
+            life = hs.case_lifecycle(self.project_path, ids[0])
+        except Exception:
+            return
+        if not (life.get("total") or 0):
+            return
+        parts = [f"событий: {life['total']}"]
+        if life.get("status_changes"):
+            parts.append(f"вердиктов: {life['status_changes']}")
+        if life.get("comments"):
+            parts.append(f"комментариев: {life['comments']}")
+        if life.get("categories"):
+            parts.append(f"причин: {life['categories']}")
+        if life.get("tags_added") or life.get("tags_removed"):
+            parts.append(f"теги: +{life.get('tags_added', 0)}/"
+                         f"−{life.get('tags_removed', 0)}")
+        if life.get("bugs"):
+            parts.append(f"баги: {life['bugs']}")
+        try:
+            self.lifecycle_label.setText(
+                f"Жизненный цикл кейса {life['case_id']}: "
+                + "; ".join(parts))
+        except Exception:
+            pass
+
+    def _selected_event_ids(self) -> list:
+        """history_id ровно 2 выбранных записей (иначе [])."""
+        out = []
+        try:
+            sm = self.history_table.selectionModel()
+            rows = sorted({i.row() for i in sm.selectedRows()})
+            events = getattr(self, "_events", []) or []
+            for r in rows:
+                ref = self.history_table.item(r, 0)
+                idx = ref.data(Qt.ItemDataRole.UserRole) if ref else None
+                if idx is not None and 0 <= idx < len(events):
+                    out.append(events[idx])
+        except Exception:
+            pass
+        return out
+
+    def compare_selected(self):
+        """Сравнение двух записей: что было / что стало."""
+        sel = self._selected_event_ids()
+        if len(sel) != 2:
+            notify(self, "warning", "Сравнение",
+                   "Выдели ровно 2 записи (Ctrl+клик).")
+            return
+        cids = {e.get("case_id") for e in sel}
+        if len(cids) != 1 or None in cids:
+            notify(self, "warning", "Сравнение",
+                   "Записи должны быть одного кейса.")
+            return
+        try:
+            res = hs.compare_states(
+                self.project_path, sel[0]["case_id"],
+                sel[0]["history_id"], sel[1]["history_id"])
+        except ValueError as e:
+            notify(self, "warning", "Сравнение", str(e))
+            return
+        except Exception as e:
+            notify(self, "error", "Ошибка", str(e))
+            return
+        dlg = StateCompareDialog(res, self)
+        dlg.exec()
+
+    def compare_with_now(self):
+        """Одна запись → сравнить с нынешним состоянием кейса."""
+        sel = self._selected_event_ids()
+        if len(sel) != 1:
+            notify(self, "warning", "Сравнение",
+                   "Выдели ровно 1 запись (текущее подставится само).")
+            return
+        try:
+            res = hs.compare_states(
+                self.project_path, sel[0]["case_id"],
+                sel[0]["history_id"], None)
+        except ValueError as e:
+            notify(self, "warning", "Сравнение", str(e))
+            return
+        except Exception as e:
+            notify(self, "error", "Ошибка", str(e))
+            return
+        dlg = StateCompareDialog(res, self)
+        dlg.exec()
+
+
+class StateCompareDialog(QDialog):
+    """Было/стало между двумя записями истории (только чтение)."""
+
+    def __init__(self, res: dict, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Сравнение состояний кейса")
+        self.setMinimumSize(560, 380)
+        layout = QVBoxLayout()
+        try:
+            from ui_compat import format_dt as _fdt
+            _b = _fdt(res.get("b_at")) if res.get("b_at") else "текущее"
+            head = QLabel(f"Кейс {res.get('case_id')}: "
+                          f"{_fdt(res.get('a_at'))} → {_b}")
+        except Exception:
+            head = QLabel(f"Кейс {res.get('case_id')}")
+        head.setWordWrap(True)
+        layout.addWidget(head)
+        table = QTableWidget()
+        rows = res.get("rows", [])
+        table.setColumnCount(3)
+        table.setRowCount(len(rows))
+        table.setHorizontalHeaderLabels(["Поле", "Было", "Стало"])
+        for i, r in enumerate(rows):
+            table.setItem(i, 0, QTableWidgetItem(r["label"]))
+            table.setItem(i, 1, QTableWidgetItem(r["a"]))
+            table.setItem(i, 2, QTableWidgetItem(r["b"]))
+            if r.get("changed"):
+                try:
+                    from PySide6.QtGui import QColor as _QC
+                    from styles import SEMANTIC as _SEM
+                    for c in range(3):
+                        table.item(i, c).setForeground(_QC(_SEM["success"]))
+                except Exception:
+                    pass
+        table.resizeColumnsToContents()
+        try:
+            clear_in_fluent(table)
+        except Exception:
+            pass
+        layout.addWidget(table)
+        btns = QHBoxLayout()
+        close = FPushButton("Закрыть")
+        close.clicked.connect(self.reject)
+        btns.addStretch()
+        btns.addWidget(close)
+        layout.addLayout(btns)
+        self.setLayout(layout)

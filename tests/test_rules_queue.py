@@ -56,3 +56,31 @@ def test_run_stores_severity_and_queue():
     assert first_two.issubset(all_ids)
     stats = queue_stats(p)
     assert stats["total"] == 3 and stats["problematic"] >= 2
+
+
+def test_why_here_only_recorded_factors():
+    import tempfile
+    from database import init_database
+    from importer import import_file
+    from filter_service import get_filtered_case_ids
+    from review_queue_service import why_here
+    p = tempfile.mkdtemp()
+    init_database(p)
+    import_file(p, "f.xlsx", "excel", "S", 0, {"q": "primary_text"},
+                [{"q": ""}])
+    ids = get_filtered_case_ids(p, {})
+    cid = ids[0]
+    res = why_here(p, cid, "normal")
+    assert res == {"mode": "normal", "score": None, "reasons": []}
+    res = why_here(p, 999999, "problematic")
+    assert res["reasons"] == ["очередь: проблемные"]
+    from autocheck_service import run_autochecks
+    run_autochecks(p)
+    res = why_here(p, cid, "problematic")
+    assert res["score"] is not None
+    assert "очередь: проблемные" in res["reasons"]
+    assert "статус не установлен" in res["reasons"]
+    assert any("автопровер" in r or "критическая" in r
+               for r in res["reasons"])
+    res = why_here(p, cid, "nope")
+    assert res["mode"] == "normal" and res["reasons"] == []

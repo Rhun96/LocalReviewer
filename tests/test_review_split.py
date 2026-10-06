@@ -274,3 +274,24 @@ def test_comment_save_and_undo_refresh_table():
         assert _comment_cell(w, cid) == "hello"
     finally:
         w.close()
+
+
+def test_why_here_label_follows_queue_mode():
+    """Почему здесь: в обычной очереди пусто, в проблемной — факторы."""
+    from PySide6.QtWidgets import QApplication
+    w = _make_window()
+    try:
+        app = QApplication.instance()
+        w.show()
+        app.processEvents()
+        w.load_case(0)
+        app.processEvents()
+        assert not w.why_label.isVisible()
+        w.queue_mode = "problematic"
+        w.load_case_ids()
+        w.load_case(0)
+        app.processEvents()
+        assert w.why_label.isVisible()
+        assert "Почему здесь" in w.why_label.text()
+    finally:
+        w.close()

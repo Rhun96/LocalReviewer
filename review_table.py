@@ -752,6 +752,9 @@ class TableMixin:
                         value = _status_label(case['status'])
                     elif col_name == 'Комментарий':
                         value = (case['comment'] or '')[:100]
+                    elif col_name == 'topic':
+                        from constants import topic_from_metadata as _tof
+                        value = _tof(metadata)[:100]
                     else:
                         value = str(metadata.get(col_name, ''))[:100]
                     # Row — не dict (.get нет!): флаг через keys().

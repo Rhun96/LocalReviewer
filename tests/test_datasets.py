@@ -1,5 +1,6 @@
 """Датасеты: создание, версии, freeze, сравнение."""
 import tempfile
+import pytest
 from database import init_database
 from bulk_operation_service import bulk_set_status
 from dataset_service import (
@@ -54,6 +55,35 @@ def test_compare():
     bulk_set_status(p, ids[4:], "bad")
     res2 = compare_versions(p, v1, v2)
     assert res2["counts"] == res["counts"]
+
+
+def test_version_delta_rates_and_categories():
+    import analytics_service as an
+    from taxonomy_service import set_case_error
+    from database import db
+    p = _proj()
+    ds = create_dataset(p, "D")
+    v1 = create_version(p, ds)
+    ids = get_filtered_case_ids(p, {})
+    bulk_set_status(p, ids[:2], "bad")
+    with db(p) as conn:
+        cat = conn.execute("SELECT category_id FROM error_categories "
+                           "WHERE code='correctness'").fetchone()
+        sub = conn.execute("SELECT category_id FROM error_categories "
+                           "WHERE code='correctness.hallucination'").fetchone()
+    for cid in ids[:2]:
+        set_case_error(p, cid, cat["category_id"], sub["category_id"], "high")
+    v2 = create_version(p, ds)
+    d = an.version_delta(p, v1, v2)
+    assert d["rate_a"] == 0.0
+    assert d["rate_b"] == pytest.approx(100.0 * 2 / 6)
+    assert d["delta_pp"] == pytest.approx(33.3)
+    assert d["cats"][0]["name"] == "Правильность"
+    assert d["cats"][0]["delta"] == 2
+    assert sorted(d["drill"]["bad_b"]) == sorted(ids[:2])
+    assert d["drill"]["bad_a"] == []
+    with pytest.raises(ValueError):
+        an.version_delta(p, 999999, v2)
 
 
 def test_key_match_across_files():

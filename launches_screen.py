@@ -85,10 +85,14 @@ class LaunchesScreen(BaseScreen):
         btn_run.clicked.connect(self._run_new)
         btn_open = FPushButton("📝 Открыть")
         btn_open.clicked.connect(self._open_run)
+        btn_cmp = FPushButton("⇄ Сравнить")
+        btn_cmp.setToolTip("Что изменилось между двумя запусками")
+        btn_cmp.clicked.connect(self._compare_runs)
         btn_del = FPushButton("🗑 Удалить")
         btn_del.clicked.connect(self._delete_run)
         btns.addWidget(btn_run)
         btns.addWidget(btn_open)
+        btns.addWidget(btn_cmp)
         btns.addWidget(btn_del)
         btns.addStretch()
         layout.addLayout(btns)
@@ -255,6 +259,12 @@ class LaunchesScreen(BaseScreen):
             return
         from regression_dialog import RegressionDialog
         dlg = RegressionDialog(self.project_path, self, regression_id=rid)
+        dlg.exec()
+        self.refresh()
+
+    def _compare_runs(self):
+        from launch_compare_dialog import LaunchCompareDialog
+        dlg = LaunchCompareDialog(self.project_path, self)
         dlg.exec()
         self.refresh()
 

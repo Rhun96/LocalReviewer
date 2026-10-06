@@ -102,6 +102,21 @@ def test_dialog_preselect():
         d.close()
 
 
+def test_compare_dialog_renders_deltas():
+    QApplication.instance() or QApplication([])
+    from launch_compare_dialog import LaunchCompareDialog
+    p = _proj()
+    d = LaunchCompareDialog(p, None)
+    try:
+        d.show()
+        assert d.combo_a.count() == 2 and d.combo_b.count() == 2
+        d._compare()
+        assert "исправлено" in d.summary.text()
+        assert d.table.rowCount() >= 0
+    finally:
+        d.close()
+
+
 def test_trend_points_chronological():
     from launches_screen import LaunchesScreen
     rows = rg.list_regressions(_proj())

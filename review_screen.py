@@ -414,6 +414,16 @@ class ReviewScreen(BaseScreen, ProfileMixin, CaseMixin, TableMixin, BulkMixin, V
         self.info_label.setWordWrap(True)
         layout.addWidget(self.info_label)
 
+        # Почему кейс в очереди (W3): только записанные факторы.
+        self.why_label = QLabel()
+        from styles import COLORS as _CCW
+        self.why_label.setStyleSheet(
+            f"font-size: 11px; color: {_CCW['gray']};")
+        self.why_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
+        self.why_label.setWordWrap(True)
+        self.why_label.setVisible(False)
+        layout.addWidget(self.why_label)
+
         # Индикатор фильтров (пилот шаг 1: влево, компактно).
         self.filter_indicator = QLabel()
         from styles import COLORS as _CC3
