@@ -14,6 +14,10 @@ dependencies = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+# Корень репо в sys.path при любом запуске (голый `pytest` в CI
+# иначе не видит модули: спасало только `python -m`). Сломано с тех пор,
+# как из tests/ убрали __init__.py.
+pythonpath = ["."]
 
 [tool.ruff]
 target-version = "py311"
